@@ -1,36 +1,34 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { displayLabel, splitProfileValues } from "@/lib/profile-list-labels";
-import type { ContactProfileEntry } from "@/hooks/useContactProfile";
+import type { FactSlot } from "@/hooks/useFacts";
 
 const MAX_VISIBLE = 7;
 
 interface PinnedHighlightsProps {
-  entries: ContactProfileEntry[];
-  onTogglePin: (entry: ContactProfileEntry) => void;
+  slots: FactSlot[];
+  onTogglePin: (slot: FactSlot) => void;
 }
 
 /**
- * Compact chip strip for pinned facts at the top of the profile. Renders
- * nothing when there are no pinned entries. Shows at most MAX_VISIBLE chips
+ * Compact chip strip for pinned facts at the top of the profile. A pin
+ * belongs to a whole line ("Languages"), so each current value of a pinned
+ * slot is one chip. Renders nothing when nothing is pinned. Shows at most MAX_VISIBLE chips
  * plus a "+N" expander for the rest.
  */
-export function PinnedHighlights({ entries, onTogglePin }: PinnedHighlightsProps) {
+export function PinnedHighlights({ slots, onTogglePin }: PinnedHighlightsProps) {
   const [expanded, setExpanded] = useState(false);
-  const pinned = entries.filter((e) => e.is_pinned);
+  const pinned = slots.filter((s) => s.isPinned && s.current.length > 0);
 
   if (pinned.length === 0) return null;
 
-  // One chip per VALUE, not per row: a comma-packed multi-value fact used to
-  // render as a single unreadable chip. Labels are canonicalized so pinned
-  // chips match the label shown in the section below.
-  const chips = pinned.flatMap((entry) =>
-    splitProfileValues(entry.label, entry.value).map((value, i) => ({
-      key: `${entry.id}-${i}`,
-      entry,
-      label: displayLabel(entry.label),
-      value,
+  // One chip per value, labelled like the line in the section below.
+  const chips = pinned.flatMap((slot) =>
+    slot.current.map((fact) => ({
+      key: fact.claim_id,
+      slot,
+      label: slot.label,
+      value: fact.value,
     })),
   );
   const visible = expanded ? chips : chips.slice(0, MAX_VISIBLE);
@@ -51,7 +49,7 @@ export function PinnedHighlights({ entries, onTogglePin }: PinnedHighlightsProps
             size="icon"
             aria-label={`Unpin ${chip.label}`}
             className="h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover/chip:opacity-100 hover:text-destructive"
-            onClick={() => onTogglePin(chip.entry)}
+            onClick={() => onTogglePin(chip.slot)}
           >
             <X className="h-3 w-3" />
           </Button>

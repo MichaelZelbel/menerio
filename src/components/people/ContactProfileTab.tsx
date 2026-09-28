@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FileText, Sparkles, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +11,8 @@ import { ProfileSections } from "@/components/profile/ProfileSections";
 import { QuickAddFact } from "@/components/people/profile/QuickAddFact";
 import { ProfileCompleteness } from "@/components/profile/ProfileCompleteness";
 import { PROFILE_TAXONOMY } from "@/lib/profile-taxonomy";
-import { useContactProfile, type ContactProfileEntry } from "@/hooks/useContactProfile";
+import { useContactProfile } from "@/hooks/useContactProfile";
+import { useFacts, type FactSubject } from "@/hooks/useFacts";
 import { PageLoader } from "@/components/LoadingStates";
 import { RelationshipsSection } from "@/components/people/RelationshipsSection";
 import { LifeEventsStrip } from "@/components/people/LifeEventsStrip";
@@ -38,15 +39,10 @@ export function ContactProfileTab({
   relatedNotes = [],
 }: ContactProfileTabProps) {
   const { user } = useAuth();
-  const {
-    categories,
-    entries,
-    isLoading,
-    upsertCategory,
-    deleteCategory,
-    upsertEntry,
-    deleteEntry,
-  } = useContactProfile(contactId);
+  const { categories, isLoading: sectionsLoading, upsertCategory, deleteCategory } = useContactProfile(contactId);
+  const subject = useMemo<FactSubject>(() => ({ type: "contact", id: contactId }), [contactId]);
+  const { facts, isLoading: factsLoading, actions, addFact } = useFacts(subject);
+  const isLoading = sectionsLoading || factsLoading;
 
   const [enriching, setEnriching] = useState(false);
   // Count pending profile suggestions for this contact (from notes OR moments).
@@ -58,7 +54,7 @@ export function ContactProfileTab({
         .from("review_queue")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user!.id)
-        .in("suggestion_type", ["add_profile_entry", "add_relationship", "normalize_profile_entry"])
+        .in("suggestion_type", ["add_profile_entry", "add_relationship"])
         .in("status", ["pending_review", "pending", "auto_applied_unreviewed"])
         .contains("payload", { contact_id: contactId });
       return count ?? 0;
@@ -89,21 +85,15 @@ export function ContactProfileTab({
     return <PageLoader />;
   }
 
-  const handleTogglePin = (entry: ContactProfileEntry) => {
-    upsertEntry.mutate({ id: entry.id, is_pinned: !entry.is_pinned });
-  };
-
   // Relationship-adjacent facts (Wedding date, Anniversary, How we met…) are
   // rendered INSIDE the Relationships card, so a profile has exactly one
   // relationship surface. They are removed from the facts panel here.
-  const relationshipCategoryIds = new Set(
-    categories.filter((c) => c.slug === "relationships").map((c) => c.id),
-  );
-  const factCategories = categories.filter((c) => !relationshipCategoryIds.has(c.id));
-  const factEntries = entries.filter((e) => !relationshipCategoryIds.has(e.category_id));
-  const milestones = entries
-    .filter((e) => relationshipCategoryIds.has(e.category_id))
-    .map((e) => ({ id: e.id, label: e.label, value: e.value }));
+  const isRelationshipSection = (slug: string | null) => slug === "relationships";
+  const factCategories = categories.filter((c) => !isRelationshipSection(c.slug));
+  const sectionFacts = facts.filter((f) => !isRelationshipSection(f.category_slug));
+  const milestones = facts
+    .filter((f) => f.is_current && isRelationshipSection(f.category_slug))
+    .map((f) => ({ id: f.claim_id, label: f.label, value: f.value }));
 
   return (
     <div className="space-y-3">
@@ -131,21 +121,18 @@ export function ContactProfileTab({
 
       <ProfileSections
         categories={factCategories}
-        entries={factEntries}
-        showPinned
-        onSaveEntry={(data) => upsertEntry.mutate(data)}
-        onDeleteEntry={(id) => deleteEntry.mutate(id)}
-        onTogglePin={handleTogglePin}
+        facts={sectionFacts}
+        actions={actions}
+        showScope
         onUpdateCategory={(data) => upsertCategory.mutate(data)}
         onDeleteCategory={(id) => deleteCategory.mutate(id)}
         onAddCategory={(data) => upsertCategory.mutate(data)}
       >
         {user?.id && (
           <QuickAddFact
-            userId={user.id}
             contactId={contactId}
-            onCommit={async ({ category_id, label, value }) => {
-              await upsertEntry.mutateAsync({ category_id, label, value });
+            onCommit={async ({ category_slug, label, value }) => {
+              await addFact.mutateAsync({ category_slug, label, value });
             }}
           />
         )}
@@ -196,7 +183,7 @@ export function ContactProfileTab({
         </Button>
       </div>
 
-      <ProfileCompleteness categories={categories} entries={entries} totalSlots={PROFILE_TAXONOMY.length} />
+      <ProfileCompleteness categories={categories} facts={facts} totalSlots={PROFILE_TAXONOMY.length} />
     </div>
   );
 }

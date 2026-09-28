@@ -17,20 +17,6 @@ export interface ProfileCategory {
   updated_at: string;
 }
 
-export interface ProfileEntry {
-  id: string;
-  user_id: string;
-  category_id: string;
-  label: string;
-  value: string;
-  linked_note_id: string | null;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-  origin: string;
-  evidence_quote: string | null;
-}
-
 export interface AgentInstruction {
   id: string;
   user_id: string;
@@ -74,7 +60,7 @@ const DEFAULT_CATEGORIES = [
 
 /**
  * The dashboard and sidebar read completeness from `profile-summary`, a
- * separate query over the same three tables; refresh it with the list.
+ * separate query over the same tables; refresh it with the list.
  */
 function invalidateProfile(qc: QueryClient, key: string) {
   qc.invalidateQueries({ queryKey: [key] });
@@ -97,21 +83,6 @@ export function useProfile() {
         .order("sort_order");
       if (error) throw error;
       return data as ProfileCategory[];
-    },
-    enabled: !!userId,
-  });
-
-  const entriesQuery = useQuery({
-    queryKey: ["profile-entries", userId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profile_entries")
-        .select("*")
-        .eq("user_id", userId!)
-        .is("contact_id", null)
-        .order("sort_order");
-      if (error) throw error;
-      return data as ProfileEntry[];
     },
     enabled: !!userId,
   });
@@ -182,41 +153,11 @@ export function useProfile() {
     },
     onSuccess: () => {
       invalidateProfile(qc, "profile-categories");
-      invalidateProfile(qc, "profile-entries");
+      // Facts filed in a deleted section fall back to "Other"; nothing is deleted.
+      invalidateProfile(qc, "profile-facts");
       showToast.success("Category deleted");
     },
     onError: (error: Error) => showToast.error(error?.message || "Could not delete the category"),
-  });
-
-  const upsertEntry = useMutation({
-    mutationFn: async (entry: Partial<ProfileEntry> & { id?: string }) => {
-      if (entry.id) {
-        const { error } = await supabase.from("profile_entries").update(entry).eq("id", entry.id);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.functions.invoke("normalize-profile", {
-          body: { action: "write_profile_entry", entry: { ...entry, contact_id: null } },
-        });
-        if (error || !data?.ok) throw error || new Error(data?.reason || "Profile entry was not saved");
-      }
-    },
-    onSuccess: () => {
-      invalidateProfile(qc, "profile-entries");
-      showToast.success("Entry saved");
-    },
-    onError: (error: Error) => showToast.error(error?.message || "Could not save the entry"),
-  });
-
-  const deleteEntry = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("profile_entries").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      invalidateProfile(qc, "profile-entries");
-      showToast.success("Entry deleted");
-    },
-    onError: (error: Error) => showToast.error(error?.message || "Could not delete the entry"),
   });
 
   const upsertInstruction = useMutation({
@@ -290,15 +231,12 @@ export function useProfile() {
 
   return {
     categories: categoriesQuery.data ?? [],
-    entries: entriesQuery.data ?? [],
     instructions: instructionsQuery.data ?? [],
     views: viewsQuery.data ?? [],
-    isLoading: categoriesQuery.isLoading || entriesQuery.isLoading,
+    isLoading: categoriesQuery.isLoading,
     seedDefaults,
     upsertCategory,
     deleteCategory,
-    upsertEntry,
-    deleteEntry,
     upsertInstruction,
     deleteInstruction,
     upsertView,

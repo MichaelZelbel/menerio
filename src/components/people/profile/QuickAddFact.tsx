@@ -3,7 +3,6 @@ import { CornerDownLeft, Loader2, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ProfileIcon } from "@/components/profile/ProfileIcon";
-import { ensureProfileCategory } from "@/lib/profile-categories";
 import { buildClassifyBody } from "@/lib/quick-add-fact";
 import { PROFILE_TAXONOMY, taxonomyBySlug } from "@/lib/profile-taxonomy";
 import { supabase } from "@/integrations/supabase/client";
@@ -45,14 +44,13 @@ async function readEdgeError(error: unknown): Promise<string | null> {
 }
 
 interface QuickAddFactProps {
-  userId: string;
   contactId: string;
   /**
-   * Persists the confirmed fact. Should resolve once the entry is written (the
-   * caller's existing `upsertEntry` mutation invalidates the section query and
-   * toasts on success).
+   * Persists the confirmed fact (write_fact files it under the section slug
+   * and creates its slot). Resolves once it is written; the caller's mutation
+   * refreshes the list and toasts.
    */
-  onCommit: (entry: { category_id: string; label: string; value: string }) => Promise<void>;
+  onCommit: (fact: { category_slug: string; label: string; value: string }) => Promise<void>;
 }
 
 /**
@@ -62,7 +60,7 @@ interface QuickAddFactProps {
  * of the 17 taxonomy categories, and Esc dismisses the proposal (keeping the
  * typed text for editing). Focus never leaves the input during the happy path.
  */
-export function QuickAddFact({ userId, contactId, onCommit }: QuickAddFactProps) {
+export function QuickAddFact({ contactId, onCommit }: QuickAddFactProps) {
   const [text, setText] = useState("");
   const [proposal, setProposal] = useState<FactProposal | null>(null);
   const [status, setStatus] = useState<"idle" | "classifying" | "committing">("idle");
@@ -101,8 +99,7 @@ export function QuickAddFact({ userId, contactId, onCommit }: QuickAddFactProps)
     if (!proposal || busy) return;
     setStatus("committing");
     try {
-      const categoryId = await ensureProfileCategory(userId, contactId, proposal.category_slug);
-      await onCommit({ category_id: categoryId, label: proposal.label, value: proposal.value });
+      await onCommit({ category_slug: proposal.category_slug, label: proposal.label, value: proposal.value });
       setText("");
       setProposal(null);
     } catch (err) {
