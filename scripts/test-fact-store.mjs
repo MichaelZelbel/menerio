@@ -392,6 +392,21 @@ await test('reconcile fold: two human copies of one value → the contact is ski
   assert.deepEqual(r, { outcome: 'skipped_two_preferred', left: true });
 });
 
+await test('bag split (B6): a machine bag becomes single facts with its provenance; a human bag stays', async () => {
+  const r = await as(db, MACHINE, async () => {
+    const attr = await val(db, 'SELECT attribute FROM claims WHERE id=$1', [b(11)]);
+    const pieces = JSON.stringify(['German', 'English', 'French'].map((value) => ({ attribute: attr, label: 'Languages', category_slug: 'identity', value })));
+    const added = await val(db, 'SELECT split_legacy_bag($1, $2, $3::jsonb)', [U, b(11), pieces]);
+    const human = await val(db, 'SELECT split_legacy_bag($1, $2, $3::jsonb)', [U, b(14), pieces]);
+    return { added, human, ...(await one(db, `SELECT
+      (SELECT count(*) FROM claims WHERE id=$1) bag_left,
+      (SELECT string_agg(DISTINCT origin, ',') FROM claims WHERE subject_id=$2 AND attribute=$3 AND valid_to IS NULL) origins,
+      (SELECT count(*) FROM claims WHERE subject_id=$2 AND attribute=$3 AND valid_to IS NULL) pieces,
+      (SELECT cardinality FROM fact_slots WHERE subject_id=$2 AND attribute=$3) slot`, [b(11), A, attr])) };
+  });
+  assert.deepEqual(r, { added: 3, human: 0, bag_left: '0', origins: 'review_queue', pieces: '3', slot: 'many' });
+});
+
 // ------------------------------------------------------------------ rollback
 await test('rollback restores the snapshot, keeps a post-switch fact aside, and the old triggers work', async () => {
   await as(db, HUMAN, () => db.query(`INSERT INTO claims (user_id, subject_type, attribute, value, origin) VALUES ($1,'self','hobby','Running','user_manual')`, [U]), { keep: true });

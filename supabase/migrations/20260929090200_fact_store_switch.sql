@@ -658,6 +658,59 @@ $function$;
 REVOKE ALL ON FUNCTION public.fold_contact_into_self(uuid, uuid) FROM public, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fold_contact_into_self(uuid, uuid) TO service_role;
 
+-- B6's one-time bag split. A legacy "bag" (several facts in one value) is
+-- replaced by its pieces, which keep the bag's origin, quote, source and dates:
+-- they are the same legacy fact, only filed singly, so they go in under the
+-- migration flag like the switch's own rows. The pieces come from writeFact's
+-- splitter (split-legacy-bags). A bag a human typed is never passed here.
+-- Service role only; dropped by …_fact_store_cleanup.sql right after B6.
+CREATE FUNCTION public.split_legacy_bag(p_user_id uuid, p_claim_id uuid, p_pieces jsonb) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
+DECLARE
+  bag public.claims;
+  piece jsonb;
+  added integer := 0;
+  n_same integer;
+BEGIN
+  SELECT * INTO bag FROM public.claims WHERE id = p_claim_id AND user_id = p_user_id AND valid_to IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RETURN 0; END IF;
+  IF bag.rank = 'preferred' OR bag.origin = 'user_manual' THEN RETURN 0; END IF;
+  IF jsonb_typeof(p_pieces) <> 'array' OR jsonb_array_length(p_pieces) < 2 THEN RETURN 0; END IF;
+
+  PERFORM set_config('menerio.fact_migration', 'on', true);
+  DELETE FROM public.claims WHERE id = bag.id;
+
+  FOR piece IN SELECT * FROM jsonb_array_elements(p_pieces) LOOP
+    SELECT count(*) INTO n_same FROM jsonb_array_elements(p_pieces) x WHERE x->>'attribute' = piece->>'attribute';
+    IF NOT EXISTS (SELECT 1 FROM public.fact_slots WHERE user_id = p_user_id AND subject_type = bag.subject_type
+                     AND subject_id IS NOT DISTINCT FROM bag.subject_id AND attribute = piece->>'attribute') THEN
+      INSERT INTO public.fact_slots (user_id, subject_type, subject_id, attribute, label, category_slug)
+      VALUES (p_user_id, bag.subject_type, bag.subject_id, piece->>'attribute', piece->>'label',
+              CASE WHEN bag.subject_type = 'entity' THEN NULL ELSE piece->>'category_slug' END);
+    END IF;
+    -- The bag listed these together, so the attribute holds several.
+    IF n_same > 1 THEN
+      UPDATE public.fact_slots SET cardinality = 'many'
+       WHERE user_id = p_user_id AND subject_type = bag.subject_type AND subject_id IS NOT DISTINCT FROM bag.subject_id
+         AND attribute = piece->>'attribute' AND cardinality IS DISTINCT FROM 'many';
+    END IF;
+    INSERT INTO public.claims (user_id, subject_type, subject_id, attribute, value, valid_from, valid_to, confidence,
+                               cardinality, source_type, source_id, evidence_quote, review_by, origin, rank, created_at)
+    SELECT p_user_id, bag.subject_type, bag.subject_id, piece->>'attribute', piece->>'value', bag.valid_from, NULL,
+           bag.confidence, CASE WHEN n_same > 1 THEN 'many' ELSE bag.cardinality END, bag.source_type, bag.source_id,
+           bag.evidence_quote, bag.review_by, bag.origin, 'normal', bag.created_at
+     WHERE NOT EXISTS (SELECT 1 FROM public.claims c WHERE c.user_id = p_user_id AND c.subject_type = bag.subject_type
+                         AND c.subject_id IS NOT DISTINCT FROM bag.subject_id AND c.attribute = piece->>'attribute'
+                         AND lower(btrim(c.value)) = lower(btrim(piece->>'value')) AND c.valid_to IS NULL);
+    IF FOUND THEN added := added + 1; END IF;
+  END LOOP;
+  PERFORM set_config('menerio.fact_migration', 'off', true);
+  RETURN added;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.split_legacy_bag(uuid, uuid, jsonb) FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.split_legacy_bag(uuid, uuid, jsonb) TO service_role;
+
 -- 12. Review queue: items that point at an entry now point at its claim. Items
 -- whose entry was folded into another claim are not revertible (a revert would
 -- delete a different, possibly human, fact). Items whose entry no longer exists

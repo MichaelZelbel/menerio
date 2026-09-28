@@ -119,6 +119,7 @@ BEGIN
     FOR EACH ROW WHEN (((old.merged_into IS NULL) AND (new.merged_into IS NOT NULL) AND (new.merged_into <> new.id)))
     EXECUTE FUNCTION public.contact_merge_move_references();
   DROP FUNCTION IF EXISTS public.fold_contact_into_self(uuid, uuid);
+  DROP FUNCTION IF EXISTS public.split_legacy_bag(uuid, uuid, jsonb);
   DROP FUNCTION public.merge_contacts_atomic(uuid, uuid, uuid, boolean);
   ALTER FUNCTION fact_retired.merge_contacts_atomic(uuid, uuid, uuid, boolean) SET SCHEMA public;
 END $$;
