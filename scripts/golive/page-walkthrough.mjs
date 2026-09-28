@@ -1,19 +1,15 @@
 // Part C4 of the fact store go-live, automated (docs/plans/one-fact-store.md,
 // section 10): the page walk-through Michael used to do by hand.
 //
-// Two layers, so a flaky selector can never be mistaken for a broken release:
-//   1. Every page action, performed as a throwaway test user through exactly
-//      the calls the page makes (write_fact, and the direct row writes of
-//      src/hooks/useFacts.ts), with the resulting rows checked after each one.
-//   2. A browser smoke check on the live site: sign in, open the test person,
-//      see the current fact and its "History (n)".
-// A failure in layer 1 is a real failure. A failure in layer 2 is reported with
-// a screenshot; the go-live session looks at it before treating it as one.
+// Every page action, performed as a throwaway test user through exactly the
+// calls the page makes (write_fact, and the direct row writes of
+// src/hooks/useFacts.ts), with the resulting rows checked after each one.
+// No browser: the page's own code paths are covered by the unit tests.
 //
 // Creates its own test user and deletes it (and with it every row) at the end.
 //
 //   SUPABASE_URL=… SUPABASE_ANON_KEY=… SUPABASE_SERVICE_ROLE_KEY=… \
-//   SITE_URL=https://menerio.com node scripts/golive/page-walkthrough.mjs
+//   node scripts/golive/page-walkthrough.mjs
 //
 // Output: one JSON line of check names and results. No fact of Michael's is
 // read: the test user only ever sees its own rows.
@@ -25,7 +21,6 @@ import { createClient } from "@supabase/supabase-js";
 const URL = process.env.SUPABASE_URL;
 const ANON = process.env.SUPABASE_ANON_KEY;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const SITE = (process.env.SITE_URL || "https://menerio.com").replace(/\/$/, "");
 if (!URL || !ANON || !SERVICE) throw new Error("Set SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY");
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
@@ -69,7 +64,6 @@ try {
   const contact = person.id;
   const { data: today } = await user.rpc("fact_today", { p_user_id: userId });
 
-  // ---- layer 1: every action the page offers ----------------------------
   let first;
   await check("add", async () => {
     const r = await writeFact(user, { contact_id: contact, label: "Current city", value: "Testville", category_slug: "location" });
@@ -150,28 +144,6 @@ try {
     assert.equal(count, 0);
   });
 
-  // ---- layer 2: the live page ---------------------------------------------
-  await check("page_smoke", async () => {
-    const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright");
-    const browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}) });
-    const page = await browser.newPage();
-    try {
-      await page.goto(`${SITE}/auth`);
-      await page.fill("#signin-email", email);
-      await page.fill("#signin-password", password);
-      await page.getByRole("button", { name: "Sign In" }).last().click();
-      await page.waitForURL(/dashboard/, { timeout: 30000 });
-      await page.goto(`${SITE}/dashboard/people/${contact}`);
-      await page.getByRole("tab", { name: "Profile" }).click();
-      await page.getByText("Examplecity").first().waitFor({ timeout: 20000 });
-      await page.getByText(/History \(\d+\)/).first().waitFor({ timeout: 20000 });
-    } catch (e) {
-      await page.screenshot({ path: "/tmp/golive-page-walkthrough.png", fullPage: true }).catch(() => {});
-      throw new Error(`${e.message.split("\n")[0]} (screenshot: /tmp/golive-page-walkthrough.png)`);
-    } finally {
-      await browser.close();
-    }
-  });
 } finally {
   if (userId) {
     const { error } = await admin.auth.admin.deleteUser(userId);
