@@ -132,8 +132,9 @@ async function acceptProfileEntryReview(db: any, userId: string, reviewId: strin
     origin: "review_queue",
     categorySlug: slug,
     evidenceQuote: parsed.data.evidence_quote ?? null,
-    sourceType: row.source_note_id ? "note" : "ai",
-    sourceId: row.source_note_id ?? null,
+    // The fact keeps where it came from: a moment, a note, or neither.
+    sourceType: payload.moment_id ? "moment" : row.source_note_id ? "note" : "ai",
+    sourceId: payload.moment_id ?? row.source_note_id ?? null,
   }, { isHuman: false });
   const outcome = legacyOutcome(result);
   if (outcome.ok) {
