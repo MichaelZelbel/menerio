@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: proposal, 2026-09-28, reviewed five times (section 8). Nothing in this document has been built.
+Status: proposal, 2026-09-28, reviewed six times (section 8). Nothing in this document has been built. Section 5 is the one-go-live layout (sixth review).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.
 
 How to read the markers:
@@ -19,10 +19,11 @@ How to read the markers:
 4. With one list, a fact cannot appear twice. A new value keeps the old one as "was true until". Assistants, search and Godspeed all read the same thing.
 5. Your typed words stay protected. The same rule that guards the profile list today moves onto the facts themselves.
 6. Relationships between people stay in their own table. They link two people, and that works well already.
-7. Cost: about eight small stages over roughly two to three weeks of work; the biggest one (stage 4) ships as several small deploys. Each ships alone with a backup, a count check and a way back. No fact is deleted until the last stage, and even then it is archived first.
-8. Godspeed: the pull becomes a straight copy of the facts, and existing files keep their ids. Its hourly pull needs to learn paging first (see Risk R1).
+7. How it ships: everything is built and rehearsed first (5-7 days of work, nothing changes in production), then goes live in one sitting of about an hour and is tested straight away. There are no waiting periods between steps. The data switch is one transaction that checks its own counts, there is one rollback script, and the old table is archived, not deleted.
+8. Godspeed: the pull becomes a straight copy of the facts, and existing files keep their ids. Its hourly pull learns paging during the build (see Risk R1).
 9. Decided (section 7): changing a fact keeps the old value as history; removing offers "not true any more" and "this was wrong"; private sections stay out of the Godspeed repo.
-10. Separately, I found a bug that can lose facts today: the tidy-up job deletes rows it then cannot re-insert (Risk R2). It is worth fixing first, whatever you decide here.
+10. Separately, I found a bug that can lose facts today: the tidy-up job deletes rows it then cannot re-insert (Risk R2). The rewrite replaces that code, and the job is paused from the start of go-live.
+11. Facts that assistants recorded but that never showed on a profile (about 200 about you) are not put on the page silently. They land in a private "To review" section, because some may be facts you deleted before the 09-28 fix.
 
 ---
 
@@ -75,17 +76,17 @@ Unique indexes: `profile_entries_no_exact_duplicate` and `profile_entries_unique
 | `backfill-profile-extraction/index.ts` | none directly (re-posts notes) | Re-runs the note pipeline. | Unchanged. |
 | `classify-profile-fact/index.ts` | none | Returns label, value and section for Quick-add. | Unchanged. |
 | `generate-profile-suggestions/index.ts` | reads categories and owner entries | Owner suggestions. | Reads `profile_facts`. |
-| `promote-profile-entries/index.ts` + `_shared/promote-entries.ts` + `_shared/adopt-claims.ts` | entries → claims, and claims → entries | The bridge. | **Retired** in stage 7. |
+| `promote-profile-entries/index.ts` + `_shared/promote-entries.ts` + `_shared/adopt-claims.ts` | entries → claims, and claims → entries | The bridge. | **Retired** at go-live (B3, B5). |
 | `profile-audit/index.ts` + RPC `profile_audit_apply_merge` (cron job 16, `50 */6`) | merges entries | Duplicate audit. | Retired. The unique live-value index (section 3.2) makes exact duplicates impossible. Near-duplicates go to the claims lint. |
 | `profile-lint/index.ts` (cron job 11, `20 3`) | deletes entries (repair); relationships | Nightly lint. | Claims lint, **report-only** for claims; relationship repair unchanged. Whether the live cron sends `repair:true` is UNVERIFIED. |
 | `profile-reconcile/index.ts` (cron job 12, `17 */2`) | moves entries to self, updates and deletes them; relationships | Folds contact duplicates of self. It **orphans those contacts' claims** (reported; UNVERIFIED line-level). | Moves claims and slots to self (`subject_type='self'`, `subject_id=NULL`) in the same transaction. The entry sections are retired. |
-| `review-queue-bulk/index.ts` (keep ~282-316, `unknown_profile_field` ~566-625, revert ~738-810) | writes and deletes entries; relationships | Bulk review. | Keep calls `writeFact`. Revert deletes the claim (the item's `target_entity_id` now holds a claim id; see stage 4). |
+| `review-queue-bulk/index.ts` (keep ~282-316, `unknown_profile_field` ~566-625, revert ~738-810) | writes and deletes entries; relationships | Bulk review. | Keep calls `writeFact`. Revert deletes the claim (the item's `target_entity_id` now holds a claim id; switch step 11). |
 | `conversation-chat/index.ts` (~113, 240-251) | reads entries (no visibility filter) | Person context in chat. | Reads `agent_facts`, which also closes today's visibility gap. |
 | `note-chat/index.ts` (~483), `_shared/read-tools.ts` `loadPersonProfile` (~193-243), chat tool `get_person_profile` | reads entries and relationships (no sensitivity filter) | Person context in chat. | Reads `agent_facts`; relationships are filtered on the contact's visibility. |
-| `_shared/read-tools.ts` `search_claims` → `match_claims` | reads claims | Chat search. | Unchanged caller. It now covers every fact, so `match_claims` gains the private-section and entity filters in stage 1 (section 3.6). |
+| `_shared/read-tools.ts` `search_claims` → `match_claims` | reads claims | Chat search. | Unchanged caller. It now covers every fact, so `match_claims` gains the private-section and entity filters in the schema migration (section 3.6). |
 | `_shared/user-profile.ts` `getUserProfile` | reads self entries (ignores `show_to_agent`) | "Who is the user" digest for chats. | Reads `agent_facts` for self, current rows only. |
 | `_shared/people-sync-core.ts` / `people-vault.ts` (`github-people-sync`) | reads contact entries (`select *`) | GitHub people vault export. | Reads `profile_facts` (current rows; pinned first). |
-| `merge-contacts` → SQL `merge_contacts_atomic` (`20260908120002`) + trigger `contact_merge_move_references` (`20260923170100`) | moves and deletes entries; moves claims; relationships | Contact merge. Deleting a duplicate entry **ends its claim before the claim is moved**, and a merge into self leaves the claims behind (trigger WHEN clause). Reported. | Moves claims and slots itself. Identical live values are folded, keeping the earliest. Merge into self re-points to `subject_type='self'`. The entry part is deleted in stage 7. |
+| `merge-contacts` → SQL `merge_contacts_atomic` (`20260908120002`) + trigger `contact_merge_move_references` (`20260923170100`) | moves and deletes entries; moves claims; relationships | Contact merge. Deleting a duplicate entry **ends its claim before the claim is moved**, and a merge into self leaves the claims behind (trigger WHEN clause). Reported. | Moves claims and slots itself. Identical live values are folded, keeping the earliest. Merge into self re-points to `subject_type='self'`. The entry part is removed at go-live. When it folds identical values it writes no suppression row (section 3.6). |
 | `delete-my-account`, `admin-delete-user` | none directly | Rely on foreign-key cascades to `auth.users` (`20260916120000` adds them to every public table with `user_id`). | `fact_slots` gets its own `ON DELETE CASCADE`. |
 | `mc-api-world/index.ts` + views `world_entities`, `world_events`, `world_claims` (`20260901098000`); `_shared/world-records.ts` `toWorldClaim` | reads the union of all three stores | Godspeed pull endpoint. Filters sensitive contacts only; **no `ai_visibility` filter on claims, and no private-section filter** (VERIFIED, `mc-api-world/index.ts:136-160` and the view SQL). | `world_claims` = claims plus relationships only (section 3.4). Add the `ai_visibility` filter; the private-section filter depends on Q4. |
 | `backfill-claim-embeddings/index.ts` | writes claim embeddings | Manual backfill; no cron (reported). | Scheduled every 10 minutes. Skips claims about hidden or sensitive subjects (section 3.6). |
@@ -116,7 +117,7 @@ Unique indexes: `profile_entries_no_exact_duplicate` and `profile_entries_unique
 | `src/pages/ReviewQueue.tsx` (accept ~229-305, revert ~150-193, `add_claim` ~635-672) | entries via normalize-profile or direct insert; revert deletes the entry | Through `normalize-profile` (now `writeFact`); revert = delete the claim. |
 | `src/hooks/useClaims.ts`, `src/components/facts/FactsPanel.tsx`, `components/world/EntityDetail.tsx` | claims for entity pages; `useAddClaim` sets no cardinality, origin or embedding | `useAddClaim` is replaced by `write_fact`. `FactsPanel`'s history pattern is reused on person pages. |
 | `src/pages/World.tsx`, `src/hooks/useWorld.ts` (~94-110), `src/lib/world-claims.ts` | `world_claims` view | Unchanged API; the view is redefined. `groupClaims` should prefer current rows (reported as not excluding closed claims). |
-| `src/lib/query-persister.ts` (`buster: "account-v3"`) | persists query results to IndexedDB for 7 days | Bump the buster when the row shape changes (stage 3). |
+| `src/lib/query-persister.ts` (`buster: "account-v3"`) | persists query results to IndexedDB for 7 days | Bump the buster when the row shape changes (go-live). |
 
 **Offline / desktop.** PowerSync syncs **only `notes`**. VERIFIED: `src/sync/schema.ts` defines one table, and publication `powersync` in `20260710120000` lists only `public.notes`. The sync rules live in the PowerSync dashboard (`docs/offline-first.md`). `src-tauri` has no profile code. Nothing in PowerSync changes. The only offline surface is the query persister above.
 
@@ -173,7 +174,7 @@ ALTER TABLE public.claims ADD CONSTRAINT claims_origin_known CHECK (origin IN
    'review_queue','import','mcp','api','normalizer')) NOT VALID;  -- VALIDATE after a count shows 0 violations
 
 -- 2. One live copy of a value per subject and attribute. Closed history rows are exempt.
---    Pre-check (stage 1) must return 0 before this is created.
+--    Created inside the switch migration, after its duplicate fold (B8 was 96 groups on 2026-09-28).
 --    The value is indexed as a hash: a b-tree entry holds at most ~2.7 KB, and a long value
 --    would otherwise make the index creation, or a later insert, fail.
 CREATE UNIQUE INDEX claims_one_live_value ON public.claims
@@ -215,7 +216,7 @@ Deleting a section no longer deletes facts; they fall back to "Other". Today a c
 
 **No other new tables:**
 
-- **Entry-to-claim lookup.** Stage 2 sets `profile_entries.derived_from_claim_id` on *every* entry, so that column is the permanent lookup from an old entry to its claim. It is kept in the archived table.
+- **Entry-to-claim lookup.** The switch migration sets `profile_entries.derived_from_claim_id` on *every* entry, so that column is the permanent lookup from an old entry to its claim. It is kept in the archived table.
 - **"This was wrong, never suggest it again".** This reuses `ai_suggestion_suppressions` (`20260424235610`: `suggestion_type`, `normalized_value`, `suppression_key`, unique per user). It uses a new `suggestion_type = 'claim'` and the key `subject_type:subject_id:attribute:lower(btrim(value))`.
 
 ### 3.3 The views
@@ -253,7 +254,7 @@ LEFT JOIN public.profile_categories cat
   ON cat.user_id = c.user_id AND cat.slug = s.category_slug
  AND cat.contact_id IS NOT DISTINCT FROM (CASE WHEN c.subject_type = 'contact' THEN c.subject_id END);
 -- profile_categories_user_contact_slug_idx is unique on (user, coalesce(contact), slug), so this join
--- cannot multiply rows (index reported from 20260412183355; confirm in the stage 0 dump).
+-- cannot multiply rows (index reported from 20260412183355; confirm in the A1 dump).
 
 -- What assistants, chats, search and the Godspeed mirror may see.
 CREATE VIEW public.agent_facts WITH (security_invoker = on) AS
@@ -310,7 +311,7 @@ Same columns as today (VERIFIED against `20260901098000`), so `mc-api-world` and
 
 `mc-api-world` `fetchClaims` also gains `ai_visibility` filtering on `subject_id` and `object_id`: contacts and entities that are hidden, on top of today's sensitive list.
 
-**The views filter nothing by user.** They are `security_invoker`, so in the browser RLS restricts them to the signed-in user. Every service-role reader (`mc-api-world`, MCP, chats, cron jobs) bypasses RLS and must keep its explicit `.eq("user_id", …)`, as `mc-api-world` does today. A test in stage 3 asserts it for each rewritten reader.
+**The views filter nothing by user.** They are `security_invoker`, so in the browser RLS restricts them to the signed-in user. Every service-role reader (`mc-api-world`, MCP, chats, cron jobs) bypasses RLS and must keep its explicit `.eq("user_id", …)`, as `mc-api-world` does today. A test in Part A asserts it for each rewritten reader.
 
 ### 3.5 One write path
 
@@ -343,12 +344,14 @@ Only **adding** a fact needs shared logic: label canonicalization, bag splitting
 | Today on `profile_entries` | Target on `claims` |
 |---|---|
 | `world_preferred_wins` / `world_preferred_survives_delete` | New `claim_preferred_wins` (BEFORE INSERT/UPDATE) and `claim_preferred_survives_delete` (BEFORE DELETE), with the same "human = `auth.uid()` IS NOT NULL" test as today. **Which writes make a claim preferred:** a human INSERT, an `origin='user_manual'` INSERT, or a human UPDATE that changes `value` or `attribute`. That last case also sets `origin='user_manual'`, because the words are now the human's; the old `evidence_quote` stays as provenance. Without this, a corrected machine fact would be `rank: preferred` but `written_by: machine` in Godspeed. A human who only ends a machine fact does not turn it into "typed by a human". **Machine UPDATE of a preferred claim:** puts back `attribute`, `value`, `valid_from` and **`valid_to`**, because closing a human's fact is demoting it (Q8). `subject_id` may change (a merge is re-filing). **Deletes:** cancelled unless cascade or owner gone (copy the `20260916120000` exceptions). |
-| `profile_entry_require_origin` | `claim_require_origin`: origin in the list, and automated origins (`ai_*`, `mcp`, `api`, `import`, `normalizer`) need `evidence_quote` of 10+ characters. `unverified` and `menerio` are refused on INSERT except inside the migration (`SET LOCAL menerio.fact_migration = 'on'`). Enforced from stage 5, once `add_claim` sends quotes. |
+| `profile_entry_require_origin` | `claim_require_origin`: origin in the list, and automated origins (`ai_*`, `mcp`, `api`, `import`, `normalizer`) need `evidence_quote` of 10+ characters. `unverified` and `menerio` are refused on INSERT except inside the migration (`SET LOCAL menerio.fact_migration = 'on'`). Attached in the switch migration, after the new `add_claim` (which sends quotes) is deployed. |
 | `profile_entry_quality_guard` | `claim_quality_guard`: **raises** a named error instead of silently returning NULL. Silent drops are why `promote-profile-entries` needed its "a guard trigger dropped the row" checks. |
 | duplicate guard + two unique indexes | `claims_one_live_value` unique index + `writeFact` returning the existing row. |
 | canonicalize, atomize | In `writeFact` (TS). One implementation, tested, with visible results. |
 | enqueue normalization, mark audit dirty | Re-attach to `claims` and `fact_slots` (normalization only; audit is retired). |
-| `profile_entry_sync_claim`, `profile_entry_end_claim` | Dropped in stage 7. |
+| `profile_entry_sync_claim`, `profile_entry_end_claim` | Dropped in the switch migration. |
+| (new) | **A merge writes no suppressions.** `merge_contacts_atomic` runs as the signed-in user (`merge-contacts` calls it with the anon key and the caller's JWT, VERIFIED), so folding a duplicate fact would otherwise record "this was wrong" for a fact that is still true. The merge sets `menerio.subject_delete = 'on'` locally, and the suppression trigger skips it, as for a subject delete (sixth review). |
+| (new) | **A private section with facts in it cannot be deleted.** Facts in a deleted section fall back to "Other", whose scope is `'all'`, so deleting a private section would show its facts to assistants and Godspeed. A BEFORE DELETE trigger on `profile_categories` refuses when `visibility_scope='private'` and a slot of that subject still uses the slug; the page asks the owner to move or remove those facts first (sixth review). |
 | `profile_entries.contact_id … ON DELETE CASCADE` (deleting a person deletes their rows) | `claims.subject_id` has no foreign key, so this must be explicit (fifth review): `claims_follow_subject_delete`, AFTER DELETE on `contacts` and on `entities`, deletes that subject's claims and slots. The preferred-delete guard lets it through (as the entry guard does for a cascade today), and the suppression trigger skips it (otherwise deleting a person writes a "never suggest again" row for every fact about them). It runs while `menerio.subject_delete = 'on'` is set locally by the trigger itself. A merge is not a delete: `merge_contacts_atomic` moves the claims before it removes the duplicate. |
 
 **Embeddings and privacy.** Today a hidden contact's facts are never embedded, because entries have no embedding and promotion refuses those contacts (`_shared/promote-entries.ts:195-199`, VERIFIED). Embedding sends the text to the embedding provider. So in the target:
@@ -358,13 +361,13 @@ Only **adding** a fact needs shared logic: label canonicalization, bag splitting
 - When a contact becomes visible, the backfill embeds their claims.
 - Hiding a contact later needs no extra machinery. The vector stays in Menerio's own database, and `match_claims` already refuses to return it (`20260901099000`, VERIFIED).
 
-**Search must hide what `agent_facts` hides (fourth review).** `match_claims` filters hidden and sensitive **contacts** only (VERIFIED, `20260901099000:72-81`). It does not filter private sections, and it does not filter hidden or sensitive **entities**. Stage 2 turns every private-section entry into a claim, so without a fix those facts become searchable by assistants through `search_brain` and chat search. (Promotion does not check private sections today either, VERIFIED in `_shared/promote-entries.ts`, so part of this leak already exists.) So:
+**Search must hide what `agent_facts` hides (fourth review).** `match_claims` filters hidden and sensitive **contacts** only (VERIFIED, `20260901099000:72-81`). It does not filter private sections, and it does not filter hidden or sensitive **entities**. The switch turns every private-section entry into a claim, so without a fix those facts become searchable by assistants through `search_brain` and chat search. (Promotion does not check private sections today either, VERIFIED in `_shared/promote-entries.ts`, so part of this leak already exists.) So:
 
-- Stage 1 redefines `match_claims` with the same three exclusions as `agent_facts`: private section (through the slot and its category), hidden or sensitive contact, hidden or sensitive entity. `get_claims` reads through the same filter.
+- The schema migration redefines `match_claims` with the same three exclusions as `agent_facts`: private section (through the slot and its category), hidden or sensitive contact, hidden or sensitive entity. `get_claims` reads through the same filter.
 - Claims filed in a private section are not embedded, just like claims about hidden subjects.
-- The stage 1 harness asserts that a private-section claim and a hidden entity's claim are never returned by `match_claims`.
+- The SQL harness asserts that a private-section claim and a hidden entity's claim are never returned by `match_claims`.
 
-**One source for "one value or several" (fourth review).** Today the rules exist three times: the `attribute_rules` table and two TypeScript copies (the table's own comment says "keep all three in sync", `20260901090000:48`). `writeFact` reads the table only; stage 4 deletes the two TypeScript copies and their callers read the table (or a cached copy of it loaded once per request).
+**One source for "one value or several" (fourth review).** Today the rules exist three times: the `attribute_rules` table and two TypeScript copies (the table's own comment says "keep all three in sync", `20260901090000:48`). `writeFact` reads the table only; the rewrite deletes the two TypeScript copies and their callers read the table (or a cached copy of it loaded once per request).
 
 ### 3.7 UI behaviour
 
@@ -512,12 +515,12 @@ This is option C, with the display row attached to the attribute, not to the val
 |---|---|
 | Duplicates / drift | Impossible by construction: one row per claim in the view, and a unique live value per slot. No sync jobs. |
 | What assistants read | `agent_facts`: one source, dated, with conflicts flagged. `show_to_agent` and private sections are honoured everywhere, which is not true today (`getUserProfile`, `loadPersonProfile` and `conversation-chat` ignore them). |
-| Godspeed | `world_claims` becomes claims plus relationships: a one-to-one copy. Migrated entries keep their id (stage 2), so their files are rewritten in place. Only entries folded into an identical fact, and the rows Q4 excludes, are removed, and both are counted first. |
+| Godspeed | `world_claims` becomes claims plus relationships: a one-to-one copy. Migrated entries keep their id, so their files are rewritten in place. Only entries folded into an identical fact, and the rows Q4 excludes, are removed, and both are counted first. |
 | History and dates | Every change is a new row. "Was true until" is visible on every profile. |
 | Guards and human words | Moved onto `claims` (section 3.6), and made loud instead of silent. |
 | Search | Every fact is embedded, except hidden or sensitive subjects. Today unpromoted entries are invisible to `search_brain`. |
 | Privacy | One visibility view (`agent_facts`), write-time embedding exclusion, and `mc-api-world` gains the missing `ai_visibility` filter. |
-| Migration risk | Medium. About 30 writer call sites move to one module. The data move is small (hundreds of rows) and additive until stage 7. |
+| Migration risk | Medium. About 30 writer call sites move to one module. The data move is small (hundreds of rows), one transaction, rehearsed on production data first. |
 | Failure it can still cause | A new attribute written with no slot shows under "Other" until it is filed. That is visible and harmless; the nightly job files it. |
 
 ### (F) Considered and dropped: an event log with claims as a projection
@@ -528,444 +531,260 @@ It would give perfect audit history, but it is heavy machinery for hundreds of r
 
 ## 5. Implementation plan
 
-**Ground rules for every stage:**
-
-- **Migrations.** One file per change in `supabase/migrations/`, with a matching `supabase/rollback/<name>_rollback.sql`. Apply one file at a time through the Supabase management API, and record it by hand: `INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES (...)`. Never use `supabase db push`.
-- **Edge functions** are deployed separately, per function, after the migration they need.
-- **Pushing to `main`** only rebuilds the frontend preview. Each stage names its frontend part.
-- **Backups.** Every stage that moves or deletes data first snapshots the affected tables into schema `fact_backup_<stage>` (`CREATE TABLE fact_backup_s2.claims AS TABLE public.claims;` and likewise for each table). That schema is not exposed to PostgREST. The same rows are also exported as CSV through the management API and kept outside the database.
-- **Counts.** Every data move has a "before" and an "after" query, and each named equality must hold before the stage is called done. If an equality fails, run the rollback.
-- **Crons.** Pause the profile crons during stages 2-4 (`cron.alter_job(<id>, active := false)` for jobs 4, 11, 12, 15 and 16; the ids are in `docs/CRON_JOBS.md`, and must be confirmed live first).
-
-### Stage 0: Baseline, and fix what can already lose data
-
-**Goal:** know the exact starting numbers. Capture the production-only definitions. Remove the two hazards that would corrupt a migration.
-
-**Touches:**
-- `_shared/profile-normalization.ts` and `normalize-profile/index.ts` (R2 fix);
-- the kit's `tools/world-pull.py` (R1 fix, in the Godspeed kit repo);
-- new `docs/plans/one-fact-store-baseline.md` (results).
-
-**Steps:**
-1. **Dump the live trigger and function definitions** into the baseline doc:
-   ```sql
-   SELECT tgrelid::regclass, tgname, pg_get_triggerdef(t.oid)
-     FROM pg_trigger t
-    WHERE NOT tgisinternal AND tgrelid IN ('public.profile_entries'::regclass,
-          'public.claims'::regclass,'public.contact_relationships'::regclass,'public.profile_categories'::regclass);
-   SELECT p.proname, pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-    WHERE n.nspname='public' AND (p.proname LIKE 'profile%' OR p.proname LIKE 'world_%' OR p.proname LIKE 'claim%'
-          OR p.proname LIKE 'relationship%' OR p.proname = 'merge_contacts_atomic');
-   SELECT jobid, jobname, schedule, command, active FROM cron.job;
-   ```
-   Why: `profile_dedup_sweep` and `profile_subset_label_sweep` exist live but in no migration (reported from `20260923190000`), and the cron bodies are live-only.
-2. **Baseline counts** (all saved to the baseline doc):
-   ```sql
-   -- B1 entries by subject and link state
-   SELECT contact_id IS NULL AS is_self, derived_from_claim_id IS NOT NULL AS linked, count(*)
-     FROM profile_entries GROUP BY 1,2;
-   -- B2 claims by subject, liveness and origin
-   SELECT subject_type, valid_to IS NULL AS live, origin, count(*) FROM claims GROUP BY 1,2,3;
-   -- B3 linked entries whose words differ from their claim
-   SELECT count(*) FROM profile_entries p JOIN claims c ON c.id = p.derived_from_claim_id
-    WHERE lower(btrim(p.value)) <> lower(btrim(c.value));
-   -- B4 entries shown as current but linked to a closed claim
-   SELECT count(*) FROM profile_entries p JOIN claims c ON c.id = p.derived_from_claim_id
-    WHERE c.valid_to IS NOT NULL;
-   -- B5 claims shown by more than one entry
-   SELECT count(*) FROM (SELECT derived_from_claim_id FROM profile_entries
-    WHERE derived_from_claim_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1) x;
-   -- B6 live claims shown by no entry (contact and self)
-   SELECT c.subject_type, count(*) FROM claims c
-    WHERE c.valid_to IS NULL AND NOT EXISTS (SELECT 1 FROM profile_entries p WHERE p.derived_from_claim_id = c.id)
-    GROUP BY 1;
-   -- B7 entries of hidden or sensitive contacts
-   SELECT count(*) FROM profile_entries p JOIN contacts ct ON ct.id = p.contact_id
-    WHERE ct.is_sensitive OR ct.ai_visibility <> 'visible';
-   -- B8 duplicate live values that would break claims_one_live_value
-   SELECT count(*) FROM (SELECT user_id, subject_type, subject_id, attribute, lower(btrim(value))
-     FROM claims WHERE valid_to IS NULL GROUP BY 1,2,3,4,5 HAVING count(*) > 1) x;
-   -- B9 world_claims by arm, and review_queue pending items by type
-   SELECT source_table, count(*) FROM world_claims GROUP BY 1;
-   SELECT type, status, count(*) FROM review_queue
-    WHERE status IN ('pending','pending_review','auto_applied_unreviewed') GROUP BY 1,2;
-   -- B10 relationships, entries in private sections, claims orphaned by deleted/merged contacts
-   SELECT count(*) FROM contact_relationships;
-   SELECT count(*) FROM profile_entries p JOIN profile_categories k ON k.id = p.category_id
-    WHERE k.visibility_scope = 'private';
-   SELECT count(*) FROM claims c WHERE c.subject_type = 'contact' AND NOT EXISTS
-     (SELECT 1 FROM contacts ct WHERE ct.id = c.subject_id AND ct.merged_into IS NULL);
-   -- B11 legacy entries the new claim quality guard would refuse (carried over under the
-   --     migration flag, then listed for Michael), and entries that stage 2 would fold
-   SELECT count(*) FROM profile_entries
-    WHERE btrim(value) = '' OR lower(btrim(value)) IN ('none','n/a','unknown','-')
-       OR lower(btrim(value)) = lower(btrim(label));
-   SELECT count(*) - count(DISTINCT (user_id, contact_id, lower(regexp_replace(btrim(label), '\s+', '-', 'g')),
-                                     lower(btrim(value))))
-     FROM profile_entries WHERE derived_from_claim_id IS NULL;
-   -- B12 who owns the tables (stage 2 disables their triggers, which needs the owner)
-   SELECT relname, pg_get_userbyid(relowner) FROM pg_class
-    WHERE relname IN ('profile_entries','claims','fact_slots') AND relnamespace = 'public'::regnamespace;
-   -- B13 the longest values (the unique index hashes them; this documents why)
-   SELECT 'claims', max(octet_length(value)) FROM claims
-   UNION ALL SELECT 'profile_entries', max(octet_length(value)) FROM profile_entries;
-   -- B14 private-section claims and hidden-entity claims that match_claims returns today
-   SELECT count(*) FROM claims c JOIN profile_entries p ON p.derived_from_claim_id = c.id
-     JOIN profile_categories k ON k.id = p.category_id
-    WHERE k.visibility_scope = 'private' AND c.embedding IS NOT NULL;
-   SELECT count(*) FROM claims c JOIN entities e ON e.id = c.subject_id
-    WHERE c.subject_type = 'entity' AND (e.ai_visibility <> 'visible' OR e.is_sensitive);
-   ```
-   Column names `review_queue.type` and `.status` are UNVERIFIED.
-3. **R2 fix.** The normalizer and `explodeBags` carry `origin`, `evidence_quote`, `is_pinned`, `rank`, `show_to_agent` and `derived_from_claim_id` through every insert and restore. They insert before they delete. They never write a row without an honest origin.
-4. **R1 fix.** The kit's `world-pull.py` pages exactly like the engine's (`limit` + `offset`, `IncompleteAnswer` on a short or missing answer), or is replaced by the engine version.
-
-**Tests:**
-- Vitest in `supabase/functions/_shared/__tests__/profile-normalization-origin.test.ts`: the no-survivor path inserts with an origin; a failed insert restores every original column.
-- Kit: a paging test with 2 pages.
-
-**Verify live:**
-- Run one normalization on a test contact of the test account and check the row counts before and after.
-- Run the kit pull with `--dry-run`: the removal list must be empty.
-
-**Rollback:** redeploy the previous function versions (the git SHAs are recorded in the baseline doc).
-
-### Stage 1: Additive schema (no data moves)
-
-**Goal:** the new table, columns, views and guards exist and are harmless.
-
-**Touches:** migrations, each with a rollback file:
-- `20261001120000_claims_gain_rank_and_checks.sql`
-  - adds `rank`, the `source_type` CHECK, and the `origin` CHECK `NOT VALID`;
-  - redefines `world_claims` so its claim arm reports `c.rank` instead of the hard-coded `'normal'`. This is needed before stage 2: from then on every profile row reaches Godspeed through the claim arm, and must not arrive demoted.
-- `20261001121000_fact_slots.sql`: the table, index, RLS and the updated_at trigger.
-- `20261001123000_profile_facts_views.sql`: `profile_facts` and `agent_facts`, with `GRANT SELECT` to authenticated and service_role.
-- `20261001124000_claim_guards.sql`: `claim_preferred_wins`, `claim_preferred_survives_delete`, `claim_quality_guard`, and the AFTER DELETE suppression trigger.
-  - All of them are active from day one. No current writer updates a preferred claim, because none is preferred yet; `claims.rank` defaults to `'normal'`.
-  - `claim_quality_guard` does not apply while `menerio.fact_migration = 'on'`, so that legacy rows can be carried over. It is the only guard with that exception.
-  - `claim_require_origin` is created but **not attached** until stage 5.
-- `20261001125000_claims_one_live_value.sql`: created only if B8 = 0. If B8 > 0, the rows are listed for Michael first. They are exact duplicates of one value, and folding them happens in stage 2.
-- `20261001126000_match_claims_hides_like_agent_facts.sql` (fourth review): `match_claims` gains the private-section and hidden/sensitive-entity exclusions. This must be live before stage 2, which is when private-section entries become claims. `backfill-claim-embeddings` skips private-section claims from the same deploy.
-- `20261001127000_claims_follow_subject_delete.sql` (fifth review): the AFTER DELETE triggers on `contacts` and `entities` from section 3.6. They also clean up today's orphans going forward; existing orphans (B10) are listed for Michael, not deleted.
-
-**Data migration:** none. Counts that must hold:
-- `claims` and `profile_entries` totals are unchanged.
-- `fact_slots` has 0 rows.
-- `world_claims` by arm is unchanged (B9), apart from `rank` on claim rows.
-
-**Tests:** a SQL harness modelled on `scripts/test-merge-review.mjs` + `bootstrap-merge-review-test.sql`, as new `scripts/test-fact-store.mjs` + `scripts/bootstrap-fact-store-test.sql`. It proves that:
-- a machine update of a preferred claim keeps its value and `valid_to`;
-- a machine delete of a preferred claim is cancelled;
-- a human update passes, and a human that only ends a machine claim does not make it preferred;
-- the quality guard raises;
-- a human delete writes a suppression row and a machine delete does not;
-- the unique live index allows the same value once live and again as history;
-- `profile_facts` returns exactly one row per claim, including a subject with a section row and one without;
-- `agent_facts` hides private, hidden and sensitive rows;
-- `match_claims` never returns a private-section claim or a hidden entity's claim;
-- a future-dated value is not current yet, and does not raise `has_conflict` against the value it replaces;
-- "Both are true" on the slot alone clears `has_conflict`;
-- deleting a contact (as a signed-in user and as the service role) deletes its claims and slots, including preferred ones, and writes no suppression rows;
-- a 5 KB value can be inserted (the hashed index).
-
-**Verify live:**
-- `SELECT count(*) FROM profile_facts` equals `SELECT count(*) FROM claims`, per user.
-- `agent_facts` is a subset of `profile_facts`.
-
-**Rollback:** the rollback files run in reverse order: drop the views, the table, the triggers, then the columns and constraints, and restore `world_claims` from `20260901098000`. None of these hold data yet.
-
-### Stage 2: Backfill: every entry becomes a claim with a slot (additive)
-
-**Goal:** `claims` and `fact_slots` hold every fact and every display setting that `profile_entries` holds, and every entry names its claim. Nothing is deleted.
-
-**Before this stage:**
-- Stage 0's pull fix (R1) must be live. From this stage on, Godspeed sees every profile row through the claim arm.
-- Reusing ids keeps that a rewrite of the same files, not a delete-and-create (see "Godspeed effect" below).
-- Pause the profile crons.
-
-**Touches:** `20261002120000_backfill_claims_from_entries.sql`. It is one transaction that sets `SET LOCAL menerio.fact_migration = 'on'` and runs `ALTER TABLE public.profile_entries DISABLE TRIGGER USER` (re-enabled at the end of the same transaction).
-
-Why the triggers are disabled: step 5 updates every entry. Without this, that update would run the old BEFORE UPDATE guards on legacy rows:
-- the origin rule for AI rows without a quote raises;
-- canonicalize and the quality guard can silently drop the update;
-- the audit and normalization triggers would queue work for every row.
-
-Foreign-key checks are system triggers and stay on.
-
-Steps:
-
-1. **Snapshot** into `fact_backup_s2`: `profile_entries`, `profile_categories`, `claims`, `review_queue`, `ai_suggestion_suppressions`.
-2. **Entries already linked to a claim.** There are about 169 contact entries plus the self rows (UNVERIFIED).
-   - **Words match** (the complement of B3): nothing to do.
-   - **Words differ** (B3): the entry's words are what you saw on the page.
-     - Insert a new claim **with `id = entry.id`**, carrying the entry's words, origin and rank, and `valid_from NULL`.
-     - Point the entry at it.
-     - The old claim stays, and the two show as "two answers" for you to settle. Nothing is overwritten.
-   - **Linked to a closed claim** (B4): leave the link. These rows move to history, not the current list, and the stage report lists them for you.
-3. **Unlinked entries:** insert a claim **with `id = entry.id`**:
-   - `subject_type` / `subject_id` from `contact_id` (NULL → self);
-   - `attribute = normalize(label)`. A reserved attribute (`relationship…`) becomes `relationship-note`; the label keeps its words.
-     The SQL here must produce exactly what `normalizeAttribute()` (`_shared/claims.ts:55`) produces, or the next value written by `writeFact` lands on a second line. Before the migration runs, a script computes the attribute for every distinct entry label with the TypeScript function and diffs it against the SQL expression; the diff must be empty (fourth review);
-   - `value` verbatim, bags included (the migration splits nothing);
-   - `valid_from NULL` (Q6), `created_at = entry.created_at`;
-   - `confidence 'likely'`; `cardinality` from `attribute_rules`, else `'one'`;
-   - `origin`, `rank` and `evidence_quote` copied;
-   - `source_type = 'note'` and `source_id = linked_note_id` when linked; else `'manual'` for `user_manual`; else `'ai'`.
-
-   **When an identical current value already exists** for the same subject and attribute, no claim is inserted. The entry is pointed at the earliest existing claim ("folded"). These are counted, and they are the only Godspeed file removals this plan causes.
-
-   Hidden or sensitive contacts are included; their claims are not embedded.
-4. **Slots:** one per `(subject, attribute)`, built from its entries:
-   - `label` = the label of the preferred row, else the most frequent label;
-   - `category_slug` = that row's section slug;
-   - `is_pinned` = any pinned; `show_to_agent` = any;
-   - `cardinality` = NULL, unless the entries already hold two different current values for a single-valued attribute: those stay as "two answers".
-5. **Link:** set `derived_from_claim_id` on every entry from steps 2 and 3. From here on that column *is* the entry-to-claim lookup.
-6. **Claims no entry shows (B6).** After stage 0 these are mostly self claims, because adoption was contact-only.
-   - A dry run of `placeClaim` (TS) produces their slot rows as a reviewed SQL file.
-   - That file is applied as the next migration, `20261002121000_slots_for_unshown_claims.sql`.
-   - One mechanism (SQL files), and the placement is still decided by the one TS implementation.
-
-**Counts that must hold after stage 2:**
-- `SELECT count(*) FROM profile_entries WHERE derived_from_claim_id IS NULL` = 0.
-- Every link points at an existing claim: `LEFT JOIN claims … WHERE claims.id IS NULL` = 0.
-- `claims_after` = `claims_before` + (unlinked − folded) + B3.
-- For every subject, the set of `(label, lower(value))` currently on the old page (entries whose claim is not closed) equals the set of current rows in `profile_facts`.
-  - Run this as a SQL `EXCEPT` both ways; it must return 0 rows.
-  - The only allowed differences are the B4 rows and the new self claims from step 6, each listed by id.
-- `count(fact_slots)` = the number of distinct `(subject, attribute)` pairs over the non-entity claims, so every non-entity claim has a slot.
-- `world_claims`: `profile_entry` rows = 0; `claim` rows = `count(claims)`.
-
-**Godspeed effect.** This is the stage where Godspeed notices the switch; stage 6 only tidies up. Every former `profile_entry` row now arrives as a `claim` row with the **same id**, so the pull rewrites the same file. Run the kit pull with `--dry-run` right after the migration:
-- removals must equal exactly the folded ids;
-- the rest must be rewrites, plus new files for the step 2 conflict claims and the step 6 self claims;
-- only then run `--apply`.
-
-**Keeping it complete until writers move (stage 4):**
-- `trg_zz_profile_entry_mirror` (BEFORE INSERT on `profile_entries`).
-  - Its name sorts last, so it runs only if no earlier guard dropped the row.
-  - It does steps 3 and 4 for the new row: the claim takes `NEW.id`, and it sets `NEW.derived_from_claim_id`.
-  - If an identical current value already exists (the entry guards compare labels, the claim index compares attributes, so this can happen), it links to that claim instead of inserting. Otherwise `claims_one_live_value` would raise, and the note pipeline's insert would fail instead of being quietly deduplicated as today.
-  - A row that arrives already linked (adoption from `promote-profile-entries`) only gets its slot ensured.
-- `trg_profile_entry_mirror_display` (AFTER UPDATE OF `label`, `category_id`, `is_pinned`, `show_to_agent`) copies display changes onto the slot.
-- The existing `sync_claim`/`end_claim` triggers keep value edits and deletes flowing. The known history loss from in-place edits continues until stage 4, and is accepted for the transition; the old words are in `fact_backup_s2`.
-
-**Tests:**
-- SQL harness cases, each ending with exactly one link: linked and equal, linked and different, linked to a closed claim, unlinked, folded, hidden contact, self, reserved label, bag value, legacy AI row without a quote, "none"-valued legacy row.
-- Mirror cases: a new entry creates its claim and slot; an entry dropped by the duplicate guard creates nothing; a pin change reaches the slot.
-
-**Verify live:**
-- The counts above, and the Godspeed dry run.
-- Open three contacts and your profile. The page still reads entries, so nothing visible changes.
-- `SELECT … FROM profile_facts WHERE subject_id = :someone AND is_current` matches the page by eye.
-
-**Rollback:** `20261002120000_…_rollback.sql`:
-1. Drop both mirror triggers.
-2. Restore `profile_entries.derived_from_claim_id` from `fact_backup_s2`.
-3. Delete the claims whose id equals an entry id and is absent from `fact_backup_s2.claims`, then the step 6 slots and all `fact_slots`.
-
-Verification of the rollback: `claims` equals `fact_backup_s2.claims`, and `profile_entries` equals `fact_backup_s2.profile_entries`, each by `EXCEPT` both ways = 0. The next pull restores the old files (same ids).
-
-### Stage 3: Assistants, chats and exports read the views
-
-**Goal:** everything outside the browser reads `agent_facts` / `profile_facts`. The page is unchanged; it moves in stage 4, with its writes.
-
-**Why not the page now.** A page that reads the view but still writes entries would depend on the mirror for every pin, move and edit. A page that reads and writes the same store in one step has no such gap.
-
-**Touches:**
-- **MCP (`menerio-mcp/index.ts`):** `get_contact_profile`, `get_user_profile`, `get_contact_context`, `search_contacts`.
-- **Shared and other functions:** `_shared/read-tools.ts` `loadPersonProfile`, `_shared/user-profile.ts`, `conversation-chat/index.ts`, `_shared/people-sync-core.ts`, `generate-profile-suggestions`.
-- **Types:** regenerate `src/integrations/supabase/types.ts` to include `fact_slots`, `profile_facts` and `agent_facts`.
-
-**Data migration:** none.
-
-**Tests:**
-- A Vitest test for the MCP and chat profile formatters, built from fixture rows. It asserts that:
-  - each fact prints once;
-  - hidden, sensitive and private rows never print;
-  - every service-role query carries a `user_id` filter.
-- Update `people-vault.test.ts`.
-
-**Verify live:**
-- A script, `scripts/compare-profile-readers.ts`, runs the old formatter (entries) and the new one (view) for each subject and diffs the printed `(label, value)` sets. The only allowed differences are the B4 list, the new self claims and the history lines.
-- Run `get_contact_profile` for three contacts and `get_user_profile` through MCP, and compare with the page.
-
-**Rollback:** redeploy the previous function versions. No data changed.
-
-### Stage 4: The page and every writer switch to claims
-
-**Goal:** the page reads and writes facts, and nothing writes `profile_entries` any more.
-
-**How it ships: three small deploys, not one (fourth review).** The first draft of this stage deployed about 30 call sites and the page at once, with the messiest rollback of the plan. It now ships in three steps. The stage 2 mirror triggers carry everything the not-yet-moved writers do, so each step is safe alone:
-
-- **4a, the page.** `useFacts`, the page components, `useAiFootprint`, `RelationshipsSection`, `ReviewQueue`, `useAddClaim` → `write_fact`, the `write_fact` action itself (JWT client), and the persister buster. Browser writes to `profile_entries` stop. Background jobs still write entries, and the mirror copies them into claims and slots. The foreign key `derived_from_claim_id → claims` is dropped here (the column stays), so a "Was wrong" delete never rewrites an entry. Hold 48 hours.
-- **4b, the background writers, one function per deploy**, in this order: `process-note`, moments, lexicon enrichment, `review-queue-bulk`, `normalize-profile` (accept, bulk, explode, apply, rollback) with `admin-normalize`, `profile-lint`, `profile-reconcile`, `add_claim`, and the merge migration. Each deploy is checked with the "Verify live" steps below for that writer before the next one.
-- **4c, the freeze.** Only once the grep test finds no writer left: the read-only migration below, and the mirror triggers are dropped.
-
-In the window between 4a and 4c, the old-row readers that are not yet moved (e.g. the note pipeline's dedup) can see an entry whose claim was ended on the page. At worst they skip a suggestion; they cannot resurrect a value, because the mirror links to an existing claim instead of inserting one.
-
-There is **no feature flag**. With entries frozen in 4c, a flag turned off would send the old page to a table that refuses writes. The way back is each step's rollback.
-
-**Touches:**
-- **New:**
-  - `_shared/fact-store.ts`: a pure planner plus a writer. It takes a Supabase client, so a human call uses the caller's JWT (section 3.5).
-  - `src/hooks/useFacts.ts`.
-- **Frontend** (step 4a, no flag):
-  - `useProfile.ts`, `useContactProfile.ts` (the adoption and backfill effects are removed);
-  - `ProfileSections.tsx`, `CompactCategorySection.tsx`, `PinnedHighlights.tsx`, `EntryForm.tsx` (two edit actions, plus label and section editing), `ExportTab.tsx`, `useProfileSummary.ts`, `useAiFootprint.ts`, `RelationshipsSection.tsx`, `ReviewQueue.tsx`;
-  - `useClaims.useAddClaim` → `write_fact`;
-  - a "History (n)" disclosure and a "two answers" badge;
-  - the `query-persister.ts` buster → `"account-v4"`.
-- **Edge functions:**
-  - `normalize-profile`: `write_fact` (renamed from `write_profile_entry`, which stays as an alias until stage 7 so an old open tab can still add a fact), accept, bulk, explode, apply, rollback;
-  - `_shared/profile-normalization.ts`;
-  - `process-note`: the promote call is removed, and dedup reads the suppressions;
-  - `_shared/moment-profile-extraction.ts`, `enrich-person-from-lexicon`, `review-queue-bulk`, `admin-normalize`;
-  - `profile-lint` (report-only for facts);
-  - `profile-reconcile` (the self fold moves claims and slots);
-  - `menerio-mcp` `add_claim` (fact store, origin `mcp`, the user's day instead of UTC).
-- **SQL:** `20261006121000_merge_moves_claims_and_slots.sql`. It rewrites `merge_contacts_atomic` to move claims and slots, and fixes merge into self.
-- **Review queue:**
-  - Pending `add_profile_entry` items carry their fact in the payload and work unchanged.
-  - A `target_entity_id` that points at an entry is rewritten to that entry's `derived_from_claim_id`.
-  - Pending `normalize_profile_entry` items reference entry ids and a before-state that no longer applies. They are set to `status='superseded'`, and the next normalization run regenerates them from facts.
-  - Count: pending items per type before = after + superseded.
-
-**Freeze entries (step 4c):** `20261006122000_profile_entries_read_only.sql`:
-- revoke `INSERT`, `UPDATE` and `DELETE` on `profile_entries` from authenticated;
-- add a BEFORE trigger that raises `profile_entries_is_read_only: write facts through write_fact` for the service role too;
-- drop both mirror triggers.
-
-The foreign key `derived_from_claim_id → claims` was already dropped in step 4a (`20261006120000_entries_drop_claim_fk.sql`); the column stays.
-
-Why drop that foreign key: its `ON DELETE SET NULL` rewrites the entry row whenever a claim is deleted. Against a read-only table, that makes every "Was wrong" delete fail. The archive should also keep the historical link even after the claim is gone.
-
-The freeze makes a stale browser tab, an old PWA bundle or a forgotten edge function fail loudly instead of writing to a dead table.
-
-**Data migration:** the superseded review items, counted as above. Check: `count(profile_entries WHERE derived_from_claim_id IS NULL)` = 0.
-
-**Tests:**
-- `_shared/__tests__/fact-store.test.ts`:
-  - supersede closes a non-preferred single value;
-  - a machine never closes a preferred value (a conflict instead);
-  - a human replaces their own preferred value (JWT client);
-  - the same value again is a no-op;
-  - many-valued attributes add;
-  - a suppressed value is refused;
-  - bags are split;
-  - the origin and quote rules hold.
-- `src/hooks/__tests__/useFacts.test.tsx`: grouping, history and conflicts.
-- Update `useContactProfile.test.tsx`, `CompactCategorySection.test.tsx`, `useAiFootprint.test.ts`, `normalization-callers.test.ts`, `profile-normalization-spend.test.ts` and `profile-insert-suppression.test.ts`.
-- SQL harness: a merge moves claims and slots; a merge into self moves claims to self; a claim delete succeeds against the frozen table.
-- A grep test, `scripts/check-no-profile-entry-writes.mjs`, wired into `npm test`. It fails if any file outside `supabase/migrations` and `supabase/rollback` contains `.from("profile_entries").insert|update|delete|upsert`.
-
-**Verify live:**
-- On a test contact and on your own profile, try each action: add, "It changed", "Fix a mistake", "No longer true", "Was wrong", pin, and move to another section. Each produces exactly the expected `claims` / `fact_slots` rows.
-- The `profile_entries` count stays the same for 24 hours.
-- Process one test note. Its facts arrive as claims with `origin='ai_note'` and a quote.
-
-**Rollback** (per step; usually only the last step deployed is rolled back):
-1. 4c: the rollback file restores the grants, drops the read-only trigger, and restores the mirror triggers.
-2. 4b: redeploy that one function's previous version. Its facts written in the meantime are claims already, and the mirror is still there.
-3. 4a: redeploy the previous frontend, and restore the foreign key (rows whose claim was deleted in the window get `derived_from_claim_id = NULL` first).
-   Facts written from the page since 4a exist only as claims. Bring them back onto the old page with the adoption direction that already exists: `promote-profile-entries` with `include_contacts`, which is still deployed until stage 7. Add a one-off SQL insert for self claims, which adoption skips.
-   Pins and moves made since 4a are lost on this rollback. They are listed from `fact_slots.updated_at`.
-
-The profile crons stay paused from stage 2 until the writer each one drives has moved in 4b; each cron is switched back on right after its writer's deploy is verified, instead of all at once in stage 5. Hold 4c for 48 hours before stage 5.
-
-### Stage 5: Enforce the rules on claims; turn the nightly jobs back on
-
-**Goal:** the origin-and-quote rule and the human-words rule hold on the only fact store, and the crons run again.
-
-**Touches:**
-- `20261009120000_claims_require_origin.sql`: attach `claim_require_origin`, and `VALIDATE CONSTRAINT claims_origin_known` once a count of violations is 0;
-- `add_claim` requires `evidence_quote` (Q7), and its tool description says why;
-- confirm cron jobs 4, 11 and 15 are back on (each was re-enabled in 4b after its writer moved); retire job 16 (audit) and the entry sections of job 12;
-- add a cron for `backfill-claim-embeddings`: every 10 minutes, `x-cron-key via call_edge`;
-- update `docs/CRON_JOBS.md`.
-
-**Data migration:** none. Count: `SELECT count(*) FROM claims WHERE <origin rule violated>` must be 0 for rows created after stage 4. Legacy rows are exempt, because the trigger checks INSERT and machine UPDATE only.
-
-**Tests:**
-- SQL harness: an automated insert without a quote raises; `user_manual` without a quote passes; an `unverified` insert raises outside the migration flag.
-- Vitest: `add_claim` refuses a fact without a quote.
-
-**Verify live:** read one nightly run's report.
-- Bags were split, and the pieces carry the source quote.
-- No preferred claim changed: the `updated_at` of preferred claims is unchanged, apart from embedding updates.
-
-**Rollback:** detach the trigger (rollback file), and pause the crons again.
-
-### Stage 6: Godspeed mirror: tidy up and close the privacy gaps
-
-**Goal:** `world_claims` is literally claims + relationships, with the privacy filters.
-
-Since stage 2 its profile-entry arm has returned nothing, so this stage changes data only through the new filters.
-
-**Touches:**
-- `20261012120000_world_claims_is_claims.sql` (section 3.4), with a rollback that restores the stage 1 text;
-- `mc-api-world/index.ts` (the `ai_visibility` filter);
-- `_shared/world-records.ts`: pass `rank` and `category` through, with tests in `world-records.test.ts` and `mc-visibility.test.ts`;
-- the Godspeed changes in section 6.
-
-**Data migration:** none in Menerio.
-
-**Counts:**
-- `claim` rows = `count(claims)`, minus the private-section rows if Q4 = exclude, minus the hidden-subject rows.
-- `contact_relationship` rows: unchanged, minus hidden-subject rows.
-- The dry-run pull's removals must equal exactly those excluded ids, listed beforehand.
-
-**Tests:** the engine's `scripts/tests/test_world_pull.py` gains cases for a former entry id arriving as a claim with the same id, `rank: preferred` on a claim, and a `category:` line.
-
-**Verify live:**
-1. Run the kit pull with `--dry-run` and read the plan.
-2. Then `--apply`, and check `git diff --stat world/claims`: only the expected removals and modifications.
-
-**Rollback:** the rollback migration restores the previous view, and the next pull re-applies from it.
-
-### Stage 7: Retire the old store
-
-**Goal:** one store, in code and in schema.
-
-**Touches:**
-- delete `supabase/functions/promote-profile-entries/`, `_shared/promote-entries.ts`, `_shared/adopt-claims.ts` and their tests;
-- remove `profile-audit` and its cron and RPCs, if Q9 = retire;
-- `20261020120000_retire_profile_entries.sql`:
-  - drop the bridge triggers and every trigger on entries;
-  - `ALTER TABLE profile_entries RENAME TO profile_entries_archive`;
-  - revoke all from authenticated;
-- regenerate `types.ts`;
-- update `docs/DATA_MODEL.md`.
-
-Dropping the archive is a separate migration after the retention period (Q10), preceded by a CSV export.
-
-**Counts:**
-- `count(profile_entries_archive)` = `count(fact_backup_s2.profile_entries)` + entries mirrored between stage 2 and stage 4.
-- Every archived row has a `derived_from_claim_id`.
-- Every archived row whose claim no longer exists matches a human delete: a `suggestion_type='claim'` suppression row. Any unmatched row is investigated before the stage continues.
-
-**Tests:**
-- `npm test` passes with the deleted modules gone.
-- The grep test from stage 4 now also fails on any read of `profile_entries`.
-
-**Verify live:** a week of normal use with no `profile_entries_is_read_only` errors in the logs, before this stage.
-
-**Rollback:** rename the table back and restore its triggers; the rollback file holds their text. The code rollback is a revert of the stage 7 commit.
+**Shape: build and rehearse, then go live in one sitting, then test at once. No waiting periods anywhere.**
+
+| Part | What happens | Production changes? | Time |
+|---|---|---|---|
+| **A. Build and rehearse** | All code, migrations, rollback, tests, Godspeed changes. A full dress rehearsal against production inside a transaction that is rolled back. | None | the bulk of the work (about 5-7 days of building) |
+| **B. Go live** | One fixed sequence, run straight through: backup, schema, functions, frontend, data switch, clean-up. | All of it | about 1 hour |
+| **C. Test live** | Right after B, in the same sitting: database checks, assistant checks, a test note, the page walk-through, the Godspeed pull. | None (test data only) | about 1 hour |
+
+Part B starts only when every Part A check is green. Part C starts the minute B finishes. If C finds a problem, it is fixed in place or the single rollback (section 5.4) is run, in the same sitting.
+
+Why this is safe without staged holds:
+- **Nothing half-migrated ever runs.** The data switch (B5) is one transaction. It backfills, folds, re-points Godspeed and retires the old table together, and it checks its own counts. If a count is wrong, the transaction raises and nothing changes.
+- **No temporary mirror triggers.** The edge functions and the page are switched *before* the data switch, and the old table is renamed *inside* it. Nothing can write the old table after the backfill has read it, so no catch-up and no mirror are needed.
+- **It was rehearsed.** The exact B5 SQL runs against production data in Part A and is rolled back, so its counts are known before go-live.
+- **Scale.** 281 profile rows, 519 claims and 3 accounts (live counts, 2026-09-28). Every step takes seconds.
+
+### 5.1 Ground rules
+
+- **Migrations.** One file per change in `supabase/migrations/`, each with `supabase/rollback/<name>_rollback.sql`. They are applied through the Supabase management API and recorded by hand in `supabase_migrations.schema_migrations`. Never `supabase db push`.
+- **Edge functions** are deployed with a script that deploys the listed functions one after another and stops at the first failure.
+- **Frontend.** Pushing to `main` only rebuilds the preview. Part A step 1 writes down exactly how production is published, so B4 is one known action.
+- **Counts are assertions.** Every equality in B5 is checked inside the transaction (`IF … THEN RAISE EXCEPTION`), not read afterwards by eye.
+- **Approval.** Michael approves once, before Part B starts. Part B then runs without stopping for approval between steps.
+
+### 5.2 Part A: build and rehearse (no production changes)
+
+**A1. Baseline and inventory (read-only).**
+- Run the queries below and save the results to `docs/plans/one-fact-store-baseline.md`.
+- Dump the live trigger, function and cron definitions (R3, R5):
+  ```sql
+  SELECT tgrelid::regclass, tgname, pg_get_triggerdef(t.oid)
+    FROM pg_trigger t
+   WHERE NOT tgisinternal AND tgrelid IN ('public.profile_entries'::regclass,
+         'public.claims'::regclass,'public.contact_relationships'::regclass,'public.profile_categories'::regclass,
+         'public.contacts'::regclass);
+  SELECT p.proname, pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+   WHERE n.nspname='public' AND (p.proname LIKE 'profile%' OR p.proname LIKE 'world_%' OR p.proname LIKE 'claim%'
+         OR p.proname LIKE 'relationship%' OR p.proname IN ('merge_contacts_atomic','match_claims'));
+  SELECT jobid, jobname, schedule, command, active FROM cron.job;
+  ```
+- Write down how the production frontend is published, and the current deployed version of every edge function that Part B touches (for the rollback).
+- Baseline counts:
+  ```sql
+  -- B1 entries by subject and link state
+  SELECT contact_id IS NULL AS is_self, derived_from_claim_id IS NOT NULL AS linked, count(*)
+    FROM profile_entries GROUP BY 1,2;
+  -- B2 claims by subject, liveness and origin
+  SELECT subject_type, valid_to IS NULL AS live, origin, count(*) FROM claims GROUP BY 1,2,3;
+  -- B3 linked entries whose words differ from their claim
+  SELECT count(*) FROM profile_entries p JOIN claims c ON c.id = p.derived_from_claim_id
+   WHERE lower(btrim(p.value)) <> lower(btrim(c.value));
+  -- B4 entries shown as current but linked to a closed claim
+  SELECT count(*) FROM profile_entries p JOIN claims c ON c.id = p.derived_from_claim_id
+   WHERE c.valid_to IS NOT NULL;
+  -- B5 claims shown by more than one entry
+  SELECT count(*) FROM (SELECT derived_from_claim_id FROM profile_entries
+   WHERE derived_from_claim_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1) x;
+  -- B6 live claims shown by no entry, per subject type (these go to "To review", A3)
+  SELECT c.subject_type, count(*) FROM claims c
+   WHERE c.valid_to IS NULL AND NOT EXISTS (SELECT 1 FROM profile_entries p WHERE p.derived_from_claim_id = c.id)
+   GROUP BY 1;
+  -- B7 entries of hidden or sensitive contacts
+  SELECT count(*) FROM profile_entries p JOIN contacts ct ON ct.id = p.contact_id
+   WHERE ct.is_sensitive OR ct.ai_visibility <> 'visible';
+  -- B8 duplicate live values (96 groups on 2026-09-28; folded in B5)
+  SELECT count(*) FROM (SELECT user_id, subject_type, subject_id, attribute, lower(btrim(value))
+    FROM claims WHERE valid_to IS NULL GROUP BY 1,2,3,4,5 HAVING count(*) > 1) x;
+  -- B9 world_claims by arm, and pending review items by type
+  SELECT source_table, count(*) FROM world_claims GROUP BY 1;
+  SELECT type, status, count(*) FROM review_queue
+   WHERE status IN ('pending','pending_review','auto_applied_unreviewed') GROUP BY 1,2;
+  -- B10 relationships, entries in private sections, claims orphaned by deleted/merged contacts
+  SELECT count(*) FROM contact_relationships;
+  SELECT count(*) FROM profile_entries p JOIN profile_categories k ON k.id = p.category_id
+   WHERE k.visibility_scope = 'private';
+  SELECT count(*) FROM claims c WHERE c.subject_type = 'contact' AND NOT EXISTS
+    (SELECT 1 FROM contacts ct WHERE ct.id = c.subject_id AND ct.merged_into IS NULL);
+  -- B11 legacy rows the new quality guard would refuse (carried over under the migration flag)
+  SELECT count(*) FROM profile_entries
+   WHERE btrim(value) = '' OR lower(btrim(value)) IN ('none','n/a','unknown','-')
+      OR lower(btrim(value)) = lower(btrim(label));
+  -- B12 table owners (the data switch renames and alters them)
+  SELECT relname, pg_get_userbyid(relowner) FROM pg_class
+   WHERE relname IN ('profile_entries','claims') AND relnamespace = 'public'::regnamespace;
+  -- B13 the longest values (the unique index hashes them)
+  SELECT 'claims', max(octet_length(value)) FROM claims
+  UNION ALL SELECT 'profile_entries', max(octet_length(value)) FROM profile_entries;
+  -- B14 private-section and hidden-entity claims that match_claims returns today
+  SELECT count(*) FROM claims c JOIN profile_entries p ON p.derived_from_claim_id = c.id
+    JOIN profile_categories k ON k.id = p.category_id
+   WHERE k.visibility_scope = 'private' AND c.embedding IS NOT NULL;
+  SELECT count(*) FROM claims c JOIN entities e ON e.id = c.subject_id
+   WHERE c.subject_type = 'entity' AND (e.ai_visibility <> 'visible' OR e.is_sensitive);
+  -- B15 PostgREST row cap vs. what Godspeed will pull after go-live (R1)
+  SELECT (SELECT count(*) FROM claims) + (SELECT count(*) FROM contact_relationships) AS rows_after;
+  ```
+  Column names `review_queue.type` and `.status` are UNVERIFIED. The PostgREST `max_rows` setting is read from the project's API settings.
+
+**A2. Code** (one branch, one pull request):
+- `supabase/functions/_shared/fact-store.ts` (`writeFact`, section 3.5), with a client passed in, so human calls use the caller's JWT.
+- Every writer and reader in section 2.3, moved to `writeFact`, `profile_facts` and `agent_facts`. That covers the page (`useFacts`, the components, `useAiFootprint`, `RelationshipsSection`, `ReviewQueue`, `useAddClaim`), all edge functions and MCP tools, the merge SQL, and the query-persister buster set to `"account-v4"`.
+- `write_profile_entry` stays as an alias of `write_fact`, so a tab left open from before go-live can still add a fact.
+- The two TypeScript copies of the cardinality rules are removed (section 3.6).
+- `promote-profile-entries`, `_shared/promote-entries.ts`, `_shared/adopt-claims.ts` and `profile-audit` are deleted from the code.
+- R2 is fixed by this rewrite: the normalizer and `explodeBags` now write claims through `writeFact`. The old code that can lose rows is paused at the start of Part B and never runs again.
+
+**A3. Migrations** (each with a rollback file):
+- `…_fact_store_schema.sql` (applied in B2; additive and harmless to the old code):
+  - `claims.rank`, the `source_type` CHECK, and the `origin` CHECK `NOT VALID`;
+  - `fact_slots` with RLS;
+  - the views `profile_facts` and `agent_facts`;
+  - the claim guards (section 3.6), including the new exemptions for merges and subject deletes;
+  - `match_claims` with the `agent_facts` exclusions;
+  - `claims_follow_subject_delete`;
+  - the private-section delete guard on `profile_categories` (section 3.6).
+
+  None of these changes what the old code sees. `rank` defaults to `'normal'`, and the old code writes no preferred claims.
+- `…_fact_store_switch.sql` (applied in B5; one transaction). It is **generated** by `scripts/generate-fact-store-switch.ts`, which reads production read-only and uses the real `normalizeAttribute()` and `placeClaim()`. That makes the SQL-vs-TypeScript parity check unnecessary: there is only one implementation. The file is committed and reviewed like any migration. It does, in order:
+  1. `SET LOCAL menerio.fact_migration = 'on'`, and lock `profile_entries` and `claims` in exclusive mode.
+  2. **Staleness check.** If any entry or claim exists that the generator did not see, or if one of those rows has changed since, `RAISE`. Nothing is applied, and the file is regenerated, which takes seconds.
+  3. **Fold duplicate claims (B8).** Per group, keep the preferred or `user_manual` claim, else the earliest. Re-point entries to the survivor, then delete the others. No suppression row is written, because the migration flag is set. The deleted ids are listed; they are the only Godspeed removals from this step.
+  4. **Entries → claims:**
+     - *Linked, words equal* (the complement of B3): nothing to do.
+     - *Linked, words differ* (B3): the entry's words are what the page showed. Insert a new claim **with `id = entry.id`**, carrying the entry's words, origin and rank, `valid_from NULL`, and point the entry at it. The old claim stays; the two show as "two answers" (Q12). Nothing is overwritten.
+     - *Linked to a closed claim* (B4): leave the link. The row moves to history, and the report lists it.
+     - *Unlinked:* insert a claim **with `id = entry.id`**:
+       - `subject_type`/`subject_id` from `contact_id` (NULL → self);
+       - `attribute = normalizeAttribute(label)` (computed by the generator; a reserved `relationship…` attribute becomes `relationship-note`, and the label keeps its words);
+       - `value` verbatim, bags included;
+       - `valid_from NULL` (Q6), `created_at = entry.created_at`;
+       - `confidence 'likely'`, `cardinality` from `attribute_rules` else `'one'`;
+       - `origin`, `rank` and `evidence_quote` copied;
+       - `source_type='note'`/`source_id=linked_note_id` when linked to a note; else `'manual'` for `user_manual`; else `'ai'`.
+     - *Folded:* when an identical current value already exists for the same subject and attribute, no claim is inserted, and the entry points at the earliest existing claim. These are counted; they are Godspeed removals.
+     - Hidden or sensitive contacts are included; their claims are not embedded.
+  5. **Slots**, one per `(subject, attribute)` from its entries:
+     - `label` = the label of the preferred row, else the most frequent label;
+     - `category_slug` = that row's section slug;
+     - `is_pinned` = any pinned; `show_to_agent` = any;
+     - `cardinality` = NULL, unless the entries already hold two different current values for a single-valued attribute (those stay as "two answers").
+  6. **Unshown current claims (B6) go to "To review".** Each such subject gets a section `to-review` ("To review", `visibility_scope='private'`), and these claims are filed there. The owner sees them on the page and either moves them to a real section or removes them ("Was wrong"). Until then no assistant, search or Godspeed sees them. This is on purpose: many may be facts deleted before the 09-28 fix, when deleting a row did not end its claim, and they must not come back silently.
+  7. `CREATE UNIQUE INDEX claims_one_live_value` (section 3.2).
+  8. `world_claims` becomes its final form (section 3.4).
+  9. Retire the old table:
+     - drop every trigger on `profile_entries`, including the bridge triggers;
+     - drop the foreign key `derived_from_claim_id → claims` (the column stays as the permanent lookup);
+     - `ALTER TABLE profile_entries RENAME TO profile_entries_archive`;
+     - revoke all on it from `authenticated` and `anon`.
+  10. Attach `claim_require_origin`, and replace `merge_contacts_atomic` with the version that moves claims and slots and no longer touches entries (it lives here, not in the schema migration, so the old table is never half-handled by it).
+  11. Review queue: rewrite `target_entity_id` from entry ids to claim ids, and set pending `normalize_profile_entry` items to `superseded`.
+  12. **Assertions** (each one `RAISE`s on failure, which undoes the whole transaction):
+      - every archived entry has a `derived_from_claim_id` that exists in `claims`, or that is in the folded list;
+      - `claims_after = claims_before − folded_duplicates + (unlinked − folded_entries) + B3`;
+      - for every subject, the old page's current `(label, lower(value))` set equals the current `profile_facts` rows outside "To review", by `EXCEPT` both ways. The only allowed differences are the B4 rows;
+      - every non-entity claim has a slot;
+      - `world_claims` has no `profile_entry` rows;
+      - `count(profile_facts) = count(claims)` per user;
+      - pending review items per type before = after + superseded.
+- Rollback files for both migrations, plus `supabase/rollback/fact_store_rollback.sql` (section 5.4).
+
+**A4. Godspeed** (section 6). The kit's `world-pull.py` pages (R1), and the `render_claim`, `category:` and `rank:` changes are made. Michael updates the kit on his machine. That is a `git pull`, done during Part A, so no one waits for it later.
+
+**A5. Tests** (all must pass before Part B):
+- **SQL harness** `scripts/test-fact-store.mjs` + `scripts/bootstrap-fact-store-test.sql` (modelled on `scripts/test-merge-review.mjs`, on a disposable local database). It covers:
+  - guards: a machine update of a preferred claim keeps its value and `valid_to`; a machine delete of a preferred claim is cancelled; a human update passes; a human that only ends a machine claim does not make it preferred; the quality guard raises; a human delete writes a suppression row and a machine delete does not;
+  - the unique live index allows the same value once live and again as history, and a 5 KB value can be inserted;
+  - views: `profile_facts` returns exactly one row per claim (with and without a section row); `agent_facts` hides private, hidden and sensitive rows; `match_claims` never returns a private-section claim or a hidden entity's claim; a future-dated value is not current yet and raises no `has_conflict`; "Both are true" on the slot alone clears `has_conflict`;
+  - deleting a contact (as a signed-in user and as the service role) deletes its claims and slots, including preferred ones, and writes no suppression rows;
+  - merge moves claims and slots, and a merge into self moves claims to self;
+  - the new exemptions: a merge that folds a duplicate writes no suppression; deleting a private section that still has facts is refused;
+  - backfill cases, each ending with exactly one link: linked and equal, linked and different, linked to a closed claim, unlinked, folded, hidden contact, self, reserved label, bag value, legacy AI row without a quote, "none"-valued legacy row; plus a duplicate claim group and an unshown self claim that lands in "To review";
+  - the switch migration's assertions firing on a corrupted fixture;
+  - the staleness check firing when a row is added after generation;
+  - the full rollback: apply both migrations, add a fact through the new path, roll back, and find that fact as an entry.
+- **Vitest:**
+  - `fact-store.test.ts`: supersede closes a non-preferred single value; a machine never closes a preferred value (a conflict instead); a human replaces their own preferred value (JWT client); the same value again is a no-op; many-valued attributes add; a suppressed value is refused; bags are split; the origin and quote rules hold;
+  - every human-triggered action (`write_fact`, accept, bulk, `review-queue-bulk` keep and revert) writes with the caller's JWT: a human replaces their own preferred value, and a human revert writes a suppression (R4d);
+  - the formatter tests for MCP and chats (each fact once; hidden, sensitive, private and "To review" rows never print; every service-role query has a `user_id` filter);
+  - `useFacts.test.tsx`;
+  - updated: `useContactProfile.test.tsx`, `CompactCategorySection.test.tsx`, `useAiFootprint.test.ts`, `normalization-callers.test.ts`, `profile-normalization-spend.test.ts`, `profile-insert-suppression.test.ts`, `people-vault.test.ts`, `world-records.test.ts`, `mc-visibility.test.ts`;
+  - `add_claim` refuses a fact without a quote.
+- **Grep test** `scripts/check-no-profile-entry-writes.mjs` in `npm test`: no code outside migrations and rollbacks reads or writes `profile_entries`.
+- **Godspeed:** the engine's `test_world_pull.py` cases (section 6) and a kit paging test.
+- `npm test`, `npm run build`, lint and type-check.
+
+**A6. Dress rehearsal on production (changes nothing).**
+- Generate the switch file, then run `BEGIN; <schema migration>; <switch migration>; <count queries>; ROLLBACK;` through the management API. This proves that the assertions pass on the real data, and it prints the real numbers: folded duplicates, "To review" claims per subject, and the Godspeed removal list.
+- The rehearsal holds locks for a few seconds and leaves nothing behind. A read-only query afterwards confirms `fact_slots` does not exist.
+- **The rehearsal numbers go to Michael with the go-live request.** In particular: how many facts land in "To review", and which Godspeed files will be removed. His one approval covers Part B.
+
+### 5.3 Part B: go live (one sitting, about one hour, no pauses)
+
+Michael should not edit profiles during Part B; the page may show odd states for a few minutes between B3 and B5.
+
+| Step | Action | Check before the next step |
+|---|---|---|
+| B1 | **Prepare.** Pause crons 4, 11, 12, 15 and 16 (`cron.alter_job(id, active := false)`). Michael pauses the hourly Godspeed pull on his machine. Snapshot `profile_entries`, `profile_categories`, `claims`, `review_queue` and `ai_suggestion_suppressions` into schema `fact_backup`, and export the same rows as CSV to the scratchpad. | Snapshot row counts equal the live counts. |
+| B2 | Apply `…_fact_store_schema.sql`. | Old page and functions still work: one read of a profile through the old MCP tool returns the same output as before. |
+| B3 | Deploy every changed edge function (script, in dependency order: `_shared` users first, `menerio-mcp` last). Delete the `promote-profile-entries` and `profile-audit` functions. | Every deploy succeeded; if one fails, stop and roll back (5.4). |
+| B4 | Publish the production frontend. | The new bundle is served (its asset hash changed). |
+| B5 | Regenerate the switch file (seconds), then apply `…_fact_store_switch.sql`. | The transaction committed, so every assertion held. If it raised, nothing changed: regenerate and retry once, else roll back. |
+| B6 | **Restart.** Resume crons 4, 11, 12 and 15. Unschedule 16. Add the `backfill-claim-embeddings` cron (every 10 minutes) and run it once now. `VALIDATE CONSTRAINT claims_origin_known` (0 violations was shown in A6). Update `docs/CRON_JOBS.md`. | The embedding run finished without errors. |
+
+### 5.4 Rollback (one script, usable at any point in Part B or C)
+
+`supabase/rollback/fact_store_rollback.sql`, then the function and frontend redeploy:
+
+1. If B5 committed:
+   - copy every claim created or changed since B1 back into the archive as entries (section from its slot, pin, origin, quote), so nothing added after go-live is lost;
+   - rename `profile_entries_archive` back to `profile_entries`;
+   - restore its grants, triggers and foreign key (the rollback file holds their text);
+   - restore the folded duplicate claims from `fact_backup`;
+   - restore `world_claims` to the `20260901098000` text, and `merge_contacts_atomic` to its previous text.
+2. Roll back the schema migration: drop the views, `fact_slots` and the claim guards; restore `match_claims`.
+3. Redeploy the function versions recorded in A1 (including `promote-profile-entries`), and republish the previous frontend.
+4. Keep crons 4 and 15 paused, because R2 is only fixed in the new code. Resume the others.
+
+**Check:** for every subject, the current `(label, value)` set equals `fact_backup.profile_entries` plus the facts added since B1, by `EXCEPT` both ways. The next Godspeed pull restores the old files (same ids).
+
+### 5.5 Part C: test live (immediately after B6, same sitting)
+
+In this order. Each failure is either fixed on the spot (a small code fix, redeployed) or triggers 5.4.
+
+1. **Database invariants** (read-only):
+   - no live duplicate values;
+   - `count(profile_facts) = count(claims)` per user;
+   - `agent_facts` ⊆ `profile_facts`;
+   - `agent_facts` holds no private, "To review", hidden or sensitive rows;
+   - no one can write `profile_entries_archive`;
+   - no preferred claim changed in B5 apart from the planned folding.
+2. **Assistants**, through the Menerio MCP tools in the session:
+   - `get_user_profile`;
+   - `get_contact_profile` for three contacts: one normal, one with a private section, one hidden. Expected: each fact once, dated where it has a date, nothing private or hidden;
+   - five real `search_brain` questions: answers still include the notes they did before (R4e);
+   - `add_claim` on the test account: refused without a quote; accepted with one; the same value again is a no-op.
+3. **Note pipeline:** process one test note on the test account. Its facts arrive as claims with `origin='ai_note'`, a quote and a slot.
+4. **The page**, walked through by Michael (about 10 minutes). On a test contact and on his own profile: add, "It changed", "Fix a mistake", "No longer true", "Was wrong", pin, move to another section, and open "History". Then open "To review" and move one fact out of it. After each action, Claude checks the resulting `claims` / `fact_slots` rows.
+5. **Merge:** merge two test contacts that share a fact. One fact remains, and no suppression row was written.
+6. **Godspeed:**
+   - Michael runs the kit pull with `--dry-run`. The removals must equal the list from A6: folded duplicates, private rows, "To review" rows and hidden subjects;
+   - then `--apply`, and `git diff --stat world/claims`;
+   - then he turns the hourly pull back on.
+7. **Logs:** the edge function logs since B1 show no new errors, in particular none mentioning `profile_entries`.
+8. **Record** every count and result in `docs/plans/one-fact-store-baseline.md`, and merge the pull request.
+
+The archive table stays, read-only. Dropping it is optional housekeeping that nothing waits for (Q10), after a CSV export.
 
 ### Effort (rough)
 
-| Stage | Effort |
+| Part | Effort |
 |---|---|
-| 0 | 1 day |
-| 1 | 1 day |
-| 2 | 1-2 days (the verification queries are most of it) |
-| 3 | 1-2 days |
-| 4 | 4-5 days of work (about 30 call sites, plus the page), shipped as 4a, 4b (one function per deploy) and 4c |
-| 5 | 1 day |
-| 6 | half a day + Godspeed |
-| 7 | half a day |
-
-Total: roughly two to three weeks of focused work.
+| A: build, tests and rehearsal | 5-7 days of work (about 30 call sites, the page, two migrations, the generator, the Godspeed changes) |
+| B: go live | about 1 hour |
+| C: test live | about 1 hour |
 
 ---
 
@@ -973,13 +792,13 @@ Total: roughly two to three weeks of focused work.
 
 Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mounted as `dev/godspeed-engine/` and gitignored in `godspeed`), the kit (`teach-it-once-kit`, **public**), and `godspeed` itself.
 
-1. **Which pull to change.** The kit's `tools/world-pull.py` is what runs every hour (VERIFIED, section 2.3). Change it, or make the kit call the engine's `scripts/world_pull.py`, which is better tested (68 tests, reported). Recommended: one implementation. The kit runner should call the engine version when it is present, and the kit copy should be brought up to it (paging, empty-answer guard, atomic writes, duplicate ranking). Until that is done, stage 2 must not ship (R1): stage 2 is where Godspeed first sees the change.
+1. **Which pull to change.** The kit's `tools/world-pull.py` is what runs every hour (VERIFIED, section 2.3). Change it, or make the kit call the engine's `scripts/world_pull.py`, which is better tested (68 tests, reported). Recommended: one implementation. The kit runner should call the engine version when it is present, and the kit copy should be brought up to it (paging, empty-answer guard, atomic writes, duplicate ranking). This is done in Part A; go-live does not start without it (R1).
 2. **`world_pull.py` / `world-pull.py`:**
    - `render_claim`: remove the "a profile entry has no dates at all" special case (engine ~178-181). Undated claims still render as `--undated` because `valid_from` is NULL; nothing else changes.
    - Write `category:` when present (new line, optional). It is display filing, useful for `world/INDEX.md` grouping.
    - Write `rank:` for claims as sent; today claims always arrive `normal`.
-   - Keep the `still_carried` removal-notice logic until a month after stage 4. Its reason (blob claims re-minted under new ids by the bag split) disappears with stage 5, but it is harmless.
-   - Ids stay plain UUIDs. Stage 2 gives every migrated entry a claim with the **same id**, so the file matched by `menerio_id` is rewritten in place and no file is deleted. Whether the pull keeps the old path when `valid_from` stays NULL is UNVERIFIED line-level: it matches existing files by `menerio_id`, and the filename is only computed for new files. Confirm with the dry run in stage 6.
+   - Keep the `still_carried` removal-notice logic for now. Its reason (blob claims re-minted under new ids by the bag split) disappears at go-live, but it is harmless.
+   - Ids stay plain UUIDs. The switch gives every migrated entry a claim with the **same id**, so the file matched by `menerio_id` is rewritten in place and no file is deleted. Whether the pull keeps the old path when `valid_from` stays NULL is UNVERIFIED line-level: it matches existing files by `menerio_id`, and the filename is only computed for new files. Confirmed by the dry run in Part C.
    - No change to `origin: godspeed` handling: the pull never touches those files.
 3. **World views** (Menerio side): section 3.4. `world_entities` and `world_events` are unchanged.
 4. **`world/menerio-bridge.md`** (in `godspeed`) — replace the "Who owns a file" paragraph about protection with:
@@ -1000,37 +819,36 @@ Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mo
   - The kit's `world-pull.py` requests `?limit=2000` once (VERIFIED). If PostgREST's `max_rows` is below that (Supabase's default is 1000; this project's setting is UNVERIFIED), any kind above the cap is silently truncated.
   - The pull then deletes the missing files as "removed in Menerio". The only protection is the mass-removal guard, and whether the kit has the engine's guard is UNVERIFIED.
   - Claims history grows under this plan (every change keeps its old row), so the cap will be reached sooner.
-  - Mitigation: stage 0 step 4, before anything else.
+  - Mitigation: Part A4, and B15 compares the post-go-live row count with the cap.
 - **R2: the normalizer can lose facts today. HIGH, and present today.** VERIFIED by reading:
   - `_shared/profile-normalization.ts` `applyNormalization` deletes non-survivors first (~1059-1069). When there is no survivor, it inserts a canonical row **without `origin`** (~1090-1101). The column default is `'unverified'` (`20260809202823:39`), and since `20260809204443` a new `unverified` row is refused.
   - Its `restoreDeleted` upsert (~1042-1055) also omits `origin`, so it is refused too. The deleted rows are gone, and their claims are only ended.
   - `rollbackNormalization` (~1189-1225) and `explodeBags` have the same shape (reported).
-  - Mitigation: stage 0 step 3. Search the function logs for `canonical insert failed` and `restore after failed apply` to learn whether this has already happened. If it has, `fact_backup` cannot help, because those rows predate it; ask Supabase for a point-in-time restore window (UNVERIFIED which plan tier this project is on).
-- **R3: a production schema that differs from the migrations.** Live-only functions and cron bodies exist (reported from `20260923190000` and `docs/CRON_JOBS.md`). Stage 0 step 1 captures them; every later migration is written against that dump, not against the repo alone.
-- **R4: rollback of stage 4 is the messy one.**
-  - Facts written during the window exist only as claims.
-  - Mitigation: the rollback re-uses the adoption direction that already exists (plus one SQL insert for self), and stage 4 is held for 48 hours.
-  - Pins and moves made in the window are lost on rollback; they are listed from `fact_slots.updated_at`.
+  - Mitigation: the rewrite replaces this code, and crons 4 and 15 are paused from B1 on (and stay paused on a rollback). Search the function logs for `canonical insert failed` and `restore after failed apply` to learn whether this has already happened. If it has, `fact_backup` cannot help, because those rows predate it; ask Supabase for a point-in-time restore window (UNVERIFIED which plan tier this project is on).
+- **R3: a production schema that differs from the migrations.** Live-only functions and cron bodies exist (reported from `20260923190000` and `docs/CRON_JOBS.md`). Part A1 captures them; every migration is written against that dump, not against the repo alone.
+- **R4: rollback after go-live.**
+  - Facts written after go-live exist only as claims. The rollback script copies them back into the entries before renaming the table back (section 5.4), and the SQL harness rehearses exactly that.
+  - Pins and moves made after go-live are carried back, since the copy reads the slot.
 - **R4b: concurrent writes.**
   - Two writers adding different values to a single-valued fact at the same moment both land as current, which shows as "two answers": visible, not lost.
   - The same value twice hits `claims_one_live_value`; `writeFact` catches 23505 and returns the existing claim.
-- **R4c: stage 2 locks `profile_entries`** (`DISABLE TRIGGER` takes an exclusive lock for the transaction).
-  - At a few hundred rows this is seconds. Run it with the note crons paused.
-  - The role applying migrations must own the table (B12).
+- **R4c: the switch migration locks `profile_entries` and `claims`** for the length of one transaction.
+  - At a few hundred rows this is seconds. The profile crons are paused from B1.
+  - The role applying migrations must own the tables (B12; `postgres` on 2026-09-28).
 - **R4e: search results change shape.**
   - Every profile fact becomes a claim, so `search_brain` (which lists claims first, on page 1) and `get_claims` return several hundred more rows than today.
-  - Check after stage 2 with five real questions that answers still include the notes they did before.
+  - Checked in Part C with five real questions that answers still include the notes they did before.
   - If claims crowd them out, cap the claim share of page 1 in `searchClaims`.
 - **R4d: the words guard depends on the caller's identity** (section 3.5).
   - If any human path ends up writing through the service role, that human can no longer replace their own typed value.
-  - The stage 4 test "a human replaces their own preferred value" guards this. Every new human write path needs the same test.
-- **R5: the trigger inventory in 2.2** comes from reading migrations in order. Confirm it against the stage 0 dump before stage 1.
-- **R6: old browser bundles.** An open tab or installed PWA from before stage 4 writes `profile_entries` directly. The read-only trigger makes that fail with a readable message instead of losing the fact silently. The user retypes it after a reload.
+  - The Part A test "a human replaces their own preferred value" guards this. Every new human write path needs the same test.
+- **R5: the trigger inventory in 2.2** comes from reading migrations in order. Confirm it against the A1 dump before writing the migrations.
+- **R6: old browser bundles.** An open tab or installed PWA from before go-live writes `profile_entries` directly. The renamed table makes that fail loudly instead of losing the fact silently. The user retypes it after a reload.
 - **R7: visibility regressions.** Moving hidden contacts' facts into claims widens the table that search reads. Mitigations:
   - `match_claims` already filters (VERIFIED);
   - embeddings stay NULL for them (section 3.6);
   - `agent_facts` is the only reader for assistants;
-  - the stage 3 formatter test asserts hidden rows never print.
+  - the formatter test asserts hidden rows never print.
 - **R8: existing gaps this plan closes on the way.**
   - `get_contact_profile` returns no claims when a contact has no non-private sections;
   - `loadPersonProfile` / `conversation-chat` ignore sensitivity;
@@ -1038,7 +856,7 @@ Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mo
   - private sections reach the Godspeed git repo today (VERIFIED: the view has no scope filter);
   - `useAddClaim` writes claims with no cardinality, origin or embedding.
 
-  These are reported, not all read line-level; each is fixed in the stage that rewrites that reader.
+  These are reported, not all read line-level; each is fixed by the rewrite of that reader.
 - **R9: out of scope, noticed.**
   - `get_user_profile` ignores relationships stored with self as the source (reported);
   - the rejection ledger is only written by the UI delete, not by review-queue remove or block (reported);
@@ -1065,7 +883,7 @@ Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mo
 | Q7 | `add_claim` refuses a fact without a verbatim quote. | "Automated facts need a verbatim evidence quote." |
 | Q8 | A machine never ends or changes a fact he typed. A different machine value shows as "two answers". | `world_preferred_wins` and `world/menerio-bridge.md`. |
 | Q9 | The duplicate-audit job is retired; the nightly lint stays, report-only. | The unique live-value index makes exact duplicates impossible. |
-| Q10 | The archived table is kept 60 days, exported to CSV, then dropped. | "No step may lose a fact": the claims hold every fact, and the archive is a safety copy. |
+| Q10 | The archived table is kept read-only; dropping it later (after a CSV export) is optional and nothing waits for it. | "No step may lose a fact": the claims hold every fact, and the archive is a safety copy. |
 | Q11 | Text in "Relationships & Family" stays as facts; nothing becomes a link to another person automatically. | Linking a name to a contact is a judgment. |
 | Q12 | Where a profile row and its claim disagree today, both are kept as "two answers" for him to settle. | "Never rewrite words a human typed." |
 
@@ -1156,16 +974,33 @@ I re-read the plan against the code, looking for over-complication and for failu
 
 ---
 
+### Sixth review (2026-09-28): one go-live, no waiting, and the first live numbers
+
+Stage numbers in the second to fifth reviews above refer to the earlier eight-stage layout, which section 5 replaces.
+
+**First read-only numbers from production** (the earlier reviews had none): 281 profile rows (104 self), 519 claims (505 current: 301 self, 204 contact), 3 accounts, and **96 groups of duplicate current values** in `claims` (B8).
+
+**Made simpler**
+
+1. **One go-live instead of eight stages with holds.** Michael asked for no waiting periods. Everything is built, tested and rehearsed first (Part A); go-live is one fixed sequence of about an hour (Part B), tested immediately (Part C). The 48-hour holds, the week of observation and the one-function-per-deploy rollout are gone.
+2. **No mirror triggers.** They were a second, SQL implementation of the add path, which section 3.5 forbids. They are unnecessary once the functions and the page switch *before* the data switch and the old table is renamed *inside* it.
+3. **The backfill is generated by TypeScript**, using the real `normalizeAttribute()` and `placeClaim()`, so the SQL-vs-TypeScript parity check disappears. A staleness check makes the generated file refuse to run on data it did not see.
+4. **Freeze and retire are one step.** Renaming the table makes stale writers fail loudly, so no read-only trigger is needed. `world_claims` is redefined once, not twice.
+5. **Counts are assertions inside the transaction**, so a wrong count undoes the switch instead of calling for a manual rollback.
+6. **R2 is fixed by the rewrite**, not by a separate patch to code that is replaced anyway; the crons that run it are paused from B1.
+
+**Fixed: things that would have gone wrong**
+
+7. **The unique live-value index could not have been created**: B8 is 96, not 0, and no step folded existing duplicate claims. The switch now folds them first (keep preferred or `user_manual`, else earliest).
+8. **About 200 unshown facts would have appeared on Michael's own profile at once.** Some may be facts he deleted before the 09-28 fix. They now land in a private "To review" section, which hides them from assistants, search and Godspeed until he files them.
+9. **Merges would have written false "never suggest again" rows** (section 3.6).
+10. **Deleting a private section would have exposed its facts** (section 3.6).
+
 ## 9. Running this plan
 
-- **One stage per session.** Each stage gets its own fresh session, started from this file. Stage N+1 begins only after stage N is verified live and its counts are recorded in `docs/plans/one-fact-store-baseline.md`.
+- **Sessions.** Part A can take one or several sessions; each continues from this file and the implementation branch, and none of them waits for anything in production. Parts B and C run in **one** session, back to back, with Michael available for about two hours: one approval before B, pausing and resuming the Godspeed pull on his machine, and the 10-minute page walk-through in C.
 - **Credentials.**
-  - Applying migrations and deploying functions needs the Supabase management token and the project ref (`tjeapelvjlmbxafsmjef`). The cloud sessions that wrote and reviewed this plan had no token, and their network policy blocked `api.supabase.com`.
-  - For a cloud session: the environment carries `SUPABASE_ACCESS_TOKEN` as an environment variable, and its network access is **Custom** with `api.supabase.com` and `tjeapelvjlmbxafsmjef.supabase.co` allowed (plus the default package-manager list). Only sessions started after that change see it. A separate token for this work, deleted afterwards, is preferred.
-  - Otherwise Michael applies each reviewed migration himself.
-  - Stage 0's Godspeed half needs push access to the kit repository (public) and to `godspeed-engine`.
-- **Every stage ends the same way:**
-  - a pull request with the code, the migration, the rollback file and the tests;
-  - the live counts from the stage section, pasted into the pull request;
-  - nothing merged or applied until those counts are recorded.
-
+  - The cloud environment carries `SUPABASE_ACCESS_TOKEN`, and its network allows `api.supabase.com` and `tjeapelvjlmbxafsmjef.supabase.co` (confirmed working on 2026-09-28). Only sessions started after that change see it.
+  - Claude Code's auto mode blocks production reads and writes by default. For Part A1/A6 and Parts B and C, Michael either approves each production call when asked or adds a permission rule for the management API calls.
+  - Part A4 needs push access to the kit repository (public) and to `godspeed-engine`.
+- **One pull request** holds all code, both migrations, the generator, the rollback and the tests. It is merged at the end of Part C, with the live results from `docs/plans/one-fact-store-baseline.md` pasted into it.
