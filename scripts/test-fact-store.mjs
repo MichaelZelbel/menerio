@@ -487,6 +487,41 @@ await test('assertion: a private entry that would become public stops the switch
   await x.end();
 });
 
+await test('unshown rule: a live value the page shows only as history is kept, not dropped as "already shown"', async () => {
+  const x = await prepared('fs_history_value');
+  // Alex was a baker until 2023 (entry b05 shows that closed claim) and is one again.
+  await x.query(`INSERT INTO claims (id, user_id, subject_type, subject_id, attribute, value, valid_from, origin, evidence_quote, source_type)
+                 VALUES ($1,$2,'contact',$3,'job','Baker','2025-01-01','ai_note','Alex went back to baking this year.','ai')`, [c(90), U, A]);
+  await applyTx(x, SQL.schema);
+  await runSwitch(x);
+  assert.equal(await num(x, `SELECT count(*) FROM claims WHERE id=$1 AND valid_to IS NULL`, [c(90)]), 1);
+  assert.equal(await num(x, `SELECT count(*) FROM ai_suggestion_suppressions WHERE target_entity_id=$1`, [c(90)]), 0);
+  await x.end();
+});
+
+await test('rollback after B6 (jobs 4, 15, 16 deleted, embedding job added) succeeds', async () => {
+  const x = await prepared('fs_rollback_after_b6');
+  // pg_cron's behaviour, checked against pg_cron 1.6: alter_job on a deleted job raises.
+  // The local database has a cron.job table but no pg_cron functions.
+  await x.query(`INSERT INTO cron.job (jobid, jobname, active) VALUES (4,'n',false),(9,'g',false),(11,'l',false),(12,'r',false),(15,'b',false),(16,'a',false),(18,'d',false);
+    CREATE FUNCTION cron.alter_job(job_id bigint, schedule text DEFAULT NULL, command text DEFAULT NULL, database text DEFAULT NULL,
+                                   username text DEFAULT NULL, active boolean DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $f$
+    BEGIN
+      UPDATE cron.job SET active = coalesce(alter_job.active, cron.job.active) WHERE jobid = job_id;
+      IF NOT FOUND THEN RAISE EXCEPTION 'Job % does not exist or you don''t own it', job_id; END IF;
+    END $f$;
+    CREATE FUNCTION cron.unschedule(job_id bigint) RETURNS boolean LANGUAGE sql AS $f$ DELETE FROM cron.job WHERE jobid = job_id RETURNING true $f$;`);
+  await applyTx(x, SQL.backup);
+  await applyTx(x, SQL.schema);
+  await runSwitch(x);
+  await x.query(`DELETE FROM cron.job WHERE jobid IN (4, 15, 16); INSERT INTO cron.job (jobid, jobname, active) VALUES (20, 'backfill-claim-embeddings', true)`);
+  await applyTx(x, SQL.rollback);
+  assert.deepEqual((await x.query(`SELECT jobid::int, active FROM cron.job ORDER BY jobid`)).rows,
+    [{ jobid: 9, active: true }, { jobid: 11, active: true }, { jobid: 12, active: true }, { jobid: 18, active: true }]);
+  assert.equal(await val(x, `SELECT to_regclass('public.profile_entries')`), 'profile_entries');
+  await x.end();
+});
+
 await admin.end();
 const failed = results.filter((r) => r[1] !== 'ok');
 for (const r of results) console.log(`${r[1] === 'ok' ? 'ok  ' : 'FAIL'}  ${r[0]}${r[2] ? `\n      ${r[2]}` : ''}`);

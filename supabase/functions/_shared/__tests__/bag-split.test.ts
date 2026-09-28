@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planBagSplit } from "../bag-split.ts";
+import { loadBagCandidates, planBagSplit } from "../bag-split.ts";
+import { factDb } from "./fact-db.ts";
 
 const bag = (over = {}) => ({ attribute: "language", value: "German, English, French", origin: "unverified", rank: "normal", label: "Language", category_slug: "identity", ...over });
 
@@ -18,5 +19,20 @@ describe("planBagSplit", () => {
   });
   it("keeps one fact that only looks like a list", () => {
     expect(planBagSplit(bag({ attribute: "current-city", label: "Current city", category_slug: "location", value: "São Paulo, Brazil" })).kind).not.toBe("split");
+  });
+  it("leaves a bag in a private section alone, so no piece is filed where assistants see it", () => {
+    expect(planBagSplit(bag({ visibility_scope: "private", label: "Contact", category_slug: "vault", value: "anna@example.invalid, +49 30 1234567" })))
+      .toEqual({ kind: "keep_private" });
+  });
+});
+
+describe("loadBagCandidates", () => {
+  it("finds live values with a comma or a semicolon, once each, without an or-filter", async () => {
+    const f = (claim_id: string, value: string, valid_to: string | null = null) =>
+      ({ claim_id, user_id: "u1", subject_type: "self" as const, subject_id: null, attribute: "language", value, valid_to });
+    const db = factDb({ facts: [f("a", "German, English"), f("b", "Tea; coffee"), f("c", "a, b; c"), f("d", "Solo"), f("e", "Old, list", "2020-01-01")] });
+    const rows = await loadBagCandidates(db);
+    expect(rows.map((r) => r.claim_id)).toEqual(["a", "b", "c"]);
+    expect(db.log.some((q) => q.filters.some((x) => x.startsWith("or:")))).toBe(false);
   });
 });

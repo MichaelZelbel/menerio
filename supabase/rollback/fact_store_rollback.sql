@@ -166,13 +166,19 @@ END $$;
 DROP SCHEMA IF EXISTS fact_retired;
 
 -- 7. Resume the jobs paused in B1 (on production only; 4 and 15 stay paused).
+-- Only jobs that still exist: cron.alter_job raises on a deleted job, which
+-- would undo this whole rollback. The embedding job added in B6 goes, since
+-- the previous backfill-claim-embeddings cannot serve it.
 DO $$
 DECLARE
-  j int;
+  j bigint;
 BEGIN
   IF to_regprocedure('cron.alter_job(bigint,text,text,text,text,boolean)') IS NOT NULL THEN
-    FOREACH j IN ARRAY ARRAY[9, 11, 12, 16, 18] LOOP
+    FOR j IN SELECT jobid FROM cron.job WHERE jobid = ANY (ARRAY[9, 11, 12, 16, 18]) ORDER BY jobid LOOP
       PERFORM cron.alter_job(j, active := true);
+    END LOOP;
+    FOR j IN SELECT jobid FROM cron.job WHERE jobname = 'backfill-claim-embeddings' LOOP
+      PERFORM cron.unschedule(j);
     END LOOP;
   END IF;
 END $$;

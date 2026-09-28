@@ -42,6 +42,15 @@ export interface AiFootprint {
   }>;
 }
 
+/**
+ * The facts a note's AI processing produced. A fact the user typed, or corrected
+ * since (rank 'preferred'), is theirs even when it cites the note, so removing
+ * the note's footprint must not delete it.
+ */
+export function machineFootprintRows<T extends { source_type?: string | null; origin?: string | null; rank?: string | null }>(rows: T[]): T[] {
+  return rows.filter((r) => r.source_type === "note" && r.rank !== "preferred" && r.origin !== "user_manual");
+}
+
 export async function fetchAiFootprint(noteId: string): Promise<AiFootprint> {
   const id = noteId;
   const [wikiRes, factRes, connSrcRes, connTgtRes] = await Promise.all([
@@ -51,7 +60,7 @@ export async function fetchAiFootprint(noteId: string): Promise<AiFootprint> {
       .eq("note_id", id),
     (supabase as any)
       .from("profile_facts")
-      .select("claim_id, subject_type, subject_id, attribute, value, label, category_slug, source_type")
+      .select("claim_id, subject_type, subject_id, attribute, value, label, category_slug, source_type, origin, rank")
       .eq("source_id", id),
     (supabase as any)
       .from("note_connections")
@@ -77,7 +86,7 @@ export async function fetchAiFootprint(noteId: string): Promise<AiFootprint> {
       sourceLinkId: r.id,
     }));
 
-  const factRows = ((factRes.data ?? []) as any[]).filter((r) => r.source_type === "note");
+  const factRows = machineFootprintRows((factRes.data ?? []) as any[]);
   const names = await subjectNames(factRows);
   const profileEntries: FootprintFact[] = factRows.map((r) => ({
     id: r.claim_id,

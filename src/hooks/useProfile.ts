@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { deleteProfileSection } from "@/lib/profile-section-delete";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 
@@ -148,8 +149,7 @@ export function useProfile() {
 
   const deleteCategory = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("profile_categories").delete().eq("id", id);
-      if (error) throw error;
+      await deleteProfileSection(supabase, id);
     },
     onSuccess: () => {
       invalidateProfile(qc, "profile-categories");

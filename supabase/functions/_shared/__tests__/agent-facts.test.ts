@@ -434,10 +434,20 @@ describe("add_claim", () => {
 
   it("an ambiguous entity name is refused with the candidates", async () => {
     const d = db();
+    d.tables.entities.push({ id: "e-acme-labs", user_id: ME, name: "Acme Labs", aliases: [], ai_visibility: "visible", is_sensitive: false });
     const out = await resolveEntityByName(d, ME, "acm");
     expect("error" in out && out.error).toMatch(/more than one entity/);
     const exact = await resolveEntityByName(d, ME, "acme corp");
     expect(exact).toEqual({ entity: { id: ACME, name: "Acme" } });
     expectEveryQueryNamesItsUser(d);
+  });
+
+  it("a hidden or sensitive entity is never a candidate, never named", async () => {
+    const d = db();
+    const partial = await resolveEntityByName(d, ME, "acm");
+    expect(partial).toEqual({ entity: { id: ACME, name: "Acme" } });
+    expect(JSON.stringify(partial)).not.toContain("Clinic");
+    expect(await resolveEntityByName(d, ME, "hidden thing")).toMatchObject({ error: expect.stringMatching(/No entity found/) });
+    expect(await resolveEntityByName(d, ME, "acme clinic")).toMatchObject({ error: expect.stringMatching(/No entity found/) });
   });
 });

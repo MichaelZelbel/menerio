@@ -230,9 +230,11 @@ SELECT c.id,
          WHEN lower(btrim(c.value)) IN ('', 'none', 'n/a', 'na', 'unknown', 'unspecified', '-', '—', 'null')
            OR lower(btrim(c.value)) ~ '^(none|n/?a|unknown|unspecified)\s*[.!]?$'
            OR lower(btrim(c.value)) IN (lower(btrim(c.attribute)), replace(lower(btrim(c.attribute)), '-', ' ')) THEN 'placeholder'
+         -- Shown as current: an entry that shows a closed claim shows history,
+         -- and the live copy of that value is the only current one.
          WHEN EXISTS (SELECT 1 FROM public.profile_entries p JOIN public.claims s ON s.id = p.derived_from_claim_id
                        WHERE s.user_id = c.user_id AND s.subject_type = c.subject_type
-                         AND s.subject_id IS NOT DISTINCT FROM c.subject_id
+                         AND s.subject_id IS NOT DISTINCT FROM c.subject_id AND s.valid_to IS NULL
                          AND lower(btrim(s.value)) = lower(btrim(c.value))) THEN 'already_shown'
          WHEN c.origin NOT IN ('user_manual', 'review_queue') AND c.rank <> 'preferred'
           AND length(btrim(coalesce(c.evidence_quote, ''))) < 10 THEN 'no_source'

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planFacts, suppressionKey, type ExistingClaim, type FactInput, type PlanContext } from "../fact-store.ts";
+import { factWritesPaused, planFacts, suppressionKey, writeFact, type ExistingClaim, type FactInput, type PlanContext } from "../fact-store.ts";
+import { factDb } from "./fact-db.ts";
 
 const self = { type: "self" as const, id: null };
 const today = "2026-09-29";
@@ -110,5 +111,75 @@ describe("planFacts", () => {
     const secret = "Top-secret-diagnosis";
     const plan = planFacts(machine({ value: secret, evidenceQuote: null }), ctx());
     expect(JSON.stringify(plan)).not.toContain(secret);
+  });
+});
+
+describe("writeFact against the database (review 2026-09-29)", () => {
+  const U = "u1";
+  const cityFact = (over: Record<string, unknown> = {}) => ({
+    claim_id: "c-old", user_id: U, subject_type: "self" as const, subject_id: null,
+    attribute: "current-city", value: "Berlin", origin: "ai_note", ...over,
+  });
+  /** The database's claim guards refuse a placeholder value (23514), as claim_quality_guard does. */
+  function withQualityGuard(db: ReturnType<typeof factDb>) {
+    const from = db.from;
+    db.from = (table: string) => {
+      const q = from(table);
+      if (table !== "claims") return q;
+      const insert = q.insert;
+      q.insert = (v: any) => {
+        if (String(v?.value ?? "").trim().toLowerCase() !== "none") return insert(v);
+        const refused: any = {
+          select: () => refused, maybeSingle: () => refused,
+          then: (ok: any, fail: any) => Promise.resolve({ data: null, error: { code: "23514", message: "claim_quality_guard: placeholder" } }).then(ok, fail),
+        };
+        return refused;
+      };
+      return q;
+    };
+    return db;
+  }
+
+  it("a value the database refuses leaves the old value current", async () => {
+    const db = withQualityGuard(factDb({ facts: [cityFact()] }));
+    const r = await writeFact(db, U, human({ value: "none" }), { isHuman: true });
+    expect(r.ok).toBe(false);
+    expect(db.tables.claims.find((c) => c.id === "c-old")?.valid_to).toBeNull();
+  });
+
+  it("a person may type a value that was marked 'do not suggest again'; a machine may not", async () => {
+    const key = suppressionKey(self, "current-city", "London");
+    const seed = () => ({ facts: [cityFact()], tables: { ai_suggestion_suppressions: [{ user_id: U, suggestion_type: "claim", suppression_key: key }] } });
+    const machineDb = factDb(seed());
+    expect((await writeFact(machineDb, U, machine(), { isHuman: false })).facts[0].outcome).toBe("suppressed");
+    const humanDb = factDb(seed());
+    expect((await writeFact(humanDb, U, human(), { isHuman: true })).facts[0].outcome).toBe("inserted");
+  });
+
+  it("a fact added to a private section stays there, even when the splitter would file it elsewhere", async () => {
+    const db = factDb({ tables: { profile_categories: [{ user_id: U, contact_id: null, slug: "vault", visibility_scope: "private" }] } });
+    const r = await writeFact(db, U, human({ label: "Contact", value: "me@example.invalid, +49 30 1234567", categorySlug: "vault" }), { isHuman: true });
+    expect(r.facts.length).toBeGreaterThan(0);
+    expect(r.facts.every((f) => f.outcome === "inserted")).toBe(true);
+    expect(new Set(db.tables.fact_slots.map((s) => s.category_slug))).toEqual(new Set(["vault"]));
+  });
+
+  it("a fact added to a private section moves its attribute's public slot there (the most private wins)", async () => {
+    const db = factDb({ facts: [cityFact()], tables: {
+      profile_categories: [{ user_id: U, contact_id: null, slug: "vault", visibility_scope: "private" }],
+      fact_slots: [{ id: "s1", user_id: U, subject_type: "self", subject_id: null, attribute: "current-city", category_slug: "location", cardinality: null }],
+    } });
+    await writeFact(db, U, human({ categorySlug: "vault" }), { isHuman: true });
+    expect(db.tables.fact_slots[0].category_slug).toBe("vault");
+  });
+
+  it("the pause flag fails closed: an unreadable flag counts as paused, a missing function does not", async () => {
+    const rpc = (error: unknown) => ({ rpc: async () => ({ data: null, error }) });
+    expect(await factWritesPaused(rpc({ code: "57014", message: "timeout" }))).toBe(true);
+    expect(await factWritesPaused(rpc({ code: "PGRST202", message: "not found" }))).toBe(false);
+  });
+
+  it("a source quote is counted in characters, as the database counts it", () => {
+    expect(planFacts(machine({ evidenceQuote: "😀😀😀😀😀" }), ctx())).toEqual([{ kind: "rejected", attribute: null, reason: "evidence_required" }]);
   });
 });

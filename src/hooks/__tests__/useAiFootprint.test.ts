@@ -18,7 +18,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 vi.mock("@/lib/toast", () => ({ showToast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ user: { id: "user-1" } }) }));
-import { fetchAiFootprint } from "../useAiFootprint";
+import { fetchAiFootprint, machineFootprintRows } from "../useAiFootprint";
 
 describe("fetchAiFootprint", () => {
   it("fails instead of reporting an empty footprint when a read fails", async () => {
@@ -32,5 +32,15 @@ describe("fetchAiFootprint", () => {
     expect(new Set(reads.tables.map((r) => r.table))).toEqual(
       new Set(["wiki_page_sources", "profile_facts", "note_connections"]),
     );
+  });
+
+  it("leaves out facts the user typed or corrected, even when they cite the note", () => {
+    const rows = [
+      { claim_id: "machine", source_type: "note", origin: "ai_note", rank: "normal" },
+      { claim_id: "typed", source_type: "note", origin: "user_manual", rank: "preferred" },
+      { claim_id: "corrected", source_type: "note", origin: "ai_note", rank: "preferred" },
+      { claim_id: "moment", source_type: "moment", origin: "ai_moment", rank: "normal" },
+    ];
+    expect(machineFootprintRows(rows).map((r) => r.claim_id)).toEqual(["machine"]);
   });
 });

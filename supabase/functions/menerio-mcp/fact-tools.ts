@@ -32,13 +32,16 @@ export type EntityMatch = { entity: { id: string; name: string } } | { error: st
  * One entity by name or alias. An exact name or alias (case-insensitive) wins;
  * otherwise a single partial match is used; several are refused with their
  * ids, the way contacts are refused. "Acme" must not quietly mean "Acme Labs".
+ * Only entities assistants may see are candidates: a hidden or sensitive one is
+ * never named in a refusal, and its name finds nothing.
  */
 export async function resolveEntityByName(db: any, userId: string, name: string): Promise<EntityMatch> {
   const needle = name.trim().toLowerCase();
   if (!needle) return { error: "subject_name is empty." };
-  const { data, error } = await db.from("entities").select("id, name, aliases").eq("user_id", userId);
+  const { data, error } = await db.from("entities").select("id, name, aliases, ai_visibility, is_sensitive").eq("user_id", userId);
   if (error) return { error: `Could not load entities: ${error.message ?? "error"}` };
-  const rows = (data ?? []) as Array<{ id: string; name: string; aliases?: string[] | null }>;
+  const rows = ((data ?? []) as Array<{ id: string; name: string; aliases?: string[] | null; ai_visibility?: string | null; is_sensitive?: boolean | null }>)
+    .filter((e) => e.ai_visibility === "visible" && e.is_sensitive !== true);
   const exact = rows.filter((e) =>
     String(e.name ?? "").trim().toLowerCase() === needle ||
     (Array.isArray(e.aliases) && e.aliases.some((a) => String(a ?? "").trim().toLowerCase() === needle)));
@@ -249,7 +252,8 @@ export function addClaimRefusal(args: Pick<AddClaimArgs, "attribute" | "value" |
   }
   if (!normalizeAttribute(args.attribute)) return "attribute is required.";
   if (!String(args.value ?? "").trim()) return "value is required.";
-  if (String(args.evidenceQuote ?? "").trim().length < 10) {
+  // Counted in code points, as the database's length() counts them.
+  if ([...String(args.evidenceQuote ?? "").trim()].length < 10) {
     return "evidence_quote is required: the exact sentence this fact came from (at least 10 characters). Nothing was written.";
   }
   if (args.validFrom && !ISO_DAY.test(args.validFrom)) return "valid_from must be a date in YYYY-MM-DD form.";

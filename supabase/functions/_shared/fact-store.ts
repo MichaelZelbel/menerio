@@ -66,6 +66,7 @@ export interface ExistingClaim {
 export interface ExistingSlot {
   attribute: string;
   cardinality: "one" | "many" | null;
+  category_slug?: string | null;
 }
 
 export interface PlanContext {
@@ -131,7 +132,8 @@ export function piecesOf(input: FactInput): Array<{ label: string; categorySlug:
  * - Several values ('many'): added.
  */
 export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
-  if (AUTOMATED.has(input.origin) && norm(input.evidenceQuote ?? "").length < 10) {
+  // Counted in code points, as the database's length() counts them.
+  if (AUTOMATED.has(input.origin) && [...norm(input.evidenceQuote ?? "")].length < 10) {
     return [{ kind: "rejected", attribute: null, reason: "evidence_required" }];
   }
   if (input.validFrom && !/^\d{4}-\d{2}-\d{2}$/.test(input.validFrom)) {
@@ -146,7 +148,8 @@ export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
     const attribute = input.attribute ? input.attribute : normalizeAttribute(piece.label);
     if (!attribute) { out.push({ kind: "rejected", attribute: null, reason: "empty_attribute" }); continue; }
     if (isReservedAttribute(attribute)) { out.push({ kind: "rejected", attribute, reason: "relationships_are_links" }); continue; }
-    if (ctx.suppressed.has(suppressionKey(input.subject, attribute, piece.value))) { out.push({ kind: "suppressed", attribute }); continue; }
+    // "Do not suggest again" binds machines. A person typing the value is not a suggestion.
+    if (!ctx.isHuman && ctx.suppressed.has(suppressionKey(input.subject, attribute, piece.value))) { out.push({ kind: "suppressed", attribute }); continue; }
 
     const mine = ctx.claims.filter((c) => c.attribute === attribute);
     const same = mine.filter((c) => norm(c.value) === norm(piece.value));
@@ -198,7 +201,9 @@ export class FactWritesPaused extends Error {
 /** True while the go-live has paused every fact writer (plan B1). */
 export async function factWritesPaused(db: any): Promise<boolean> {
   const { data, error } = await db.rpc("fact_writes_paused");
-  if (error) return false; // before the pause flag exists, nothing is paused
+  // Before the pause migration the function does not exist: nothing is paused.
+  // Any other error counts as paused: a writer that cannot tell must not write.
+  if (error) return !["PGRST202", "42883"].includes(String((error as any).code ?? ""));
   return data === true;
 }
 
@@ -233,15 +238,21 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
   let slots: ExistingSlot[] = [];
   let rules: Record<string, "one" | "many"> = {};
   const suppressed = new Set<string>();
+  const privateSlugs = new Set<string>();
   if (attributes.length > 0) {
-    const [c, s, r, sup] = await Promise.all([
+    const sections = input.subject.type === "entity" ? null : db.from("profile_categories").select("slug").eq("user_id", userId)
+      .eq("visibility_scope", "private");
+    const [c, s, r, sup, k] = await Promise.all([
       subjectFilter(db.from("claims").select("id, attribute, value, valid_from, valid_to, rank")).in("attribute", attributes),
-      subjectFilter(db.from("fact_slots").select("attribute, cardinality")).in("attribute", attributes),
+      subjectFilter(db.from("fact_slots").select("attribute, cardinality, category_slug")).in("attribute", attributes),
       db.from("attribute_rules").select("attribute, cardinality").in("attribute", attributes),
       db.from("ai_suggestion_suppressions").select("suppression_key").eq("user_id", userId).eq("suggestion_type", "claim")
         .like("suppression_key", `${input.subject.type}:${input.subject.id ?? ""}:%`),
+      sections === null ? { data: [], error: null }
+        : input.subject.id === null ? sections.is("contact_id", null) : sections.eq("contact_id", input.subject.id),
     ]);
-    for (const res of [c, s, r, sup]) if (res.error) throw new Error(`fact-store read: ${res.error.message}`);
+    for (const res of [c, s, r, sup, k]) if (res.error) throw new Error(`fact-store read: ${res.error.message}`);
+    for (const x of k.data ?? []) privateSlugs.add(x.slug);
     claims = c.data ?? [];
     slots = s.data ?? [];
     rules = Object.fromEntries((r.data ?? []).map((x: any) => [x.attribute, x.cardinality]));
@@ -261,8 +272,19 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
     }
 
     // The slot first: a new value inherits the section, label and pin of the attribute.
-    if (!slots.some((s) => s.attribute === step.attribute)) {
-      const placed = input.categorySlug ? { label: step.label, categorySlug: step.categorySlug } : placeClaim(step.attribute);
+    // A fact filed in a private section stays private: the splitter's own filing
+    // (an email under Communication) and an existing public slot both give way,
+    // the most private placement winning, as in the switch and the merge.
+    const intoPrivate = input.categorySlug && privateSlugs.has(input.categorySlug) ? input.categorySlug : null;
+    const existing = slots.find((s) => s.attribute === step.attribute);
+    if (existing && intoPrivate && !privateSlugs.has(existing.category_slug ?? "")) {
+      const { error } = await subjectFilter(db.from("fact_slots").update({ category_slug: intoPrivate })).eq("attribute", step.attribute);
+      if (error) throw new Error(`fact-store slot: ${error.message}`);
+      existing.category_slug = intoPrivate;
+    }
+    if (!existing) {
+      const placed = intoPrivate ? { label: step.label, categorySlug: intoPrivate }
+        : input.categorySlug ? { label: step.label, categorySlug: step.categorySlug } : placeClaim(step.attribute);
       const { error } = await db.from("fact_slots").insert({
         user_id: userId,
         subject_type: input.subject.type,
@@ -273,14 +295,11 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
         is_pinned: input.isPinned ?? false,
       });
       if (error && error.code !== "23505") throw new Error(`fact-store slot: ${error.message}`);
-      slots.push({ attribute: step.attribute, cardinality: null });
+      slots.push({ attribute: step.attribute, cardinality: null, category_slug: placed.categorySlug });
     }
 
-    if (step.close.length > 0) {
-      const { error } = await db.from("claims").update({ valid_to: step.closeOn }).in("id", step.close).eq("user_id", userId).is("valid_to", null);
-      if (error) throw new Error(`fact-store close: ${error.message}`);
-    }
-
+    // Insert first, close after: if the database refuses the new value (quality
+    // or origin guard), the old one must still be current.
     const { data: inserted, error } = await db.from("claims").insert({
       user_id: userId,
       subject_type: input.subject.type,
@@ -302,6 +321,10 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
       if (error.code === "23505") { result.facts.push({ attribute: step.attribute, outcome: "already_recorded" }); continue; }
       if (error.code === "23514") { result.ok = false; result.facts.push({ attribute: step.attribute, outcome: "rejected", reason: String(error.message).split(":")[0] }); continue; }
       throw new Error(`fact-store insert: ${error.code ?? "error"}`);
+    }
+    if (step.close.length > 0) {
+      const { error: closeError } = await db.from("claims").update({ valid_to: step.closeOn }).in("id", step.close).eq("user_id", userId).is("valid_to", null);
+      if (closeError) throw new Error(`fact-store close: ${closeError.message}`);
     }
     result.facts.push({ attribute: step.attribute, outcome: "inserted", claimId: inserted?.id, closed: step.close.length, conflict: step.conflict });
   }
