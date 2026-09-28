@@ -3,6 +3,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractProfileFromMoment, createServiceClient } from "../_shared/moment-profile-extraction.ts";
+import { factWritesPaused } from "../_shared/fact-store.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -90,6 +91,11 @@ Deno.serve(async (req: Request) => {
     const body: Body = req.headers.get("content-type")?.includes("application/json")
       ? await req.json().catch(() => ({}))
       : {};
+
+    // Go-live has paused every fact writer: refuse with a retryable answer.
+    if (await factWritesPaused(supabase)) {
+      return json({ error: "fact_writes_paused", retryable: true }, 503);
+    }
 
     // @ts-expect-error EdgeRuntime is a Supabase global
     EdgeRuntime.waitUntil(runBackfill(user.id, body).then((result) => {
