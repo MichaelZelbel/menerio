@@ -7,10 +7,8 @@ import { showToast } from "@/lib/toast";
 import { Loader2, ShieldCheck, ShieldAlert } from "lucide-react";
 
 type LintResult = {
-  violations?: {
-    relationships?: Array<{ reason: string }>;
-    profile_entries?: Array<{ reason: string }>;
-  };
+  /** Integrity violations by kind (relationships, facts). Counted whatever the kind is called. */
+  violations?: Record<string, Array<{ reason: string }> | undefined>;
   needs_review?: number;
   queued?: number;
 };
@@ -40,8 +38,7 @@ export function ProfileHealthChip({ contactId }: { contactId: string }) {
   };
 
   const total =
-    (result?.violations?.relationships?.length ?? 0) +
-    (result?.violations?.profile_entries?.length ?? 0) +
+    Object.values(result?.violations ?? {}).reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0) +
     (result?.needs_review ?? 0);
 
   return (

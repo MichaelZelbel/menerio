@@ -35,7 +35,7 @@ export function ProfileWidget() {
             </span>
           </div>
           <div className="space-y-0.5 min-w-0">
-            <p className="text-sm font-medium">{profileSummary.entryCount} entries</p>
+            <p className="text-sm font-medium">{profileSummary.entryCount} facts</p>
             <p className="text-xs text-muted-foreground">{profileSummary.activeInstructions} agent instructions</p>
           </div>
         </div>

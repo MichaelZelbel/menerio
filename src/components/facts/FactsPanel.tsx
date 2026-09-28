@@ -5,13 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   AlertDialog,
@@ -69,7 +62,6 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
   const [attribute, setAttribute] = useState("");
   const [value, setValue] = useState("");
   const [validFrom, setValidFrom] = useState("");
-  const [confidence, setConfidence] = useState<ClaimConfidence>("likely");
 
   const claims = useMemo(
     () => allClaims.filter((c) => !isReservedAttribute(c.attribute)),
@@ -83,7 +75,6 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
     setAttribute("");
     setValue("");
     setValidFrom("");
-    setConfidence("likely");
     setAdding(false);
   };
 
@@ -96,7 +87,6 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
         attribute,
         value,
         valid_from: validFrom || null,
-        confidence,
       },
       { onSuccess: reset },
     );
@@ -243,19 +233,6 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
                   className="h-8 text-sm"
                 />
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Confidence</Label>
-                <Select value={confidence} onValueChange={(v) => setConfidence(v as ClaimConfidence)}>
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="certain">Certain</SelectItem>
-                    <SelectItem value="likely">Likely</SelectItem>
-                    <SelectItem value="unsure">Unsure</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
             {isReservedAttribute(attribute) && (
               <p className="text-xs text-destructive">
@@ -310,7 +287,7 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
             <AlertDialogTitle>Remove this fact?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDelete
-                ? `"${humanizeAttribute(pendingDelete.attribute)}: ${pendingDelete.value}" will be deleted, with no history kept. `
+                ? `"${humanizeAttribute(pendingDelete.attribute)}: ${pendingDelete.value}" will be deleted, with no history kept, and not suggested again. `
                 : ""}
               If it was true once and has changed, use "No longer true" instead. This cannot be undone.
             </AlertDialogDescription>
@@ -319,7 +296,7 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (pendingDelete) deleteClaim.mutate(pendingDelete.id);
+                if (pendingDelete) deleteClaim.mutate(pendingDelete);
                 setPendingDelete(null);
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"

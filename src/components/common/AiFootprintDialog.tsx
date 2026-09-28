@@ -105,7 +105,7 @@ export function AiFootprintDialog({ noteId, open, onOpenChange }: Props) {
               {data!.profileEntries.length > 0 && (
                 <section>
                   <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
-                    <User className="h-4 w-4" /> People profile entries (
+                    <User className="h-4 w-4" /> Facts (
                     {data!.profileEntries.length})
                   </h3>
                   <ul className="space-y-1">

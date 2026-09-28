@@ -311,6 +311,7 @@ export type Database = {
           evidence_quote: string | null
           id: string
           origin: string
+          rank: string
           review_by: string | null
           source_id: string | null
           source_type: string | null
@@ -332,6 +333,7 @@ export type Database = {
           evidence_quote?: string | null
           id?: string
           origin?: string
+          rank?: string
           review_by?: string | null
           source_id?: string | null
           source_type?: string | null
@@ -353,6 +355,7 @@ export type Database = {
           evidence_quote?: string | null
           id?: string
           origin?: string
+          rank?: string
           review_by?: string | null
           source_id?: string | null
           source_type?: string | null
@@ -1399,6 +1402,51 @@ export type Database = {
         }
         Relationships: []
       }
+      fact_slots: {
+        Row: {
+          attribute: string
+          cardinality: string | null
+          category_slug: string | null
+          created_at: string
+          id: string
+          is_pinned: boolean
+          label: string
+          show_to_agent: boolean
+          subject_id: string | null
+          subject_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attribute: string
+          cardinality?: string | null
+          category_slug?: string | null
+          created_at?: string
+          id?: string
+          is_pinned?: boolean
+          label: string
+          show_to_agent?: boolean
+          subject_id?: string | null
+          subject_type: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          attribute?: string
+          cardinality?: string | null
+          category_slug?: string | null
+          created_at?: string
+          id?: string
+          is_pinned?: boolean
+          label?: string
+          show_to_agent?: boolean
+          subject_id?: string | null
+          subject_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       gdrive_connections: {
         Row: {
           channel_expires_at: string | null
@@ -2059,6 +2107,24 @@ export type Database = {
           stage?: string | null
           total_tokens?: number
           user_id?: string
+        }
+        Relationships: []
+      }
+      maintenance_flags: {
+        Row: {
+          changed_at: string
+          is_on: boolean
+          key: string
+        }
+        Insert: {
+          changed_at?: string
+          is_on?: boolean
+          key: string
+        }
+        Update: {
+          changed_at?: string
+          is_on?: boolean
+          key?: string
         }
         Relationships: []
       }
@@ -4624,6 +4690,39 @@ export type Database = {
       }
     }
     Views: {
+      agent_facts: {
+        Row: {
+          attribute: string | null
+          cardinality: string | null
+          category_name: string | null
+          category_slug: string | null
+          claim_id: string | null
+          confidence: string | null
+          contact_id: string | null
+          created_at: string | null
+          evidence_quote: string | null
+          has_conflict: boolean | null
+          is_current: boolean | null
+          is_pinned: boolean | null
+          label: string | null
+          origin: string | null
+          rank: string | null
+          review_by: string | null
+          show_to_agent: boolean | null
+          slot_id: string | null
+          source_id: string | null
+          source_type: string | null
+          subject_id: string | null
+          subject_type: string | null
+          updated_at: string | null
+          user_id: string | null
+          valid_from: string | null
+          valid_to: string | null
+          value: string | null
+          visibility_scope: string | null
+        }
+        Relationships: []
+      }
       llm_spend_daily: {
         Row: {
           calls: number | null
@@ -4651,6 +4750,39 @@ export type Database = {
           events: number | null
           prompt_tokens: number | null
           total_tokens: number | null
+        }
+        Relationships: []
+      }
+      profile_facts: {
+        Row: {
+          attribute: string | null
+          cardinality: string | null
+          category_name: string | null
+          category_slug: string | null
+          claim_id: string | null
+          confidence: string | null
+          contact_id: string | null
+          created_at: string | null
+          evidence_quote: string | null
+          has_conflict: boolean | null
+          is_current: boolean | null
+          is_pinned: boolean | null
+          label: string | null
+          origin: string | null
+          rank: string | null
+          review_by: string | null
+          show_to_agent: boolean | null
+          slot_id: string | null
+          source_id: string | null
+          source_type: string | null
+          subject_id: string | null
+          subject_type: string | null
+          updated_at: string | null
+          user_id: string | null
+          valid_from: string | null
+          valid_to: string | null
+          value: string | null
+          visibility_scope: string | null
         }
         Relationships: []
       }
@@ -4964,6 +5096,11 @@ export type Database = {
         Args: { p_contact_id: string; p_reason?: string; p_user_id: string }
         Returns: undefined
       }
+      fact_today: {
+        Args: { p_user_id: string }
+        Returns: string
+      }
+      fact_writes_paused: { Args: never; Returns: boolean }
       fail_note_ai_job: {
         Args: {
           _job_id: string

@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { displayLabel, splitProfileValues } from "@/lib/profile-list-labels";
-import { groupEntriesByLabel } from "@/components/people/profile/CompactCategorySection";
 import { guardNameValue } from "../../../supabase/functions/_shared/profile-name-guard.ts";
 import { isKnownCanonicalLabel, canonicalProfileLabel } from "../../../supabase/functions/_shared/profile-canonical-schema.ts";
-
-const entry = (id: string, label: string, value: string) =>
-  ({ id, label, value, category_id: "c", is_pinned: false, linked_note_id: null }) as any;
 
 describe("label canonicalization", () => {
   it("maps name synonyms onto Nickname in the UI", () => {
@@ -40,17 +36,6 @@ describe("multi-value rendering", () => {
     expect(splitProfileValues("Current city", "Frankfurt am Main, Germany")).toEqual([
       "Frankfurt am Main, Germany",
     ]);
-  });
-
-  it("collapses synonym rows and packed values into one bulleted group", () => {
-    const groups = groupEntriesByLabel([
-      entry("1", "Nickname", "Yumi, Mimi"),
-      entry("2", "Name alias", "Chocola"),
-      entry("3", "Alternative name", "yumi"),
-      entry("4", "Current city", "Frankfurt"),
-    ]);
-    expect(groups.map((g) => g.label)).toEqual(["Nickname", "Current city"]);
-    expect(groups[0].items.map((i) => i.value)).toEqual(["Yumi", "Mimi", "Chocola"]);
   });
 });
 
