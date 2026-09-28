@@ -1956,7 +1956,7 @@ server.registerTool(
       const baseEntryQuery = () =>
         supabase
           .from("profile_entries")
-          .select("category_id, label, value, sort_order")
+          .select("category_id, label, value, sort_order, derived_from_claim_id")
           .eq("user_id", getCurrentUserId())
           .eq("contact_id", c.id)
           .in("category_id", ids)
@@ -1998,8 +1998,11 @@ server.registerTool(
       const liveHits = allHits.filter((h) => !h.valid_to || h.valid_to > today);
       const dated = flagStale(flagConflicts(liveHits), judgeDayFor(null, liveHits, today));
 
+      // A row that displays a claim printed above is that claim again.
+      const printedClaims = new Set(dated.map((h: any) => h.id).filter(Boolean));
       const byCat = new Map<string, any[]>();
       for (const e of (entries || []) as any[]) {
+        if (e.derived_from_claim_id && printedClaims.has(e.derived_from_claim_id)) continue;
         const arr = byCat.get(e.category_id) || [];
         arr.push(e);
         byCat.set(e.category_id, arr);

@@ -15,9 +15,12 @@ import type { ProfileCategory, ProfileEntry } from "./useProfile";
  */
 export interface ContactProfileEntry extends ProfileEntry {
   is_pinned: boolean;
+  /** The claim (dated record) this row displays, if it has one. */
+  derived_from_claim_id?: string | null;
 }
 
 const autoNormalizationInFlight = new Set<string>();
+const claimAdoptionRequested = new Set<string>();
 const autoNormalizationSeen = new Set<string>();
 
 /** Turns a server refusal reason into a message the user can act on. */
@@ -137,6 +140,32 @@ export function useContactProfile(contactId: string | null) {
       });
   }, [categoriesQuery.isLoading, contactId, entriesQuery.data, entriesQuery.isLoading, qc, triggerPeopleSync, userId]);
 
+  // Claims written outside this page (add_claim, the review queue) get their
+  // row in the list from promote-profile-entries, which runs after each note.
+  // Opening a person runs it too, so a fact an agent just added is on the page
+  // now, not after the next note. Once per person per session.
+  useEffect(() => {
+    if (!userId || !contactId) return;
+    const key = `${userId}:${contactId}`;
+    if (claimAdoptionRequested.has(key)) return;
+    claimAdoptionRequested.add(key);
+    void supabase.functions
+      .invoke("promote-profile-entries", {
+        body: { dry_run: false, include_contacts: true, pending_only: true, limit: 200 },
+      })
+      .then(({ data, error }) => {
+        if (error) throw error;
+        if (Number((data as any)?.adopted || 0) + Number((data as any)?.adopt_linked || 0) > 0) {
+          qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
+          qc.invalidateQueries({ queryKey: ["contact-profile-categories", userId, contactId] });
+        }
+      })
+      .catch((err) => {
+        claimAdoptionRequested.delete(key);
+        console.error("[promote-profile-entries] claim adoption failed", err);
+      });
+  }, [contactId, qc, userId]);
+
   // Every mutation below reports its own failure: the pages call plain
   // mutate() with no handler, so a refused write (including the duplicate
   // guard's reason that describeWriteFailure spells out) used to vanish.
@@ -225,11 +254,20 @@ export function useContactProfile(contactId: string | null) {
 
   const deleteEntry = useMutation({
     mutationFn: async (id: string) => {
+      // Deleting a fact on purpose deletes its dated record too. Left alone,
+      // the database would only END the claim (that is what it does when a
+      // background job removes a row), and agents would still read it.
+      const claimId = entriesQuery.data?.find((e) => e.id === id)?.derived_from_claim_id;
+      if (claimId) {
+        const { error: claimError } = await (supabase as any).from("claims").delete().eq("id", claimId);
+        if (claimError) throw claimError;
+      }
       const { error } = await supabase.from("profile_entries").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-profile-entries", userId, contactId] });
+      qc.invalidateQueries({ queryKey: ["claims"] });
       // Hard delete — no updated_at trace; force the page.
       triggerPeopleSync(contactId ? { people: [contactId] } : undefined);
       showToast.success("Entry deleted");

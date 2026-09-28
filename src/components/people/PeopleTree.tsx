@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useNavigate } from "react-router-dom";
@@ -77,6 +78,13 @@ export interface PeopleTreeProps {
   selectedPersonId: string | null;
   searchQuery: string;
   serverSearch?: boolean;
+  /** Favorites and recent people loaded on their own, whatever page they sit on. */
+  pinnedPeople?: Person[];
+  /** Every matching person on the server, loaded or not. */
+  totalPeople?: number;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   onSelectPerson: (id: string) => void;
   onToggleFavorite: (id: string, isFavorite: boolean) => void;
   onCreateGroup: (parentGroupId: string | null) => void;
@@ -512,6 +520,11 @@ export function PeopleTree({
   selectedPersonId,
   searchQuery,
   serverSearch = false,
+  pinnedPeople = [],
+  totalPeople,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   onSelectPerson,
   onToggleFavorite,
   onCreateGroup,
@@ -562,18 +575,24 @@ export function PeopleTree({
     [groupLites],
   );
 
+  // Loaded pages last, so a row the list has refreshed wins over the pinned copy.
+  const knownPeople = useMemo(
+    () => [...new Map([...pinnedPeople, ...people].map((p) => [p.id, p])).values()],
+    [pinnedPeople, people],
+  );
+
   const favorites = useMemo(
-    () => people.filter((p) => p.is_favorite).sort((a, b) => a.name.localeCompare(b.name)),
-    [people],
+    () => knownPeople.filter((p) => p.is_favorite).sort((a, b) => a.name.localeCompare(b.name)),
+    [knownPeople],
   );
 
   const recent = useMemo(
     () =>
-      people
+      knownPeople
         .filter((p) => p.last_viewed_at)
         .sort((a, b) => new Date(b.last_viewed_at!).getTime() - new Date(a.last_viewed_at!).getTime())
         .slice(0, 15),
-    [people],
+    [knownPeople],
   );
 
   const searchResults = useMemo(() => {
@@ -614,7 +633,7 @@ export function PeopleTree({
         }
       });
     if (!inGroup) {
-      const person = people.find((p) => p.id === selectedPersonId);
+      const person = knownPeople.find((p) => p.id === selectedPersonId);
       if (person?.is_favorite) keys.add(FAVORITES_KEY);
     }
     setExpanded((current) => {
@@ -628,7 +647,7 @@ export function PeopleTree({
       });
       return changed ? next : current;
     });
-  }, [selectedPersonId, memberships, groupLites, people]);
+  }, [selectedPersonId, memberships, groupLites, knownPeople]);
 
   const toggle = useCallback((key: string) => {
     setExpanded((current) => {
@@ -750,11 +769,30 @@ export function PeopleTree({
   );
 
   const allExpanded = expanded.has(ALL_KEY);
+
+  // Infinite scroll: when the sentinel under the list comes into view, fetch the
+  // next page. The observer is rebuilt after each load, so a page too short to
+  // fill the panel still triggers the one after it.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const listShown = searching || allExpanded;
+  useEffect(() => {
+    const root = scrollRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel || !hasMore || loadingMore || !listShown || !onLoadMore) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some((e) => e.isIntersecting)) onLoadMore(); },
+      { root, rootMargin: "0px 0px 300px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, listShown, onLoadMore, people.length]);
   const allDragOver = dragOverKey === ALL_KEY && (draggingKey?.startsWith("group:") || draggingKey?.startsWith("person:"));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto p-2">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-2">
         {searching ? (
           searchResults.length === 0 ? (
             <div className="px-2 py-6 text-center text-sm text-muted-foreground">No people found</div>
@@ -846,7 +884,7 @@ export function PeopleTree({
                     </span>
                     <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate">All People</span>
-                    <span className="text-[10px] text-muted-foreground">{people.length}</span>
+                    <span className="text-[10px] text-muted-foreground">{totalPeople ?? people.length}</span>
                   </button>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-52">
@@ -911,6 +949,11 @@ export function PeopleTree({
               )}
             </div>
           </>
+        )}
+        {listShown && hasMore && (
+          <div ref={sentinelRef} role="status" className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+            {loadingMore ? "Loading more people..." : ""}
+          </div>
         )}
       </div>
 

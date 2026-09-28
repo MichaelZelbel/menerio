@@ -102,6 +102,32 @@ export function usePeople(search = "", options: { enabled?: boolean; excludeId?:
     total: query.data?.pages.at(-1)?.total ?? 0 };
 }
 
+/**
+ * Favorites and recently viewed people, fetched on their own so the tree's
+ * Favorites and Recent sections are complete from the first render, however
+ * far down the name-sorted pages those people sit.
+ */
+export function usePinnedPeople(recentLimit = 15) {
+  const { user } = useAuth();
+  const query = useQuery<Person[]>({
+    queryKey: ["contacts", user?.id, "pinned", recentLimit],
+    enabled: !!user,
+    queryFn: async ({ signal }) => {
+      const base = () => (supabase as any).from("contacts").select(PEOPLE_COLUMNS)
+        .eq("user_id", user!.id).is("merged_into", null);
+      const [favorites, recent] = await Promise.all([
+        base().eq("is_favorite", true).order("name").abortSignal(signal),
+        base().not("last_viewed_at", "is", null).order("last_viewed_at", { ascending: false })
+          .limit(recentLimit).abortSignal(signal),
+      ]);
+      if (favorites.error) throw favorites.error;
+      if (recent.error) throw recent.error;
+      return [...new Map([...favorites.data, ...recent.data].map((row: Person) => [row.id, normalizePerson(row)])).values()];
+    },
+  });
+  return { ...query, data: query.data ?? [] };
+}
+
 export function usePerson(id: string | null) {
   const { user } = useAuth();
   return useQuery<Person | null>({
@@ -270,6 +296,8 @@ export function useTouchPersonViewed() {
       if (!result) return;
       qc.setQueriesData({ queryKey: ["contacts", user?.id] }, (old: unknown) =>
         updateContactCache(old, result.id, { last_viewed_at: result.lastViewedAt }));
+      // A person opened from a link may not be in any cached list yet.
+      qc.invalidateQueries({ queryKey: ["contacts", user?.id, "pinned"] });
     },
   });
 }

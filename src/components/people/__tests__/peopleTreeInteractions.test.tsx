@@ -169,3 +169,33 @@ describe("PeopleTree — bulk-select checkbox clicks (regression: checkbox click
     expect(handlers.onSelectPerson).toHaveBeenCalledWith("p-marco");
   });
 });
+
+describe("PeopleTree — favorites and infinite scroll", () => {
+  it("lists a favorite that no loaded page contains yet", () => {
+    const yuki = person("p-yuki", "Yuki Zed", { is_favorite: true });
+    renderTree({ pinnedPeople: [yuki] });
+    fireEvent.click(screen.getByText("Favorites"));
+    expect(screen.getByText("Yuki Zed")).toBeInTheDocument();
+    // Not repeated under All People, which only shows loaded pages.
+    expect(screen.getAllByText("Yuki Zed")).toHaveLength(1);
+  });
+
+  it("asks for the next page when the end of the list scrolls into view", () => {
+    const observers: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = [];
+    const original = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = class {
+      constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) { observers.push(cb); }
+      observe() {}
+      disconnect() {}
+    } as unknown as typeof IntersectionObserver;
+    try {
+      const onLoadMore = vi.fn();
+      renderTree({ hasMore: true, onLoadMore, totalPeople: 120 });
+      expect(screen.getByText("120")).toBeInTheDocument();
+      observers.at(-1)!([{ isIntersecting: true }]);
+      expect(onLoadMore).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.IntersectionObserver = original;
+    }
+  });
+});

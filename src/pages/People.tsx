@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { showToast } from "@/lib/toast";
@@ -35,6 +35,7 @@ import { useGroups, useCreateGroup, useUpdateGroup, useArchiveGroup, useRestoreG
 import { useAllMemberships, useAddMembership, useRemoveMembership } from "@/hooks/useGroupMemberships";
 import {
   usePeople,
+  usePinnedPeople,
   usePerson,
   useCreatePerson,
   useDeletePerson,
@@ -81,6 +82,11 @@ export default function People() {
   // ── Queries ──
   const peopleQuery = usePeople(searchQuery);
   const { data: people, total } = peopleQuery;
+  const { data: pinnedPeople } = usePinnedPeople();
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = peopleQuery;
+  const loadMorePeople = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
   const selectedQuery = usePerson(selectedPersonId);
   const { data: groups = [] } = useGroups();
   const { data: memberships = [] } = useAllMemberships();
@@ -254,6 +260,11 @@ export default function People() {
           selectedPersonId={selectedPersonId}
           searchQuery={searchQuery}
           serverSearch
+          pinnedPeople={pinnedPeople}
+          totalPeople={total}
+          hasMore={!!hasNextPage}
+          loadingMore={isFetchingNextPage}
+          onLoadMore={loadMorePeople}
           onSelectPerson={openPerson}
           onToggleFavorite={(id, isFavorite) => toggleFavorite.mutate({ id, isFavorite })}
           onCreateGroup={handleCreateGroup}
@@ -266,11 +277,7 @@ export default function People() {
           onMergePerson={(id) => setMergeTreeId(id)}
           onDeletePerson={handleDeletePerson}
         />
-        <div className="shrink-0 border-t p-2 space-y-2">
-          <p className="text-xs text-muted-foreground">Groups, favorites and recent people show loaded contacts.</p>
-          {peopleQuery.hasNextPage && <Button className="w-full" variant="outline" disabled={peopleQuery.isFetching} onClick={() => peopleQuery.fetchNextPage()}>
-            {peopleQuery.isFetchingNextPage ? "Loading..." : "Load more people"}
-          </Button>}
+        <div className="shrink-0 border-t p-2">
           <Button className="w-full" variant="ghost" disabled={peopleQuery.isFetching} onClick={() => peopleQuery.refetch()}>Refresh people</Button>
         </div>
       </div>

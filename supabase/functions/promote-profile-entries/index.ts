@@ -33,6 +33,8 @@ import {
   type EntryRow,
   type ExistingClaim,
 } from "../_shared/promote-entries.ts";
+import { CATEGORY_DISPLAY, planAdoptions, type AdoptClaim, type AdoptEntry } from "../_shared/adopt-claims.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -111,7 +113,7 @@ Deno.serve(async (req) => {
       entryQuery,
       admin
         .from("claims")
-        .select("id, subject_type, subject_id, attribute, value, valid_to")
+        .select("id, subject_type, subject_id, attribute, value, valid_to, origin, source_type, source_id, evidence_quote")
         .eq("user_id", userId),
       admin
         .from("contacts")
@@ -144,6 +146,25 @@ Deno.serve(async (req) => {
       .filter((s) => s.reason === "collision-needs-michael")
       .map((s) => `${s.label}: ${s.detail}`);
 
+    // The other direction: claims nothing shows yet (add_claim, the note
+    // pipeline, the review queue write claims only). Needs every contact
+    // entry, not the pending window above, to know what the page already shows.
+    let adoption = { adopt: [], link: [], skip: [] } as ReturnType<typeof planAdoptions>;
+    if (includeContacts) {
+      const contactEntries = await selectAllRows<AdoptEntry>((from, to) =>
+        admin.from("profile_entries").select("id, contact_id, value, derived_from_claim_id")
+          .eq("user_id", userId).not("contact_id", "is", null).order("id").range(from, to));
+      // Entries this run is about to link count as shown already.
+      const linking = new Map<string, string>();
+      for (const l of plan.link) linking.set(l.entry_id, l.claim_id);
+      for (const p of plan.promote) for (const id of p.entry_ids) linking.set(id, "planned");
+      adoption = planAdoptions(
+        (claimsRes.data || []) as AdoptClaim[],
+        contactEntries.map((e) => linking.has(e.id) && !e.derived_from_claim_id
+          ? { ...e, derived_from_claim_id: linking.get(e.id)! } : e),
+      );
+    }
+
     const summary = {
       scanned: (entriesRes.data || []).length,
       would_promote: plan.promote.length,
@@ -152,6 +173,9 @@ Deno.serve(async (req) => {
       skipped_by_reason: byReason,
       collisions_for_michael: [...new Set(collisions)],
       include_contacts: includeContacts,
+      would_adopt: adoption.adopt.length,
+      would_link_to_claims: adoption.link.length,
+      adopt_skipped: adoption.skip.length,
     };
 
     if (dryRun) return json({ dry_run: true, ...summary });
@@ -229,7 +253,50 @@ Deno.serve(async (req) => {
       } else linked++;
     }
 
-    return json({ dry_run: false, ...summary, promoted, linked, claims_embedded: embedded, failures });
+    let adopted = 0;
+    let adoptLinked = 0;
+    const categoryIds = new Map<string, string | null>();
+    const categoryFor = async (contactId: string, slug: string) => {
+      const key = `${contactId}:${slug}`;
+      if (categoryIds.has(key)) return categoryIds.get(key)!;
+      const { data: existing } = await admin.from("profile_categories").select("id")
+        .eq("user_id", userId).eq("contact_id", contactId).eq("slug", slug).maybeSingle();
+      let id: string | null = existing?.id ?? null;
+      if (!id) {
+        const display = CATEGORY_DISPLAY[slug] ?? { name: slug, icon: "folder" };
+        const order = Object.keys(CATEGORY_DISPLAY).indexOf(slug);
+        const { data: created } = await admin.from("profile_categories").insert({
+          user_id: userId, contact_id: contactId, slug, name: display.name, icon: display.icon,
+          is_default: false, sort_order: order < 0 ? 99 : order, visibility_scope: "all",
+        } as any).select("id").maybeSingle();
+        id = created?.id ?? null;
+      }
+      categoryIds.set(key, id);
+      return id;
+    };
+
+    for (const a of adoption.adopt) {
+      const categoryId = await categoryFor(a.contact_id, a.category_slug);
+      if (!categoryId) { failures.push(`adopt ${a.label}: no section ${a.category_slug}`); continue; }
+      // `.select()` for the same reason as the link loop below: a guard
+      // trigger that drops the row reports no error.
+      const { data: landed, error } = await admin.from("profile_entries").insert({
+        user_id: userId, contact_id: a.contact_id, category_id: categoryId, label: a.label, value: a.value,
+        origin: a.origin, evidence_quote: a.evidence_quote, linked_note_id: a.linked_note_id,
+        derived_from_claim_id: a.claim_id,
+      } as any).select("id");
+      if (error) failures.push(`adopt ${a.label}: ${error.message}`);
+      else if (!landed?.length) failures.push(`adopt ${a.label}: a guard trigger dropped the row`);
+      else adopted++;
+    }
+    for (const l of adoption.link) {
+      const { data: updated, error } = await admin.from("profile_entries")
+        .update({ derived_from_claim_id: l.claim_id }).eq("id", l.entry_id).is("derived_from_claim_id", null).select("id");
+      if (error) failures.push(`link claim ${l.claim_id}: ${error.message}`);
+      else if (updated?.length) adoptLinked++;
+    }
+
+    return json({ dry_run: false, ...summary, promoted, linked, adopted, adopt_linked: adoptLinked, claims_embedded: embedded, failures });
   } catch (err: unknown) {
     return json({ error: (err as Error).message }, 500);
   }
