@@ -146,6 +146,14 @@ ALTER TABLE public.claims DROP CONSTRAINT IF EXISTS claims_source_type_check;
 ALTER TABLE public.claims ADD CONSTRAINT claims_source_type_check
   CHECK (source_type = ANY (ARRAY['note'::text, 'moment'::text, 'manual'::text, 'ai'::text]));
 ALTER TABLE public.claims DROP COLUMN IF EXISTS rank;
+-- The singular rule rows the schema migration added (only rows added after B1).
+DO $$
+BEGIN
+  IF to_regclass('fact_backup.meta') IS NOT NULL THEN
+    DELETE FROM public.attribute_rules WHERE attribute IN ('aliases', 'allergies', 'favorite-characters', 'favorite-desserts', 'favorite-drinks', 'favorite-foods', 'favorite-fruits', 'favorite-games', 'favorite-movies', 'favorite-music-artists', 'favorite-places', 'favorite-restaurants', 'favorite-snacks', 'favorite-songs', 'favorite-tv-shows', 'favorite-youtubers', 'health-conditions', 'hobbies', 'hobby', 'interest', 'language', 'likes', 'love-language', 'medications', 'nickname', 'personality-traits', 'pets', 'skill', 'tool-/-platform', 'topic-of-interest', 'vrchat-activities', 'vrchat-equipment', 'vrchat-setup')
+       AND created_at >= (SELECT taken_at FROM fact_backup.meta);
+  END IF;
+END $$;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = to_regnamespace('fact_retired'))

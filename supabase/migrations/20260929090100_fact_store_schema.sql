@@ -28,6 +28,46 @@ ALTER TABLE public.claims ADD CONSTRAINT claims_origin_known CHECK (origin IN
   ('user_manual','unverified','menerio','ai_note','ai_moment','ai_lexicon',
    'review_queue','import','mcp','api','normalizer')) NOT VALID;
 
+-- 1b. attribute_rules becomes the one registry of "several values" (3.6). It is
+-- keyed by the plural ("languages") while canonical labels are singular
+-- ("Language"), so the canonical list-valued labels (profile-canonical-schema.ts
+-- LIST_VALUED_LABELS, normalized) are added. Existing rows are left as they are.
+INSERT INTO public.attribute_rules (attribute, cardinality) VALUES
+  ('aliases', 'many'),
+  ('allergies', 'many'),
+  ('favorite-characters', 'many'),
+  ('favorite-desserts', 'many'),
+  ('favorite-drinks', 'many'),
+  ('favorite-foods', 'many'),
+  ('favorite-fruits', 'many'),
+  ('favorite-games', 'many'),
+  ('favorite-movies', 'many'),
+  ('favorite-music-artists', 'many'),
+  ('favorite-places', 'many'),
+  ('favorite-restaurants', 'many'),
+  ('favorite-snacks', 'many'),
+  ('favorite-songs', 'many'),
+  ('favorite-tv-shows', 'many'),
+  ('favorite-youtubers', 'many'),
+  ('health-conditions', 'many'),
+  ('hobbies', 'many'),
+  ('hobby', 'many'),
+  ('interest', 'many'),
+  ('language', 'many'),
+  ('likes', 'many'),
+  ('love-language', 'many'),
+  ('medications', 'many'),
+  ('nickname', 'many'),
+  ('personality-traits', 'many'),
+  ('pets', 'many'),
+  ('skill', 'many'),
+  ('tool-/-platform', 'many'),
+  ('topic-of-interest', 'many'),
+  ('vrchat-activities', 'many'),
+  ('vrchat-equipment', 'many'),
+  ('vrchat-setup', 'many')
+ON CONFLICT (attribute) DO NOTHING;
+
 -- 2. How one attribute of one subject is displayed (3.2).
 CREATE TABLE public.fact_slots (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),

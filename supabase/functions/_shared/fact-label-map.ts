@@ -9,7 +9,7 @@
 // Pure: labels and attributes in, rows out.
 
 import { isReservedAttribute, normalizeAttribute } from "./claims.ts";
-import { placeClaim } from "./adopt-claims.ts";
+import { placeClaim } from "./fact-placement.ts";
 
 export interface FactLabelMapRow {
   kind: "label" | "attribute";
