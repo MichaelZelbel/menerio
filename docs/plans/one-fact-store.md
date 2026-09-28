@@ -150,7 +150,7 @@ Where each attribute lives:
 | category (section) | `fact_slots.category_slug` | Filing belongs to "Languages for this person", not to one language. A new value inherits it. |
 | label (display name) | `fact_slots.label` | Same reason. The attribute key is the stable machine name; the label is how the page says it. |
 | pin | `fact_slots.is_pinned` | Per attribute (Q3). |
-| sort order | `fact_slots.sort_order` | Per attribute. |
+| one answer or several | `fact_slots.cardinality` (NULL = use `attribute_rules`, else `'one'`) | "Both are true" is about this person's attribute, and the next new value must respect it. |
 | show to assistants | `fact_slots.show_to_agent` | Per attribute. |
 | privacy scope | `profile_categories.visibility_scope` (unchanged) | A private section hides everything filed in it. |
 
@@ -188,9 +188,9 @@ CREATE TABLE public.fact_slots (
   attribute     text NOT NULL,             -- normalizeAttribute() output, same key as claims.attribute
   label         text NOT NULL,             -- what the page prints, e.g. "Favourite foods"
   category_slug text,                      -- 'food', 'identity' ... NULL = "Other"
+  cardinality   text CHECK (cardinality IN ('one','many')),   -- NULL = attribute_rules decides
   is_pinned     boolean NOT NULL DEFAULT false,
   show_to_agent boolean NOT NULL DEFAULT false,
-  sort_order    integer NOT NULL DEFAULT 0,
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT fact_slots_subject_pair CHECK (
@@ -235,7 +235,6 @@ SELECT
   coalesce(cat.visibility_scope, 'all')                                  AS visibility_scope,
   coalesce(s.is_pinned, false)     AS is_pinned,
   coalesce(s.show_to_agent, false) AS show_to_agent,
-  coalesce(s.sort_order, 0)        AS sort_order,
   -- "two live answers": more than one current value on a single-valued attribute
   (count(*) FILTER (WHERE (c.valid_to IS NULL OR c.valid_to > public.user_today(c.user_id))
                       AND c.cardinality = 'one')
@@ -263,7 +262,8 @@ WHERE f.visibility_scope <> 'private'
     OR (f.subject_type = 'entity' AND EXISTS (
           SELECT 1 FROM public.entities e
            WHERE e.id = f.subject_id AND e.user_id = f.user_id
-             AND coalesce(e.ai_visibility, 'visible') = 'visible'))  -- column name UNVERIFIED
+             AND e.ai_visibility = 'visible' AND e.is_sensitive IS NOT TRUE))
+             -- entities carry both flags (VERIFIED, 20260811091414:11-12)
   );
 ```
 
@@ -285,7 +285,7 @@ CREATE OR REPLACE VIEW public.world_claims WITH (security_invoker = on) AS
          f.source_type AS source_kind, f.source_id AS source_ref, f.origin, f.rank,
          f.evidence_quote, f.created_at, f.updated_at
     FROM public.profile_facts f
-   WHERE f.visibility_scope <> 'private'      -- only if Q4 = "exclude"
+   WHERE f.visibility_scope <> 'private'      -- Q4, decided: private sections stay in Menerio
   UNION ALL
   SELECT r.id, r.user_id, 'contact_relationship', r.source_type, r.source_id, 'relationship',
          'relationship', COALESCE(NULLIF(btrim(r.custom_label), ''), r.label), r.target_id,
@@ -311,11 +311,11 @@ Only **adding** a fact needs shared logic: label canonicalization, bag splitting
 
 | Operation | Meaning | How |
 |---|---|---|
-| `writeFact(subject, label or attribute, value, origin, evidence, source, valid_from?)` | "This is true." | Edge function. Canonicalize the label (`profile-canonical-schema.ts`), split bags (the atomize logic moves from the trigger into TS), refuse suppressed values, and ensure a slot exists (placement from `placeClaim` / `classify-profile-fact`). Then insert the claim; if the same value is already current, return the existing claim. For `cardinality='one'`, close the older current value at `valid_from` (or the user's today). **A machine never closes a preferred value**: it inserts alongside, which surfaces as `has_conflict`. |
+| `writeFact(subject, label or attribute, value, origin, evidence, source, valid_from?)` | "This is true." | Edge function. Canonicalize the label (`profile-canonical-schema.ts`), split bags (the atomize logic moves from the trigger into TS), refuse suppressed values, and ensure a slot exists (placement from `placeClaim` / `classify-profile-fact`). Then insert the claim; if the same value is already current, return the existing claim. Cardinality comes from the slot, else `attribute_rules`, else `'one'`, and is copied onto the claim. For `'one'`, close the older current value at `valid_from` (or the user's today). **A machine never closes a preferred value**: it inserts alongside, which surfaces as `has_conflict`. |
 | end: "No longer true since …" | | Browser: `update claims set valid_to = :date`. The row stays as history. |
 | retract: "This was wrong." | | Browser: `delete from claims`. An AFTER DELETE trigger writes the suppression row when `auth.uid()` is set, so a human's "wrong" is remembered without a second call and the note pipeline does not bring it back. |
 | correct: "Typo." | | Browser: `update claims set value`. The words guard (3.6) refuses this for machines on preferred rows. |
-| refile: section, label, pin, order, show to assistants | Display only. | Browser or job: `update fact_slots`. Machines may re-file; that is what `world/menerio-bridge.md` allows. |
+| refile: section, label, pin, show to assistants | Display only. | Browser or job: `update fact_slots`. Machines may re-file; that is what `world/menerio-bridge.md` allows. |
 
 **Human or machine is decided by whose credentials make the write. This must be kept.**
 
@@ -329,7 +329,7 @@ Only **adding** a fact needs shared logic: label canonicalization, bag splitting
 
 | Today on `profile_entries` | Target on `claims` |
 |---|---|
-| `world_preferred_wins` / `world_preferred_survives_delete` | New `claim_preferred_wins` (BEFORE INSERT/UPDATE) and `claim_preferred_survives_delete` (BEFORE DELETE), with the same "human = `auth.uid()` IS NOT NULL" test as today. **Which writes make a claim preferred:** a human INSERT, an `origin='user_manual'` INSERT, or a human UPDATE that changes `value` or `attribute`. A human who only ends a machine fact does not turn it into "typed by a human". **Machine UPDATE of a preferred claim:** puts back `attribute`, `value`, `valid_from` and **`valid_to`**, because closing a human's fact is demoting it (Q8). `subject_id` may change (a merge is re-filing). **Deletes:** cancelled unless cascade or owner gone (copy the `20260916120000` exceptions). |
+| `world_preferred_wins` / `world_preferred_survives_delete` | New `claim_preferred_wins` (BEFORE INSERT/UPDATE) and `claim_preferred_survives_delete` (BEFORE DELETE), with the same "human = `auth.uid()` IS NOT NULL" test as today. **Which writes make a claim preferred:** a human INSERT, an `origin='user_manual'` INSERT, or a human UPDATE that changes `value` or `attribute`. That last case also sets `origin='user_manual'`, because the words are now the human's; the old `evidence_quote` stays as provenance. Without this, a corrected machine fact would be `rank: preferred` but `written_by: machine` in Godspeed. A human who only ends a machine fact does not turn it into "typed by a human". **Machine UPDATE of a preferred claim:** puts back `attribute`, `value`, `valid_from` and **`valid_to`**, because closing a human's fact is demoting it (Q8). `subject_id` may change (a merge is re-filing). **Deletes:** cancelled unless cascade or owner gone (copy the `20260916120000` exceptions). |
 | `profile_entry_require_origin` | `claim_require_origin`: origin in the list, and automated origins (`ai_*`, `mcp`, `api`, `import`, `normalizer`) need `evidence_quote` of 10+ characters. `unverified` and `menerio` are refused on INSERT except inside the migration (`SET LOCAL menerio.fact_migration = 'on'`). Enforced from stage 5, once `add_claim` sends quotes. |
 | `profile_entry_quality_guard` | `claim_quality_guard`: **raises** a named error instead of silently returning NULL. Silent drops are why `promote-profile-entries` needed its "a guard trigger dropped the row" checks. |
 | duplicate guard + two unique indexes | `claims_one_live_value` unique index + `writeFact` returning the existing row. |
@@ -358,7 +358,7 @@ Only **adding** a fact needs shared logic: label canonicalization, bag splitting
   - Owner and contact pages behave the same (today they differ; VERIFIED in `useContactProfile.ts` and reported for `useProfile.ts`).
 - **History.** Each slot has "History (n)" listing closed claims: "Berlin, until 2026-03-01". This is `FactsPanel`'s pattern, which today only entity pages have.
 - **Multi-value facts.** `cardinality='many'` (from `attribute_rules`) allows several current values, with no conflict.
-- **Two live answers.** `has_conflict` shows a badge with "Keep this one" (ends the other) and "Both are true" (sets `cardinality='many'` on the slot's attribute for this subject, via the claims' `cardinality`).
+- **Two live answers.** `has_conflict` shows a badge with "Keep this one" (ends the other) and "Both are true" (sets `fact_slots.cardinality='many'` and the current claims' `cardinality='many'`; `writeFact` reads the slot first, so the next value is added, not swapped in).
 
 ### 3.8 Relationships stay separate
 
@@ -679,7 +679,8 @@ Steps:
 4. **Slots:** one per `(subject, attribute)`, built from its entries:
    - `label` = the label of the preferred row, else the most frequent label;
    - `category_slug` = that row's section slug;
-   - `is_pinned` = any pinned; `show_to_agent` = any; `sort_order` = the minimum.
+   - `is_pinned` = any pinned; `show_to_agent` = any;
+   - `cardinality` = NULL, unless the entries already hold two different current values for a single-valued attribute: those stay as "two answers".
 5. **Link:** set `derived_from_claim_id` on every entry from steps 2 and 3. From here on that column *is* the entry-to-claim lookup.
 6. **Claims no entry shows (B6).** After stage 0 these are mostly self claims, because adoption was contact-only.
    - A dry run of `placeClaim` (TS) produces their slot rows as a reviewed SQL file.
@@ -705,8 +706,9 @@ Steps:
 - `trg_zz_profile_entry_mirror` (BEFORE INSERT on `profile_entries`).
   - Its name sorts last, so it runs only if no earlier guard dropped the row.
   - It does steps 3 and 4 for the new row: the claim takes `NEW.id`, and it sets `NEW.derived_from_claim_id`.
+  - If an identical current value already exists (the entry guards compare labels, the claim index compares attributes, so this can happen), it links to that claim instead of inserting. Otherwise `claims_one_live_value` would raise, and the note pipeline's insert would fail instead of being quietly deduplicated as today.
   - A row that arrives already linked (adoption from `promote-profile-entries`) only gets its slot ensured.
-- `trg_profile_entry_mirror_display` (AFTER UPDATE OF `label`, `category_id`, `is_pinned`, `show_to_agent`, `sort_order`) copies display changes onto the slot.
+- `trg_profile_entry_mirror_display` (AFTER UPDATE OF `label`, `category_id`, `is_pinned`, `show_to_agent`) copies display changes onto the slot.
 - The existing `sync_claim`/`end_claim` triggers keep value edits and deletes flowing. The known history loss from in-place edits continues until stage 4, and is accepted for the transition; the old words are in `fact_backup_s2`.
 
 **Tests:**
@@ -964,6 +966,10 @@ Paths below are in the Godspeed engine repo (`MichaelZelbel/godspeed-engine`, mo
 - **R4c: stage 2 locks `profile_entries`** (`DISABLE TRIGGER` takes an exclusive lock for the transaction).
   - At a few hundred rows this is seconds. Run it with the note crons paused.
   - The role applying migrations must own the table (B12).
+- **R4e: search results change shape.**
+  - Every profile fact becomes a claim, so `search_brain` (which lists claims first, on page 1) and `get_claims` return several hundred more rows than today.
+  - Check after stage 2 with five real questions that answers still include the notes they did before.
+  - If claims crowd them out, cap the claim share of page 1 in `searchClaims`.
 - **R4d: the words guard depends on the caller's identity** (section 3.5).
   - If any human path ends up writing through the service role, that human can no longer replace their own typed value.
   - The stage 4 test "a human replaces their own preferred value" guards this. Every new human write path needs the same test.
@@ -1049,4 +1055,43 @@ I re-read the plan against the code, looking for over-complication and for failu
 - **A one-evening switch instead of stages 2-4 with mirror triggers.** It is simpler on paper. But it deploys about 15 functions and the page at once, and its rollback has to undo all of them together. Two small triggers for about a week cost less.
 - **Two views (`profile_facts`, `agent_facts`) rather than one.** The second is the single place that decides what assistants may see. Today that decision is scattered across six readers, and three of them get it wrong.
 - **Relationships stay separate.** Nothing in the second pass changed the reasoning in 3.8.
+
+### Third review (2026-09-28)
+
+**Made simpler**
+
+1. **`fact_slots.sort_order` is dropped.**
+   - No screen sets it, and nearly every writer writes 0 (reported in the caller map).
+   - Sections follow the taxonomy, and pins give prominence.
+   - One column fewer to migrate and mirror.
+
+**Fixed: things that would have gone wrong**
+
+2. **"Both are true" would not have stuck.**
+   - It set `cardinality='many'` only on the current claims.
+   - The next new value would have read `attribute_rules` ('one') and closed one of them.
+   - The slot now carries a per-person cardinality override, read first.
+3. **A human fixing a machine's typo stayed "written by machine".**
+   - It became `rank: preferred` but kept `origin='ai_note'`, so Godspeed would say `written_by: machine` about words the human wrote.
+   - A human value change now also sets `origin='user_manual'`.
+4. **Sensitive entities could have reached assistants.** Entities have their own `is_sensitive` flag (VERIFIED, `20260811091414:12`), and `agent_facts` now checks it.
+5. **The stage 2 mirror would have broken the note pipeline.**
+   - The old entry guards compare labels; the new claim index compares attributes.
+   - An entry the old guards let through could hit the index and make the note's insert fail.
+   - The mirror now links to the existing claim instead.
+6. **Search can be crowded by the new claims** (R4e). Added a check after stage 2.
+
+---
+
+## 9. Running this plan
+
+- **One stage per session.** Each stage gets its own fresh session, started from this file. Stage N+1 begins only after stage N is verified live and its counts are recorded in `docs/plans/one-fact-store-baseline.md`.
+- **Credentials.**
+  - Applying migrations and deploying functions needs the Supabase management token and the project ref. The cloud session that wrote this plan had neither.
+  - The implementing session needs them, or Michael applies each reviewed migration himself.
+  - Stage 0's Godspeed half needs push access to the kit repository (public) and to `godspeed-engine`.
+- **Every stage ends the same way:**
+  - a pull request with the code, the migration, the rollback file and the tests;
+  - the live counts from the stage section, pasted into the pull request;
+  - nothing merged or applied until those counts are recorded.
 
