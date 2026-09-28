@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: 2026-09-29. **Built and ready for an unattended go-live.** Everything in Part A is done on branch `claude/wonderful-keller-sashcq`: both migrations with Michael's two rules, the rollback, the pause flag, the bag split, all application code moved to the one fact store (no code touches `profile_entries`), the Godspeed changes (engine and `godspeed` on branch `claude/one-fact-store`, the kit as a patch). Checks: 1,200 unit tests, type check, build, live-schema harness 42/42, A6 on production matched every prediction. Next: paste `docs/plans/one-fact-store-golive-prompt.md` into Claude Code on X30 or the VPS (section 10).
+Status: 2026-09-29. **Built and ready for an unattended go-live.** Everything in Part A is done on branch `claude/wonderful-keller-sashcq`: both migrations with Michael's two rules, the rollback, the pause flag, the bag split, all application code moved to the one fact store (no code touches `profile_entries`), the Godspeed changes (engine and `godspeed` on branch `claude/one-fact-store`, the kit as a patch). Checks: 1,212 unit tests, type check, build, live-schema harness 44/44 (after the tenth review's fixes, section 8), A6 on production matched every prediction. The switch changed in that review, so the go-live's A6 re-run is required, as the prompt already says. Next: paste `docs/plans/one-fact-store-golive-prompt.md` into Claude Code on X30 or the VPS (section 10).
 
 **This file on `main` is the only copy of this plan.** Every session reads it from `main` and commits its changes back to `main` in the same session. No other branch holds a version of it (section 9).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.
@@ -1035,6 +1035,41 @@ Built on `claude/wonderful-keller-sashcq` (code stays off `main` until the one p
 | attributes placed private by "most private wins" | 0 |
 
 **A6 real counts:** every row above matched exactly. Also: 406 slots after (268 from entries, 138 added in step 7, 1 of those in a private section), 451 agent facts and 451 `world_claims` claim rows (519 before), Godspeed removals 101 and additions 11, 479 normalize items superseded, 234 review items repointed and 1,654 pointing at a missing entry, 73 live claims holding a list value (legacy bags), 2 many-valued entries whose words differ, 0 `claims_origin_known` violations.
+
+### Tenth review (2026-09-29): adversarial, against the running code
+
+Not a prose review. A local copy of the live structure was built (`build-local-db.sh --template`: 100 tables, 158 functions, 77 triggers, 212 policies), and the harness, `npm test`, the build and the type check were run: all green before any change (42/42, 1,200). Then the change was attacked by four reviewers (switch and rollback SQL; privacy of every reader; writers; frontend and leftovers), and every finding was checked against the code, a query or a test. Production was only read (counts, ids, cron names).
+
+**Fixed on `claude/wonderful-keller-sashcq` (commit `a64c9395`), each with a test that fails without the fix:**
+
+1. **The rollback could not run after B6.** B6 deleted cron 16 and the rollback then called `cron.alter_job(16, …)`. Checked against a real pg_cron 1.6: `Job 16 does not exist or you don't own it`, which undoes the whole rollback. It now resumes only jobs that exist and removes the new `backfill-claim-embeddings` job. Harness: "rollback after B6".
+2. **The switch deleted a current fact.** Step 7's "already shown" matched a value an entry shows only as history (a closed claim), so the live copy of that value was deleted and suppressed. Production has exactly 1 such fact (count query). "Already shown" now means shown as current. Harness: "a live value the page shows only as history is kept". The broader worry (a different fact deleted because another label shows the same value in another section) is 0 in production.
+3. **B6's bag split would have failed.** `split-legacy-bags` filtered with `.or("value.like.%,%,value.like.%;%")`; PostgREST splits an `or` list on commas, so it does not parse, the job answers 500 and the gate fails. Now two plain `like` filters (`loadBagCandidates`, unit test).
+4. **A private fact could reach assistants through the bag split.** `split_legacy_bag` files a piece into an existing slot of its attribute whatever that slot's section is. Production has 1 bag in a private section (count). Bags in private sections are now left whole.
+5. **`writeFact` ended the old value before inserting the new one.** When the database then refused the new value (quality guard, or a quote the code counted as 10 UTF-16 units and Postgres as 5 characters), the old value stayed ended with nothing in its place. It now inserts first and closes after; quotes are counted in characters in `writeFact` and `add_claim`.
+6. **A person could not type a value that had been suppressed** (by "Was wrong", a Revert, or the switch's garbage rule): `write_fact` answered `suppressed`. Suppression now binds machines only.
+7. **A fact added to a private section joined its attribute's public slot**, so assistants saw it. The most private placement now wins, as in the switch and the merge.
+8. **The pause flag failed open**: any error reading it counted as "not paused". It now fails closed, except when the function does not exist yet.
+9. **`get_claims` / `add_claim` named hidden and sensitive entities** when a name was ambiguous (the old test asserted exactly that). The lookup now only sees entities assistants may see.
+10. **Removing a note's AI footprint deleted facts the user typed or corrected** if they cited that note. It now takes machine facts only.
+11. **Deleting a section left its facts under the old slug**: a nameless section that could not be deleted, and a later section with the same slug (possibly private) would take them in. Their slots now move to "Other" first; a private section is still refused by its guard.
+
+**Fixed in `docs/plans/one-fact-store-golive-prompt.md`:**
+
+12. **B0 deployed the new functions before the pause flag was on**, while crons 9 and 18 ran: new code against the old schema. The flag is now switched on first, then the functions are deployed.
+13. **B6 deleted crons 4, 15, 16 and three functions the rollback needs**, and a cron's command holds a secret the session must not read, so they could not be recreated. They now stay paused and deployed until Part C has passed (new step C8). The rollback redeploys from the recorded `main` commit, since a version number cannot be redeployed. The embedding cron has a fixed name the rollback removes.
+
+**Checked and found correct:** every reader that leaves the owner's view goes through `agent_facts` or `match_claims`, and every service-role query names its user; nothing but `backfill-claim-embeddings` embeds a claim, and it reads `agent_facts`; the Godspeed relationship arm drops hidden and sensitive people; logs and errors carry codes, not values; human versus machine in `write_fact`; parked note jobs resume after an hour, so the pause loses no note; the people vault aborts on a read error instead of exporting empty profiles; no stray function, view or cron still names `profile_entries` (catalog counts); the suppression key is the same everywhere.
+
+**Disproven:** the walkthrough leaving orphan rows (the live schema cascades every table from `auth.users`); `writeFact` re-filing a fact a person put in a private section (not reproduced; kept as a guard test).
+
+**Not fixed; for a later change (none blocks go-live):**
+- `add_claim`'s answer ("already recorded", "marked as wrong", `closed_previous`) tells an assistant that a value exists in a private section.
+- A merge does not carry `is_sensitive` or hidden from the merged-away contact to the target (older than this change).
+- A queue Revert of a machine value does not reopen the value it had closed.
+- "Keep this one" and "No longer true" use the browser's date, the view the user's time zone; across midnight the badge can stay a day.
+- The walkthrough's "Was wrong" and "Fix a mistake" checks are weak (a cancelled delete and a NULL embedding both pass).
+- `world_claims` is granted to `anon` (no rows reach it; `agent_facts` is refused).
 
 ## 9. Running this plan
 
