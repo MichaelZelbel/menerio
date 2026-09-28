@@ -28,6 +28,7 @@ import {
   type ClaimHit,
 } from "./claim-search.ts";
 import { todayISO } from "./claims.ts";
+import { assistantVisibleContactIds, groupFactsBySection, labelOf, readFacts } from "./agent-facts.ts";
 
 const SEMANTIC_EMBED_MODEL = "openai/text-embedding-3-small";
 
@@ -171,7 +172,7 @@ export const READ_TOOL_SCHEMAS = [
     function: {
       name: "get_person_profile",
       description:
-        "Look up a person from the user's People list by name and return their full profile: attribute entries (label/value by category), relationships, and aliases. Use this FIRST for any question about a specific person or their profile data — profiles are structured data that note search cannot see.",
+        "Look up a person from the user's People list by name and return their profile: current facts (label/value by section; a fact marked two_answers has more than one current value, report both), relationships, and aliases. Use this FIRST for any question about a specific person or their profile data — profiles are structured data that note search cannot see.",
       parameters: {
         type: "object",
         properties: {
@@ -187,57 +188,66 @@ export const READ_TOOL_SCHEMAS = [
 export const READ_TOOL_NAMES = READ_TOOL_SCHEMAS.map((t) => t.function.name);
 
 /**
- * Load a contact's structured profile (entries + relationships) for the
- * get_person_profile tool and for person-page context injection.
+ * Load a contact's facts and relationships for the get_person_profile tool
+ * and for person-page context injection. Both go into an LLM prompt, so both
+ * follow the assistants' rule: facts from agent_facts (current only, no
+ * private section), and nothing at all for a hidden or sensitive person.
+ * A relationship to a hidden or sensitive person is left out, since its
+ * label and the other person's name would say what agent_facts withholds.
+ * Returns null when there is no such person, or none an assistant may see.
  */
 export async function loadPersonProfile(db: any, userId: string, contactId: string) {
   const { data: contact } = await db
     .from("contacts")
-    .select("id, name, aliases")
+    .select("id, name, aliases, is_sensitive, ai_visibility")
     .eq("id", contactId)
     .eq("user_id", userId)
     .is("merged_into", null)
     .maybeSingle();
-  if (!contact) return null;
+  if (!contact || contact.is_sensitive === true || contact.ai_visibility !== "visible") return null;
 
-  const { data: entries } = await db
-    .from("profile_entries")
-    .select("label, value, profile_categories(name, slug)")
-    .eq("user_id", userId)
-    .eq("contact_id", contactId)
-    .limit(100);
+  const facts = await readFacts(db, userId, { subjectType: "contact", subjectIds: [contactId], limit: 200 });
 
-  const { data: rels } = await db
+  const { data: rels, error: relError } = await db
     .from("contact_relationships")
     .select("source_type, source_id, target_type, target_id, label")
     .eq("user_id", userId)
     .or(`source_id.eq.${contactId},target_id.eq.${contactId}`);
+  if (relError) throw new Error(`Could not read relationships: ${relError.message ?? "error"}`);
 
   const otherIds = new Set<string>();
   for (const r of (rels || []) as any[]) {
     if (r.source_type === "contact" && r.source_id && r.source_id !== contactId) otherIds.add(r.source_id);
     if (r.target_type === "contact" && r.target_id && r.target_id !== contactId) otherIds.add(r.target_id);
   }
+  const visible = await assistantVisibleContactIds(db, userId, [...otherIds]);
   let names: Record<string, string> = {};
-  if (otherIds.size > 0) {
-    const { data: others } = await db.from("contacts").select("id, name").in("id", [...otherIds]);
+  if (visible.size > 0) {
+    const { data: others } = await db.from("contacts").select("id, name").eq("user_id", userId).in("id", [...visible]);
     names = Object.fromEntries((others || []).map((c: any) => [c.id, c.name]));
   }
+  const sideOk = (type: string, id: string | null) =>
+    type !== "contact" || id === contactId || (!!id && visible.has(id));
   const describe = (type: string, id: string | null) =>
     type === "self" ? "the user" : id === contactId ? contact.name : names[id || ""] || "unknown";
 
   return {
     person: { id: contact.id, name: contact.name, aliases: (contact.aliases || []) as string[] },
-    profile_entries: ((entries || []) as any[]).map((e: any) => ({
-      category: e.profile_categories?.name || e.profile_categories?.slug || "other",
-      label: e.label,
-      value: e.value,
-    })),
-    relationships: ((rels || []) as any[]).map((r: any) => ({
-      from: describe(r.source_type, r.source_id),
-      label: r.label,
-      to: describe(r.target_type, r.target_id),
-    })),
+    facts: groupFactsBySection(facts).flatMap((section) =>
+      section.facts.map((f) => ({
+        section: section.name,
+        label: labelOf(f),
+        value: f.value,
+        ...(f.valid_from ? { since: f.valid_from } : {}),
+        ...(f.has_conflict ? { two_answers: true } : {}),
+      }))),
+    relationships: ((rels || []) as any[])
+      .filter((r: any) => sideOk(r.source_type, r.source_id) && sideOk(r.target_type, r.target_id))
+      .map((r: any) => ({
+        from: describe(r.source_type, r.source_id),
+        label: r.label,
+        to: describe(r.target_type, r.target_id),
+      })),
   };
 }
 
@@ -512,8 +522,13 @@ export async function executeReadTool(
           hint: "Multiple people matched — call again with a more specific name.",
         });
       }
-      const profile = await loadPersonProfile(db, userId, matches[0].id);
-      if (!profile) return JSON.stringify({ found: false, message: "Person not found." });
+      let profile;
+      try {
+        profile = await loadPersonProfile(db, userId, matches[0].id);
+      } catch {
+        return JSON.stringify({ error: "Could not read this person's profile right now." });
+      }
+      if (!profile) return JSON.stringify({ found: false, message: "Person not found, or hidden from AI by the user." });
       return JSON.stringify({ found: true, ...profile });
     }
 

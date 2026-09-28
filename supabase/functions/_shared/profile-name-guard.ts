@@ -5,7 +5,7 @@
  * The extractor kept filing online handles and OCR noise as "nicknames"
  * ("yaunderε", "ChocolaJoy"), and re-filing the person's own name as a
  * nickname. Those are not judgment calls, so they are decided in code, before
- * the LLM's output is allowed to hit `profile_entries`.
+ * the LLM's output is allowed to become a fact (a claim, through writeFact).
  *
  * Decisions:
  *  - keep   → store as-is (possibly cleaned)

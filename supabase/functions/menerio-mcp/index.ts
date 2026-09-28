@@ -13,7 +13,17 @@ import { GROUP_BRIEFING_PROMPT, GROUP_NEXT_STEP_PROMPT, GROUP_SUGGEST_MEMBERS_PR
 import { noteText as promptNoteText, taggedPrompt } from "../_shared/prompt-safety.ts";
 import { importGroupMembersFromNotes, previewGroupMembersFromNotes } from "../_shared/group-note-import.ts";
 import { embedAndStoreNoteChunks } from "../_shared/chunk-embeddings.ts";
-import { addClaimWithSupersede, changedSince, isCurrentClaim, isReservedAttribute, normalizeAttribute, sortClaims, todayISO } from "../_shared/claims.ts";
+import { todayISO } from "../_shared/claims.ts";
+import {
+  addClaim,
+  contactContextLines,
+  contactHighlights,
+  contactProfileText,
+  entityFacts,
+  getClaims,
+  resolveEntityByName,
+  userProfileFacts,
+} from "./fact-tools.ts";
 import { lookupGodspeedKey } from "../_shared/mc-auth.ts";
 import { escapeLike, ilikeAnyColumn } from "../_shared/postgrest-filters.ts";
 import { normalizeFolderPath } from "../_shared/note-create-tools.ts";
@@ -1726,29 +1736,11 @@ server.registerTool(
       const redacted = redactContactList(data || []);
       if (!redacted.length) return { content: [{ type: "text" as const, text: "No contacts found." }] };
 
-      // Pull a small allow-list of high-value profile facts per hit so the caller
-      // sees birthdays / nicknames without needing a second tool call.
-      const HIGHLIGHT_LABELS = new Set([
-        "date of birth", "birthday", "nickname", "aliases", "ethnicity",
-        "current city", "job title", "employer",
-      ]);
+      // Pull a small allow-list of high-value facts per hit so the caller sees
+      // birthdays / nicknames without needing a second tool call. From
+      // agent_facts: a hidden or sensitive person has none there.
       const visibleIds = redacted.filter((c: any) => !c._redacted).map((c: any) => c.id);
-      const factsById = new Map<string, string[]>();
-      if (visibleIds.length > 0) {
-        const { data: pe } = await supabase
-          .from("profile_entries")
-          .select("contact_id, label, value")
-          .eq("user_id", getCurrentUserId())
-          .in("contact_id", visibleIds)
-          .limit(400);
-        for (const e of (pe || []) as any[]) {
-          if (!HIGHLIGHT_LABELS.has(String(e.label || "").trim().toLowerCase())) continue;
-          const arr = factsById.get(e.contact_id) || [];
-          if (arr.length >= 4) continue;
-          arr.push(`${e.label}: ${e.value}`);
-          factsById.set(e.contact_id, arr);
-        }
-      }
+      const factsById = await contactHighlights(supabase, getCurrentUserId(), visibleIds);
 
       const lines = redacted.map((c: any, i: number) => {
         // The id is what get_contact_context, add_group_member, the topic tools
@@ -1857,47 +1849,10 @@ server.registerTool(
 
       // Structured profile facts — the whole reason external LLMs ask about a
       // person. Without this section a bot literally cannot see the birthday,
-      // nicknames, favorites, etc. stored in Menerio. Cap ~40 entries; skip
-      // private categories.
-      const { data: catRows } = await supabase
-        .from("profile_categories")
-        .select("id, name, slug, sort_order")
-        .eq("user_id", getCurrentUserId())
-        .eq("contact_id", contact.id)
-        .neq("visibility_scope", "private")
-        .order("sort_order");
-      const profCatIds = (catRows || []).map((c: any) => c.id);
-      if (profCatIds.length > 0) {
-        const { data: profEntries } = await supabase
-          .from("profile_entries")
-          .select("category_id, label, value, sort_order")
-          .eq("user_id", getCurrentUserId())
-          .eq("contact_id", contact.id)
-          .in("category_id", profCatIds)
-          .order("sort_order")
-          .limit(60);
-        if (profEntries?.length) {
-          lines.push("", "## Profile");
-          const byCat = new Map<string, any[]>();
-          for (const e of profEntries as any[]) {
-            const arr = byCat.get(e.category_id) || [];
-            arr.push(e);
-            byCat.set(e.category_id, arr);
-          }
-          let printed = 0;
-          for (const cat of (catRows || []) as any[]) {
-            const es = byCat.get(cat.id);
-            if (!es?.length) continue;
-            lines.push(`### ${cat.name}`);
-            for (const e of es) {
-              if (printed >= 40) break;
-              lines.push(`- ${e.label}: ${e.value}`);
-              printed++;
-            }
-            if (printed >= 40) { lines.push(`(profile truncated at 40 entries)`); break; }
-          }
-        }
-      }
+      // nicknames, favorites, etc. stored in Menerio. Current facts from
+      // agent_facts (no private section), capped at 40; get_contact_profile
+      // has the rest.
+      lines.push(...await contactContextLines(supabase, getCurrentUserId(), contact.id, 40, await userToday()));
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     } catch (err: unknown) {
@@ -1907,24 +1862,28 @@ server.registerTool(
 );
 
 
-// Tool: Get Contact Profile — return a contact's structured profile_entries.
+// Tool: Get Contact Profile — a contact's facts, grouped by section.
 // Mirror of get_user_profile but for a named contact. This is the direct
-// "look up X's birthday / nickname / favorite food" tool.
+// "look up X's birthday / nickname / favorite food" tool. It reads
+// agent_facts only: one source, so every fact prints once, and nothing in a
+// private section or about a hidden or sensitive person comes back.
 server.registerTool(
   "get_contact_profile",
   {
     title: "Get Contact Profile",
     description:
-      "Return a specific contact's structured profile facts (birthday, nicknames, favorite foods, aliases, ethnicity, location, job, …) together with their DATED CLAIMS, which carry validity dates, a confidence and the sentence the fact came from. Use this when the user asks about a specific person's attributes and `get_contact_context` doesn't include enough profile detail. Provide either `name` (fuzzy) or `contact_id`. " +
-      "Prefer a dated claim over a plain profile row and say which you used. A claim marked NOT CONFIRMED SINCE is still usable — give the value and say when it was last confirmed. A claim marked DISAGREES WITH has more than one live answer: report every value, never pick one.",
+      "Return a specific contact's facts (birthday, nicknames, favorite foods, aliases, ethnicity, location, job, …), grouped by section, with their dates when known. Use this when the user asks about a specific person's attributes and `get_contact_context` doesn't include enough profile detail. Provide either `name` (fuzzy) or `contact_id`. " +
+      "A fact marked NOT CONFIRMED SINCE is still usable — give the value and say when it was last confirmed. A fact marked TWO ANSWERS has more than one current value: report every value, never pick one.",
     inputSchema: {
       name: z.string().optional().describe("Contact name (fuzzy, case-insensitive)"),
       contact_id: z.string().uuid().optional().describe("Exact contact UUID"),
       detail: z.enum(["curated", "full"]).optional().default("curated")
-        .describe("curated = the facts flagged to reach an agent unasked, plus every dated claim. full = every profile row as well. Nothing is hidden by 'curated': what it leaves out stays reachable through detail:'full' and through search_brain."),
+        .describe("curated = the facts flagged to reach an agent unasked. full = every fact. Nothing is hidden by 'curated': what it leaves out stays reachable through detail:'full' and through search_brain."),
+      include_history: z.boolean().optional().default(false)
+        .describe("Also list facts that are no longer true (or not true yet), with their dates."),
     },
   },
-  async ({ name, contact_id, detail }) => {
+  async ({ name, contact_id, detail, include_history }) => {
     try {
       if (!name && !contact_id) {
         return { content: [{ type: "text" as const, text: "Provide either `name` or `contact_id`." }], isError: true };
@@ -1935,100 +1894,14 @@ server.registerTool(
       if (c.is_sensitive) {
         return { content: [{ type: "text" as const, text: `# ${c.name}\n🔒 Marked sensitive — profile facts hidden from AI.` }] };
       }
-      const topicsSection = await topicContext(supabase, getCurrentUserId(), c.id);
-      const { data: cats } = await supabase
-        .from("profile_categories")
-        .select("id, name, slug, sort_order")
-        .eq("user_id", getCurrentUserId())
-        .eq("contact_id", c.id)
-        .neq("visibility_scope", "private")
-        .order("sort_order");
-      const ids = (cats || []).map((x: any) => x.id);
-      if (ids.length === 0) {
-        return { content: [{ type: "text" as const, text: `# ${c.name}\n${topicsSection}\nNo structured profile facts recorded yet.` }] };
-      }
-      // Curation, the same treatment get_user_profile got on 2026-08-31 and
-      // for the same reason: an uncurated dump arrives at equal weight, so a
-      // question about someone's birthday comes back with every note-derived
-      // trivium attached. Measured 2026-08-31: the largest contact here held
-      // 38 rows. Fail safe — if nothing is flagged, hand back the whole record
-      // and SAY so, because an empty profile is worse than a long one.
-      const baseEntryQuery = () =>
-        supabase
-          .from("profile_entries")
-          .select("category_id, label, value, sort_order, derived_from_claim_id")
-          .eq("user_id", getCurrentUserId())
-          .eq("contact_id", c.id)
-          .in("category_id", ids)
-          .order("sort_order");
-
-      let entries: any[] | null = null;
-      let curationApplied = detail === "curated";
-      if (curationApplied) {
-        const { data } = await baseEntryQuery().eq("show_to_agent", true);
-        entries = data ?? null;
-        if (!entries?.length) {
-          curationApplied = false;
-          const { data: all } = await baseEntryQuery();
-          entries = all ?? null;
-        }
-      } else {
-        const { data } = await baseEntryQuery();
-        entries = data ?? null;
-      }
-
-      // The dated facts about this person. They were invisible here until
-      // 2026-08-31: this tool is described in the code as get_user_profile's
-      // mirror for a named contact, and it had no idea the claims table
-      // existed. A claim carries dates, a confidence and the sentence it came
-      // from, so it is strictly better than the row beside it.
-      const { data: claimRows } = await supabase
-        .from("claims")
-        .select("id, subject_type, subject_id, attribute, value, valid_from, valid_to, confidence, cardinality, review_by, evidence_quote, source_type, source_id")
-        .eq("user_id", getCurrentUserId())
-        .eq("subject_type", "contact")
-        .eq("subject_id", c.id)
-        .order("valid_from", { ascending: false, nullsFirst: false });
-
-      const today = todayISO();
-      const allHits = toClaimHits(
-        ((claimRows || []) as any[]).map((r) => ({ ...r, similarity: 1 })),
-        () => c.name,
-      );
-      const liveHits = allHits.filter((h) => !h.valid_to || h.valid_to > today);
-      const dated = flagStale(flagConflicts(liveHits), judgeDayFor(null, liveHits, today));
-
-      // A row that displays a claim printed above is that claim again.
-      const printedClaims = new Set(dated.map((h: any) => h.id).filter(Boolean));
-      const byCat = new Map<string, any[]>();
-      for (const e of (entries || []) as any[]) {
-        if (e.derived_from_claim_id && printedClaims.has(e.derived_from_claim_id)) continue;
-        const arr = byCat.get(e.category_id) || [];
-        arr.push(e);
-        byCat.set(e.category_id, arr);
-      }
-      const out: string[] = [`# ${c.name} — Profile`, topicsSection];
-
-      if (dated.length) {
-        out.push(`\n## Dated facts (prefer these over the rows below)`);
-        // The similarity percentage is meaningless here — nothing was searched
-        // for — so it is stripped rather than printed as a fake 100%.
-        for (const h of dated) out.push(renderClaimHit(h).replace(/ · \d+% match/, ""));
-      }
-
-      for (const cat of (cats || []) as any[]) {
-        const es = byCat.get(cat.id);
-        if (!es?.length) continue;
-        out.push(`\n## ${cat.name}`);
-        for (const e of es) out.push(`- ${e.label}: ${e.value}`);
-      }
-      if (out.length === 1) out.push("No entries.");
-      if (detail === "curated" && !curationApplied && (entries?.length ?? 0) > 0) {
-        out.push(`\n(No fact on ${c.name} is flagged for agents yet, so this is the whole record.)`);
-      } else if (curationApplied) {
-        out.push(`\n(Curated view. Ask again with detail:"full" for every profile row.)`);
-      }
-      return { content: [{ type: "text" as const, text: out.join("\n") }] };
+      const text = await contactProfileText(supabase, getCurrentUserId(), {
+        contact: { id: c.id, name: c.name },
+        detail: detail ?? "curated",
+        includeHistory: !!include_history,
+        topicsSection: await topicContext(supabase, getCurrentUserId(), c.id),
+        today: await userToday(),
+      });
+      return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {
       return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
@@ -2849,163 +2722,51 @@ server.registerTool(
         return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
       };
 
-      // Fetch categories (never return private via MCP).
-      // contact_id IS NULL → user's own profile categories (not contacts').
-      let catQuery = supabase
-        .from("profile_categories")
-        .select("id, name, slug, visibility_scope, sort_order")
-        .eq("user_id", getCurrentUserId())
-        .is("contact_id", null)
-        .neq("visibility_scope", "private")
-        .order("sort_order");
-
-      if (scope) {
-        catQuery = catQuery.in("visibility_scope", ["all", scope]);
-      }
-
-      const { data: cats, error: catErr } = await catQuery;
-      if (catErr) return { content: [{ type: "text" as const, text: `Error: ${catErr.message}` }], isError: true };
-
-      let filteredCats = cats || [];
-      if (catSlugs?.length) {
-        filteredCats = filteredCats.filter((c: any) => catSlugs.includes(c.slug));
-      }
-
-      // Fetch entries for these categories — also restricted to the user's own
-      // profile (contact_id IS NULL) so contact entries never leak through.
-      const catIds = filteredCats.map((c: any) => c.id);
-      if (catIds.length === 0) {
+      // The user's own current facts, from agent_facts: never a private
+      // section, never a contact's fact. Measured 2026-08-30: the uncurated
+      // call returns 51 items at equal weight, so a question about a book
+      // arrives with a calorie tracking app and a Telegram thread id attached.
+      // 'curated' is the few the user flagged show_to_agent. Fail safe: if
+      // nothing is flagged, the whole record comes back and the answer SAYS so.
+      const { categories: factCategories, curationApplied, noteIds } = await userProfileFacts(supabase, getCurrentUserId(), {
+        scope,
+        categorySlugs: catSlugs,
+        detail: detail ?? "curated",
+      });
+      if (factCategories.length === 0) {
         return emptyProfileResponse();
       }
 
-      const entryColumns = "category_id, label, value, linked_note_id, sort_order, show_to_agent";
-      const baseEntryQuery = () =>
-        supabase
-          .from("profile_entries")
-          .select(entryColumns)
-          .eq("user_id", getCurrentUserId())
-          .is("contact_id", null)
-          .in("category_id", catIds)
-          .order("sort_order");
-
-      // Measured 2026-08-30: the uncurated call returns 51 items at equal
-      // weight, so a question about a book arrives with a calorie tracking app
-      // and a Telegram thread id attached. 'curated' is the few Michael chose
-      // on 2026-08-31: identity, work, contact. Not tooling.
-      let entries: any[] | null = null;
-      let curationApplied = detail === "curated";
-
-      if (curationApplied) {
-        const { data } = await baseEntryQuery().eq("show_to_agent", true);
-        entries = data ?? null;
-        // Fail safe. If nothing is flagged yet, an empty profile is worse than
-        // a long one, so fall back to the whole record and SAY that it happened
-        // rather than quietly handing back silence.
-        if (!entries?.length) {
-          curationApplied = false;
-          const { data: all } = await baseEntryQuery();
-          entries = all ?? null;
-        }
-      } else {
-        const { data } = await baseEntryQuery();
-        entries = data ?? null;
-      }
-
-      // Check if there are any entries at all
-      if (!entries?.length) {
-        return emptyProfileResponse();
-      }
-
-      // Optionally fetch linked notes
+      // Optionally fetch the notes the facts came from.
       const noteMap = new Map<string, { title: string; content: string }>();
-      if (include_notes) {
-        const noteIds = entries.filter((e: any) => e.linked_note_id).map((e: any) => e.linked_note_id);
-        if (noteIds.length > 0) {
-          // Only this user's live notes that are visible to AI: the full body
-          // of a note hidden from AI used to be returned here as
-          // linked_note_content.
-          const { data: notes } = await supabase
-            .from("notes")
-            .select("id, title, content")
-            .eq("user_id", getCurrentUserId())
-            .eq("is_trashed", false)
-            .eq("ai_visibility", "visible")
-            .in("id", [...new Set(noteIds)]);
-          for (const n of notes || []) {
-            noteMap.set(n.id, { title: n.title, content: n.content });
-          }
+      if (noteIds.length > 0) {
+        // Only this user's live notes that are visible to AI: the full body
+        // of a note hidden from AI used to be returned here as
+        // linked_note_content.
+        const { data: notes } = await supabase
+          .from("notes")
+          .select("id, title, content")
+          .eq("user_id", getCurrentUserId())
+          .eq("is_trashed", false)
+          .eq("ai_visibility", "visible")
+          .in("id", noteIds);
+        for (const n of notes || []) {
+          noteMap.set(n.id, { title: n.title, content: n.content });
         }
       }
 
-      // Build structured response, collapsing categories that share a slug into
-      // one block and de-duplicating entries within each block by (label, value).
-      const slugOrder: string[] = [];
-      const slugBuckets = new Map<string, { name: string; slug: string; catIds: string[] }>();
-      for (const cat of filteredCats as any[]) {
-        const slug = cat.slug || cat.id;
-        if (!slugBuckets.has(slug)) {
-          slugBuckets.set(slug, { name: cat.name, slug, catIds: [cat.id] });
-          slugOrder.push(slug);
-        } else {
-          slugBuckets.get(slug)!.catIds.push(cat.id);
-        }
-      }
-
-      const profileCategories = slugOrder.map((slug) => {
-        const bucket = slugBuckets.get(slug)!;
-        const catIdSet = new Set(bucket.catIds);
-        const seenEntries = new Map<string, Record<string, unknown>>();
-        const orderedKeys: string[] = [];
-
-        for (const e of (entries || []) as any[]) {
-          if (!catIdSet.has(e.category_id)) continue;
-          const labelKey = String(e.label ?? "").trim().toLowerCase();
-          const valueKey = String(e.value ?? "").trim().toLowerCase();
-          const key = `${labelKey}\u0000${valueKey}`;
-
-          const existing = seenEntries.get(key);
-          if (existing) {
-            // Prefer the variant that has a linked note.
-            if (e.linked_note_id && !existing.has_linked_note) {
-              const entry: Record<string, unknown> = {
-                label: e.label,
-                value: e.value,
-                has_linked_note: true,
-              };
-              if (noteMap.has(e.linked_note_id)) {
-                entry.linked_note_title = noteMap.get(e.linked_note_id)!.title;
-                if (include_notes) {
-                  entry.linked_note_content = noteMap.get(e.linked_note_id)!.content;
-                }
-              }
-              seenEntries.set(key, entry);
-            }
-            continue;
-          }
-
-          const entry: Record<string, unknown> = {
-            label: e.label,
-            value: e.value,
-            has_linked_note: !!e.linked_note_id,
+      const profileCategories = factCategories.map((cat) => ({
+        ...cat,
+        entries: cat.entries.map(({ linked_note_id, ...entry }) => {
+          const note = typeof linked_note_id === "string" ? noteMap.get(linked_note_id) : undefined;
+          return {
+            ...entry,
+            has_linked_note: !!note,
+            ...(note ? { linked_note_title: note.title } : {}),
+            ...(note && include_notes ? { linked_note_content: note.content } : {}),
           };
-          if (e.linked_note_id && noteMap.has(e.linked_note_id)) {
-            entry.linked_note_title = noteMap.get(e.linked_note_id)!.title;
-            if (include_notes) {
-              entry.linked_note_content = noteMap.get(e.linked_note_id)!.content;
-            }
-          }
-          seenEntries.set(key, entry);
-          orderedKeys.push(key);
-        }
-
-        const catEntries = orderedKeys.map((k) => seenEntries.get(k)!);
-        if (catEntries.length === 0) return null;
-        return { name: bucket.name, slug: bucket.slug, entries: catEntries };
-      }).filter(Boolean);
-
-      if (profileCategories.length === 0) {
-        return emptyProfileResponse();
-      }
+        }),
+      }));
 
       const result: Record<string, unknown> = {
         profile: { categories: profileCategories },
@@ -3823,15 +3584,6 @@ server.registerTool(
 
 const ENTITY_FIELDS = "id, name, aliases, entity_type, description, tags, metadata, ai_visibility, is_sensitive, created_at, updated_at";
 
-// claims.embedding is a 1536-number vector. `select("*")` handed it to the
-// caller as text, about 20 KB per claim: get_claims at its default limit of
-// 100 answered with roughly two megabytes of numbers no model can use.
-// deno-lint-ignore no-explicit-any
-function claimForAgent(claim: any): Record<string, unknown> {
-  const { embedding: _embedding, ...rest } = claim ?? {};
-  return rest;
-}
-
 function visibleEntities(query: any) {
   return query.eq("ai_visibility", "visible");
 }
@@ -3965,18 +3717,14 @@ server.registerTool(
     const entity = await findEntity(id_or_name);
     if (!entity) return jsonTool({ error: `No entity found matching "${id_or_name}".` });
     if (entity.ai_visibility === "hidden") return jsonTool({ error: "This entity is hidden from AI in Menerio." });
+    // agent_facts leaves out a sensitive entity's facts; its moments and the
+    // notes naming it would still say what the facts say, so the whole
+    // entity stays out, like a sensitive person.
+    if (entity.is_sensitive) return jsonTool({ error: "This entity is marked sensitive in Menerio; its context is hidden from AI." });
     const userId = getCurrentUserId();
-    const today = todayISO();
 
-    const { data: claimRows } = await supabase
-      .from("claims")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("subject_type", "entity")
-      .eq("subject_id", entity.id)
-      .order("valid_from", { ascending: false, nullsFirst: false });
-    const claims = sortClaims((claimRows || []) as any);
-    const current = claims.filter((c: any) => isCurrentClaim(c, today));
+    // From agent_facts, current and (on request) history.
+    const { facts, history } = await entityFacts(supabase, userId, entity.id, !!include_history);
 
     const { data: links } = await supabase.from("moment_entities").select("moment_id").eq("entity_id", entity.id).limit(50);
     let moments: any[] = [];
@@ -4018,8 +3766,8 @@ server.registerTool(
     return jsonTool({
       tool: "get_entity_context",
       entity,
-      facts: current.map(claimForAgent),
-      history: include_history ? claims.filter((c: any) => !isCurrentClaim(c, today)).map(claimForAgent) : undefined,
+      facts,
+      history,
       moments,
       notes,
     });
@@ -4030,152 +3778,79 @@ server.registerTool(
   "add_claim",
   {
     title: "Add Claim",
-    description: "Record a dated fact about the user, a person, or an entity (e.g. employer, lives-in, owner). Any overlapping earlier fact with the same attribute is closed with an end date — nothing is deleted. Relationships between people are NOT claims: use the relationship tools instead.",
+    description: "Record a fact about the user, a person, or an entity (e.g. employer, lives-in, owner) that is true now, or since valid_from. On a single-valued attribute the older value is closed with an end date — nothing is deleted — unless the user typed it themselves; then both stay and are shown as two answers until the user decides. The same value again changes nothing. Requires evidence_quote. Relationships between people are NOT claims: use the relationship tools instead.",
     inputSchema: {
       subject_type: z.enum(["self", "contact", "entity"]),
-      subject_name: z.string().optional().describe("Person or entity name. Omit for subject_type 'self'."),
+      subject_name: z.string().optional().describe("Person or entity name. Omit for subject_type 'self'. A name matching several is refused with their ids."),
       subject_id: z.string().optional().describe("Explicit contact or entity id, if known."),
       attribute: z.string().describe("Open vocabulary, e.g. employer, role, lives-in, owner, status"),
       value: z.string(),
       valid_from: z.string().optional().describe("YYYY-MM-DD when this became true"),
-      valid_to: z.string().optional().describe("YYYY-MM-DD when this stopped being true"),
+      valid_to: z.string().optional().describe("Not accepted: add_claim records what is true now. Refused when given."),
       confidence: z.enum(["certain", "likely", "unsure"]).optional().default("likely"),
       source_note_id: z.string().optional(),
       evidence_quote: z.string().optional()
-        .describe("The exact sentence this fact came from. Give search something to match on: 'employer: Acme' is three words and matches badly."),
-      cardinality: z.enum(["one", "many"]).optional()
-        .describe("one = a second live value is a contradiction and supersedes the first. many = several live values are normal and nothing is closed. Defaults from the attribute."),
-      review_by: z.string().optional()
-        .describe("YYYY-MM-DD when this should be re-checked. Defaults from the attribute: a counter needs weeks, a birth date never."),
+        .describe("REQUIRED. The exact sentence this fact came from, at least 10 characters. A fact without one is refused."),
     },
   },
-  async ({ subject_type, subject_name, subject_id, attribute, value, valid_from, valid_to, confidence, source_note_id, evidence_quote, cardinality, review_by }) => {
+  async ({ subject_type, subject_name, subject_id, attribute, value, valid_from, valid_to, confidence, source_note_id, evidence_quote }) => {
     try {
-      if (isReservedAttribute(attribute)) {
-        return jsonTool({
-          error: "Relationships between people are not claims. Use the relationship path so canonical labels, inverses and the rejection ledger stay authoritative.",
-        });
-      }
       const userId = getCurrentUserId();
       let resolvedId: string | null = null;
       if (subject_type === "contact") {
-        if (subject_id) resolvedId = subject_id;
-        else if (subject_name) {
-          const contacts = await resolveOrCreateContactsByName([subject_name]);
-          resolvedId = contacts[0]?.id ?? null;
+        if (subject_id) {
+          if (!looksLikeUuid(subject_id)) return jsonTool({ error: `subject_id is not a contact id: ${subject_id}` });
+          resolvedId = subject_id;
+        } else if (subject_name) {
+          // Never creates a person, and never guesses between two: the same
+          // resolver as get_claims and the other write tools.
+          try {
+            resolvedId = (await resolveContactByName(subject_name, "id, name")).id;
+          } catch (err) {
+            return jsonTool({ error: (err as Error).message.replace("Call again with contact_id.", "Call again with subject_id.") });
+          }
         }
         if (!resolvedId) return jsonTool({ error: "subject_name or subject_id is required for a contact claim." });
         await assertWritable(supabase, userId, "contact", resolvedId);
       } else if (subject_type === "entity") {
-        if (subject_id) resolvedId = subject_id;
-        else if (subject_name) {
-          const entities = await resolveOrCreateEntitiesByName([subject_name]);
-          resolvedId = entities[0]?.id ?? null;
-        }
-        if (!resolvedId) return jsonTool({ error: "subject_name or subject_id is required for an entity claim." });
-        // A contact id is checked by assertWritable above; an entity id was
-        // stored as given, so any string (or another account's entity id)
-        // became a claim about nothing that no entity view would ever show.
         if (subject_id) {
           if (!looksLikeUuid(subject_id)) return jsonTool({ error: `subject_id is not an entity id: ${subject_id}` });
-          const { data: owned, error: entityErr } = await supabase
-            .from("entities").select("id").eq("user_id", userId).eq("id", subject_id).maybeSingle();
-          if (entityErr) return jsonTool({ error: `Could not check the entity: ${entityErr.message}` });
-          if (!owned) return jsonTool({ error: `No entity with id ${subject_id} in this account.` });
+          resolvedId = subject_id;
+        } else if (subject_name) {
+          const match = await resolveEntityByName(supabase, userId, subject_name);
+          if ("error" in match) return jsonTool({ error: match.error });
+          resolvedId = match.entity.id;
         }
-      }
-      if (source_note_id) {
-        // Same for the source note: it is the claim's evidence link, so it
-        // must be one of this user's notes.
-        if (!looksLikeUuid(source_note_id)) return jsonTool({ error: `source_note_id is not a note id: ${source_note_id}` });
-        const { data: note, error: noteErr } = await supabase
-          .from("notes").select("id").eq("user_id", userId).eq("id", source_note_id).maybeSingle();
-        if (noteErr) return jsonTool({ error: `Could not check the source note: ${noteErr.message}` });
-        if (!note) return jsonTool({ error: `No note with id ${source_note_id} in this account.` });
+        if (!resolvedId) return jsonTool({ error: "subject_name or subject_id is required for an entity claim." });
       }
 
-      const { claim, superseded } = await addClaimWithSupersede(supabase, {
-        user_id: userId,
-        subject_type,
-        subject_id: resolvedId,
+      // writeFact checks the subject belongs to this account, refuses a fact
+      // without a quote, treats the same value as already recorded, and never
+      // lets this machine writer close a value the user typed.
+      return jsonTool(await addClaim(supabase, userId, {
+        subject: { type: subject_type, id: subject_type === "self" ? null : resolvedId },
         attribute,
         value,
-        valid_from: valid_from ?? null,
-        valid_to: valid_to ?? null,
+        evidenceQuote: evidence_quote ?? null,
+        validFrom: valid_from ?? null,
+        validTo: valid_to ?? null,
         confidence,
-        // Both default from the attribute inside addClaimWithSupersede when
-        // omitted, so a caller that knows nothing about either still gets
-        // correct supersede behaviour and a sensible review date.
-        cardinality,
-        evidence_quote: evidence_quote ?? null,
-        review_by: review_by ?? undefined,
-        source_type: source_note_id ? "note" : "ai",
-        source_id: source_note_id ?? null,
-      });
-      // Embed it so search_brain can find it. Best-effort on purpose: an
-      // embedding provider having a bad minute must never cost the user a
-      // fact. An unembedded claim is invisible to semantic search and still
-      // perfectly readable through get_claims, and backfill-claim-embeddings
-      // sweeps up anything that failed here.
-      //
-      // The quote is embedded when there is one: "employer: Acme" is three
-      // words and matches badly, while the sentence it came from is what a
-      // person would actually type.
-      try {
-        const text = claim.evidence_quote
-          ? `${claim.attribute}: ${claim.value}\n${claim.evidence_quote}`
-          : `${claim.attribute}: ${claim.value}`;
-        const emb = await getEmbedding(text, "mcp-capture");
-        await supabase.from("claims").update({ embedding: emb }).eq("id", claim.id);
-      } catch (_e) {
-        // Deliberately silent to the caller; the sweeper is the safety net.
-      }
-
-      return jsonTool({ tool: "add_claim", claim: claimForAgent(claim as any), superseded_count: superseded.length, superseded: superseded.map((c) => claimForAgent(c as any)) });
+        sourceNoteId: source_note_id ?? null,
+      }));
     } catch (err: unknown) {
       return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" });
     }
   },
 );
 
-/**
- * Claims whose subject an AI may see. search_brain's claim arm (match_claims)
- * already drops claims about a contact who is sensitive, hidden or merged away;
- * get_claims read the table directly and handed them all out, so a sensitive
- * person's facts were one call away. Entities hidden from AI are dropped too,
- * as get_entity_context does.
- */
-async function visibleClaims<T extends { subject_type: string; subject_id: string | null }>(rows: T[]): Promise<T[]> {
-  const contactIds = [...new Set(rows.filter((r) => r.subject_type === "contact" && r.subject_id).map((r) => r.subject_id))];
-  const entityIds = [...new Set(rows.filter((r) => r.subject_type === "entity" && r.subject_id).map((r) => r.subject_id))];
-  const okContacts = new Set<string>();
-  const okEntities = new Set<string>();
-  for (let i = 0; i < contactIds.length; i += 200) {
-    const { data, error } = await supabase.from("contacts").select("id").eq("user_id", getCurrentUserId())
-      .in("id", contactIds.slice(i, i + 200)).is("merged_into", null).eq("ai_visibility", "visible").not("is_sensitive", "is", true);
-    if (error) throw new Error(`Could not check who the claims are about: ${error.message}`);
-    for (const c of data || []) okContacts.add(c.id);
-  }
-  for (let i = 0; i < entityIds.length; i += 200) {
-    const { data, error } = await supabase.from("entities").select("id").eq("user_id", getCurrentUserId())
-      .in("id", entityIds.slice(i, i + 200)).eq("ai_visibility", "visible");
-    if (error) throw new Error(`Could not check what the claims are about: ${error.message}`);
-    for (const e of data || []) okEntities.add(e.id);
-  }
-  return rows.filter((r) =>
-    r.subject_type === "contact" ? okContacts.has(r.subject_id ?? "")
-    : r.subject_type === "entity" ? okEntities.has(r.subject_id ?? "")
-    : true);
-}
-
 server.registerTool(
   "get_claims",
   {
     title: "Get Claims",
-    description: "Read dated facts. Mode 'current' returns what is true now, 'history' returns everything including ended facts, 'changed_since' returns facts that started or ended after a date.",
+    description: "Read dated facts. Mode 'current' returns what is true now, 'history' returns everything including ended facts, 'changed_since' returns facts that started or ended after a date. A fact marked two_answers has more than one current value: report every value, never pick one.",
     inputSchema: {
       subject_type: z.enum(["self", "contact", "entity"]).optional(),
-      subject_name: z.string().optional().describe("Person or entity name; requires subject_type contact or entity. An exact name wins; a name matching several people is refused with their ids."),
+      subject_name: z.string().optional().describe("Person or entity name; requires subject_type contact or entity. An exact name wins; a name matching several is refused with their ids."),
       subject_id: z.string().optional().describe("Contact or entity id, if known."),
       attribute: z.string().optional(),
       mode: z.enum(["current", "history", "changed_since"]).optional().default("current"),
@@ -4184,55 +3859,49 @@ server.registerTool(
     },
   },
   async ({ subject_type, subject_name, subject_id, attribute, mode, since, limit: rawLimit }) => {
-    const userId = getCurrentUserId();
-    const limit = clampNumber(rawLimit, 1, 1000, 100);
-    if (subject_id && !looksLikeUuid(subject_id)) return jsonTool({ error: `subject_id is not an id: ${subject_id}` });
-    // The mode filter runs on the rows below, so the database limit only
-    // applies as-is for mode "all". For "current" and "changed_since" the
-    // limit used to cut the rows before the filter, and a subject with more
-    // closed claims than the limit silently lost current ones.
-    const today = todayISO();
-    let q = supabase.from("claims").select("*").eq("user_id", userId).order("valid_from", { ascending: false, nullsFirst: false });
-    if (mode === "current") q = q.or(`valid_to.is.null,valid_to.gt.${today}`).limit(limit);
-    else if (mode === "changed_since" && since && /^\d{4}-\d{2}-\d{2}$/.test(since)) q = q.or(`valid_from.gte.${since},valid_to.gte.${since}`).limit(limit);
-    else q = q.limit(limit);
-    if (subject_type) q = q.eq("subject_type", subject_type);
-    if (attribute) q = q.eq("attribute", normalizeAttribute(attribute));
+    try {
+      const userId = getCurrentUserId();
+      const limit = clampNumber(rawLimit, 1, 1000, 100);
+      if (subject_id && !looksLikeUuid(subject_id)) return jsonTool({ error: `subject_id is not an id: ${subject_id}` });
 
-    // A name without a subject_type used to be ignored, and the call returned
-    // every claim in the account, none of them carrying a name, which read as
-    // that one person's facts.
-    if (subject_name && !subject_id && (!subject_type || subject_type === "self")) {
-      return jsonTool({ error: `subject_name needs subject_type "contact" or "entity". Nothing was filtered, so nothing is returned.` });
-    }
-    let resolvedId = subject_id ?? null;
-    if (!resolvedId && subject_name && subject_type && subject_type !== "self") {
-      if (subject_type === "entity") resolvedId = (await findEntity(subject_name))?.id ?? null;
-      else {
-        // `%name%` with limit(1) answered "Ann" with whichever of Joanna,
-        // Annette or Ann came back first, and the facts of the wrong person
-        // were reported as Ann's. Same resolver as the write tools: an exact
-        // name wins, an ambiguous one is refused with the candidates.
-        try {
-          resolvedId = (await resolveContactByName(subject_name, "id, name")).id;
-        } catch (err) {
-          return jsonTool({ error: (err as Error).message.replace("Nothing was written. Call again with contact_id.", "Call again with subject_id.") });
+      // A name without a subject_type used to be ignored, and the call returned
+      // every claim in the account, none of them carrying a name, which read as
+      // that one person's facts.
+      if (subject_name && !subject_id && (!subject_type || subject_type === "self")) {
+        return jsonTool({ error: `subject_name needs subject_type "contact" or "entity". Nothing was filtered, so nothing is returned.` });
+      }
+      let resolvedId = subject_id ?? null;
+      if (!resolvedId && subject_name && subject_type && subject_type !== "self") {
+        if (subject_type === "entity") {
+          const match = await resolveEntityByName(supabase, userId, subject_name);
+          if ("error" in match) return jsonTool({ error: match.error });
+          resolvedId = match.entity.id;
+        } else {
+          // `%name%` with limit(1) answered "Ann" with whichever of Joanna,
+          // Annette or Ann came back first, and the facts of the wrong person
+          // were reported as Ann's. Same resolver as the write tools: an exact
+          // name wins, an ambiguous one is refused with the candidates.
+          try {
+            resolvedId = (await resolveContactByName(subject_name, "id, name")).id;
+          } catch (err) {
+            return jsonTool({ error: (err as Error).message.replace("Nothing was written. Call again with contact_id.", "Call again with subject_id.") });
+          }
         }
       }
-      if (!resolvedId) return jsonTool({ message: `No ${subject_type} found matching "${subject_name}".` });
-    }
-    if (subject_type === "self") q = q.is("subject_id", null);
-    else if (resolvedId) q = q.eq("subject_id", resolvedId);
 
-    const { data, error } = await q;
-    if (error) return jsonTool({ error: error.message });
-    let rows = sortClaims(await visibleClaims(data || []) as any);
-    if (mode === "current") rows = rows.filter((c: any) => isCurrentClaim(c, today));
-    else if (mode === "changed_since") {
-      if (!since) return jsonTool({ error: "mode 'changed_since' requires a `since` date (YYYY-MM-DD)." });
-      rows = changedSince(rows as any, since);
+      // Every mode reads agent_facts: no private section, no hidden or
+      // sensitive person or entity, whatever the subject filter says.
+      return jsonTool(await getClaims(supabase, userId, {
+        mode: mode ?? "current",
+        since,
+        subjectType: subject_type,
+        subjectId: subject_type === "self" ? null : resolvedId,
+        attribute,
+        limit,
+      }));
+    } catch (err: unknown) {
+      return jsonTool({ error: err instanceof Error ? err.message : "Unknown error" });
     }
-    return jsonTool({ tool: "get_claims", mode, count: rows.length, claims: rows.map((c: any) => claimForAgent(c)) });
   },
 );
 

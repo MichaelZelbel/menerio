@@ -188,3 +188,50 @@ export function parseLimit(raw?: string | null, fallback = 500, max = 2000): num
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return Math.min(n, max);
 }
+
+/** PostgREST's row cap per response on Supabase. A window larger than this is read in pages. */
+export const SERVER_PAGE_CAP = 1000;
+
+/**
+ * Read `limit` rows starting at `offset`, in pages the server will actually
+ * return. `parseLimit` allows up to 2000, but a single `.range()` is cut to
+ * 1000 rows without a word, and a client paging until it gets a short page
+ * stopped at 1000 and never saw the rest.
+ *
+ * Stops on an empty page or once `limit` rows are in hand. A server cap below
+ * the page size only means more pages, never a silent cut.
+ */
+export async function readWindow<T>(
+  fetchRange: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  offset: number,
+  limit: number,
+  pageSize = SERVER_PAGE_CAP,
+): Promise<T[]> {
+  const out: T[] = [];
+  let from = offset;
+  while (out.length < limit) {
+    const want = Math.min(pageSize, limit - out.length);
+    const { data, error } = await fetchRange(from, from + want - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    if (rows.length === 0) break;
+    out.push(...rows.slice(0, limit - out.length));
+    from += rows.length;
+  }
+  return out;
+}
+
+/**
+ * The PostgREST filter that keeps a world_claims row away from people the
+ * mirror must not name. The claim arm of world_claims reads agent_facts, so it
+ * never holds such a row; the relationship arm reads contact_relationships
+ * directly, and a relationship from or to a hidden or sensitive person would
+ * put that person's id and label into a git repository. Null when there is
+ * nobody to leave out.
+ */
+export function relationshipExclusionFilter(excludedContactIds: string[]): string | null {
+  const ids = [...new Set(excludedContactIds.filter(Boolean))];
+  if (ids.length === 0) return null;
+  const list = `(${ids.join(",")})`;
+  return `and(or(subject_id.is.null,subject_id.not.in.${list}),or(object_id.is.null,object_id.not.in.${list}))`;
+}

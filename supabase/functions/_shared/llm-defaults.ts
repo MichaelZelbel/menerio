@@ -784,7 +784,7 @@ function normalizeSchemaDescription(): string {
   return lines.join("\n");
 }
 
-export const NORMALIZE_PROFILE_PLAN_PROMPT = `You normalize ONE person's profile (owner or contact). You receive a JSON list of their CURRENT profile_entries. Your job: produce groups of entries that should be merged/relabeled/recategorized/reformatted into a single canonical entry.
+export const NORMALIZE_PROFILE_PLAN_PROMPT = `You normalize ONE person's profile (owner or contact). You receive a JSON list of their CURRENT profile entries. Your job: produce groups of entries that should be merged/relabeled/recategorized/reformatted into a single canonical entry.
 
 Canonical schema (per category, [single]=one truth per subject, [multi]=many allowed):
 ${normalizeSchemaDescription()}

@@ -8,6 +8,7 @@ import {
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
 import { getUserProfile, formatUserProfileDigest } from "../_shared/user-profile.ts";
+import { labelOf, readFacts, sectionOf, uniqueFacts, type FactRow } from "../_shared/agent-facts.ts";
 import { sanitizePromptText } from "../_shared/prompt-safety.ts";
 import { buildAwarenessContext } from "../_shared/awareness.ts";
 import { webSearchTool, runWebSearch } from "../_shared/web-search.ts";
@@ -110,7 +111,13 @@ Deno.serve(async (req) => {
     const [historyResult, personResult, profileResult, notesResult, momentsResult, shortDocsResult] = await Promise.all([
       supabase.from("conversation_messages").select("role, content").eq("user_id", user.id).eq("person_id", personId).order("created_at", { ascending: false }).limit(10),
       personId ? supabase.from("contacts").select("id, name, notes, tags, aliases, metadata").eq("user_id", user.id).eq("id", personId).single() : Promise.resolve({ data: null }),
-      personId ? supabase.from("profile_entries").select("label, value, profile_categories(name)").eq("user_id", user.id).eq("contact_id", personId).limit(50) : Promise.resolve({ data: [] }),
+      // The person's current facts from agent_facts: this goes into an LLM
+      // prompt, so no private section and nothing about a hidden or sensitive
+      // person. A failed read leaves the facts out rather than failing the chat.
+      personId
+        ? readFacts(supabase, user.id, { subjectType: "contact", subjectIds: [personId], limit: 50 })
+          .then((data) => ({ data }), () => ({ data: [] as FactRow[] }))
+        : Promise.resolve({ data: [] as FactRow[] }),
       supabase.from("notes").select("title, created_at, metadata").eq("user_id", user.id).eq("is_trashed", false).eq("ai_visibility", "visible").order("created_at", { ascending: false }).limit(50),
       supabase.from("moments").select("title, description, happened_at, impact_level, status").eq("user_id", user.id).is("deleted_at", null).order("happened_at", { ascending: false }).limit(50),
       personId ? supabase.from("person_documents").select("title, content").eq("user_id", user.id).eq("person_id", personId).eq("memory_type", "short_term") : Promise.resolve({ data: [] }),
@@ -239,7 +246,7 @@ Deno.serve(async (req) => {
   }
 });
 
-function buildPersonContext(person: any, profileEntries: any[], notes: any[], moments: any[]) {
+function buildPersonContext(person: any, profileEntries: FactRow[], notes: any[], moments: any[]) {
   if (!person) return "";
   let ctx = `## Person Context\nName: ${person.name}\n`;
   if (person.aliases?.length) ctx += `Aliases: ${person.aliases.join(", ")}\n`;
@@ -247,7 +254,9 @@ function buildPersonContext(person: any, profileEntries: any[], notes: any[], mo
   if (person.notes) ctx += `Notes: ${person.notes}\n`;
   if (profileEntries.length) {
     ctx += "\n### Profile\n";
-    for (const entry of profileEntries) ctx += `- ${entry.profile_categories?.name || "Profile"}: ${entry.label} — ${entry.value}\n`;
+    for (const fact of uniqueFacts(profileEntries)) {
+      ctx += `- ${sectionOf(fact).name}: ${labelOf(fact)} — ${fact.value}${fact.has_conflict ? " (one of two current answers; report both)" : ""}\n`;
+    }
   }
   if (moments.length) {
     ctx += "\n### Related Moments\n";
