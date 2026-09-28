@@ -550,7 +550,7 @@ Why this is safe without staged holds:
   - `scripts/check-no-prod-data.mjs` scans every staged commit for secrets (`x-cron-key`, `eyJ`, `sb_secret`) as a backstop. It is a backstop only; the rule above is what prevents it.
 - **Migrations.** One file per change in `supabase/migrations/`, each with `supabase/rollback/<name>_rollback.sql`. They are applied through the Supabase management API and recorded by hand in `supabase_migrations.schema_migrations`. Never `supabase db push`. Every function a migration redefines is written from its **live** text (A1 dump), not from the repo's oldest version. For example, `match_claims` starts from `20260923150000:221-340`, which carries the cross-account check.
 - **Edge functions** are deployed with a script that deploys the listed functions one after another and stops at the first failure.
-- **Frontend.** Pushing to `main` only rebuilds the preview. Part A step 1 writes down exactly how production is published, so B4 is one known action.
+- **Frontend.** Pushing to `main` publishes the site (Michael, 2026-09-29). No Lovable coding agent and no browser are used.
 - **Counts are assertions.** Every equality in B5 is checked inside the transaction (`IF … THEN RAISE EXCEPTION`), not read afterwards by eye.
 - **Approval.** Michael approves once, before Part B starts. Part B then runs without stopping for approval between steps.
 
@@ -731,7 +731,7 @@ Michael does not use Menerio during Parts B and C, except for the walk-through i
 | B1 | **Pause every fact writer.** Pause crons 4, 9, 11, 12, 15, 16 and 18 (`cron.alter_job(id, active := false)`), and every non-cron path found in A1. **Set the fact-writer pause flag** (A1 run, finding 3): about nine functions call `process-note` directly and fire-and-forget (`receive-note`, `telegram-capture`, `discord-capture`, `singlefile-capture`, `mc-api-notes`, `menerio-mcp` capture, `note-chat`, `conversation-chat`, the editor's manual run), and webhooks can arrive at any time, so they cannot be paused one by one. `process-note` and every other fact writer (`extract-moment-profile`, `enrich-person-from-lexicon`, `normalize-profile`, `add_claim`) read one flag row in the database; while it is set, a note is left in `note_ai_jobs` for cron 18 instead of being processed, and the others refuse with a retryable error. The flag is added in Part A and deployed before B1; B6 clears it. Michael pauses the hourly Godspeed runner on his machine (it also pushes notes up). **Snapshot** `profile_entries`, `profile_categories`, `claims`, `review_queue` and `ai_suggestion_suppressions` into schema `fact_backup`: `REVOKE ALL ON SCHEMA fact_backup FROM public, anon, authenticated`, and it is not in the API's exposed schemas. No CSV export. | Snapshot row counts equal the live counts. No fact-writing job is active. The pause flag is set. |
 | B2 | Apply `…_fact_store_schema.sql`. | It applied. The views answer as the `authenticated` role. |
 | B3 | Deploy every changed edge function (script, in dependency order: `_shared` users first, `menerio-mcp` last). | Every deploy succeeded; if one fails, stop and roll back (5.4). |
-| B4 | Publish the production frontend. | The new bundle is served (its asset hash changed). |
+| B4 | Merge the implementation branch into `main` and push; that publishes the site. | The push succeeded. |
 | B5 | Re-run `build-fact-label-map` (seconds), then apply `…_fact_store_switch.sql`. | The transaction committed, so every assertion held. If it raised, nothing changed: fix the cause and retry once, else roll back. |
 | B6 | **Restart.** Run the one-time bag split (`writeFact`'s splitter over the carried-over bag values, service role: pieces inserted, the bag retracted; a bag Michael typed becomes a review suggestion instead). Delete crons 4, 15 and 16 and the `promote-profile-entries`, `profile-audit` and `admin-normalize` functions. Resume crons 9, 11, 12 and 18, and the other paths paused in B1. Add the `backfill-claim-embeddings` cron (every 10 minutes, `call_edge`) and run it once now. `VALIDATE CONSTRAINT claims_origin_known` (0 violations was shown in A6). Update `docs/CRON_JOBS.md` (job names and schedules only). | The bag split and the embedding run finished without errors. |
 
@@ -747,7 +747,7 @@ Michael does not use Menerio during Parts B and C, except for the walk-through i
    - `review_queue` is not restored wholesale, so items created after B1 survive. Items the switch re-pointed get their entry ids and `profile_entry` type back, through `derived_from_claim_id`.
 4. Re-create the foreign keys and **then** the entry triggers, after the data is back (otherwise atomize and canonicalize rewrite the restored rows). Restore `world_claims` (the `20260901098000` text), `merge_contacts_atomic` (its previous live text) and `match_claims` (its live text from A1, which is `20260923150000`'s).
 5. Roll back the schema migration: drop the views, `fact_today`, `fact_slots` and `claims.rank`.
-6. Redeploy the function versions recorded in A1 (including `promote-profile-entries`), and republish the previous frontend.
+6. Redeploy the function versions recorded in A1 (including `promote-profile-entries`), and revert the merge commit on `main` and push (the previous site).
 7. Resume crons 9, 11, 12, 16 and 18. Keep 4 and 15 paused, because R2 lives in that code.
 
 **Check:** the restored tables' row counts equal the `fact_backup` counts, and RLS and policy counts equal B16. The next Godspeed pull restores the old files (same ids).
@@ -1064,7 +1064,7 @@ Michael does not sit with anyone and does not do steps. This section overrides 5
 - **Re-running A6 first.** The rules above changed the switch, so the go-live session re-runs the trial and continues only if every assertion holds and the counts are within 5 % of the last A6 run (data changes daily).
 
 **Changes to Part C:**
-- **The page walk-through (C4)** becomes a Playwright script. It uses a throwaway test account that the session creates through the admin API and deletes afterwards, and it performs every action C4 lists, checking the rows after each one.
+- **The page walk-through (C4)** becomes `scripts/golive/page-walkthrough.mjs`: a throwaway test user that the session creates through the admin API and deletes afterwards performs every action C4 lists through the page's own calls, and the rows are checked after each one. No browser.
 - **Godspeed (C6).** The kit's mass-removal guard accepts the removal count that A6 reported (A4 adds this allowance). The session runs the pull itself if it is on the runner's machine; otherwise the next hourly run does it.
 
 **If anything fails:** any failed gate in B or C runs the rollback (5.4) automatically, re-checks it, resumes the jobs and writes a report. Nobody is asked anything. In both outcomes Michael gets one short message: done, or rolled back and why.
