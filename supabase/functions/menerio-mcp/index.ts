@@ -3498,13 +3498,23 @@ server.registerTool(
       // Claims go FIRST, and not for tidiness. They are the only hits that
       // carry their own dates, so a reader who stops early has stopped on the
       // evidence that can be checked rather than on an undated sentence.
-      for (const h of claimHits) {
+      //
+      // But they are capped by `limit`, as the schema says (searchClaims
+      // fetches at least 20 so conflicts can be seen), and they may take at
+      // most 60% of the budget while notes are waiting: on 2026-09-30 a query
+      // with limit 3 answered 20 claims at 35-40% similarity and not one note.
+      const claimBudget = notePage.length > 0 ? Math.floor(RESPONSE_CHAR_BUDGET * 0.6) : RESPONSE_CHAR_BUDGET;
+      const claimPage = claimHits.slice(0, limit);
+      let claimsShown = 0;
+      for (const h of claimPage) {
         const block = renderClaimHit(h);
         const cost = block.length + 2;
-        if (used + cost > RESPONSE_CHAR_BUDGET && blocks.length > 0) { capped = true; break; }
+        if (used + cost > claimBudget && blocks.length > 0) break;
         blocks.push(block);
         used += cost;
+        claimsShown++;
       }
+      const claimsLeft = claimHits.length - claimsShown;
 
       for (let i = 0; !capped && i < notePage.length; i++) {
         const t = notePage[i] as any;
@@ -3539,6 +3549,9 @@ server.registerTool(
           : `\n\n… capped (response budget reached) before every Lexicon page was shown. Use lexicon_search for the Lexicon pages alone.`;
       } else if (offset + notePage.length < noteTotal) {
         text += `\n\nMore notes: re-run with offset=${offset + notePage.length}.`;
+      }
+      if (claimsLeft > 0) {
+        text += `\n\n${claimsLeft} more claim(s) not shown: re-run with include=["claim"] and a higher limit to see them.`;
       }
       return { content: [{ type: "text" as const, text }] };
     } catch (err: unknown) {

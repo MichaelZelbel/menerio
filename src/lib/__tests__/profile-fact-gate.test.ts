@@ -56,6 +56,17 @@ describe("splitToFacts", () => {
     const prose = "We met in 2019 at a conference, then stayed in touch, and later worked together";
     expect(splitToFacts("Professional summary", prose)).toEqual([prose]);
   });
+
+  it("keeps a goal, a task or a status whole, however it is labelled", () => {
+    const aim = "Becoming a thought leader in AI as a mission control, as a help system for life, while he keeps the final say";
+    for (const label of ["Professional goal", "professional-goal", "Goal", "Fitness goal", "Task", "Current project status", "Life goals"]) {
+      expect(splitToFacts(label, aim)).toEqual([aim]);
+    }
+    // A real list label still splits.
+    expect(splitToFacts("Hobbies", "chess, hiking, VRChat")).toEqual(["chess", "hiking", "VRChat"]);
+    // "Goalkeeper" is not a goal.
+    expect(splitToFacts("Favorite goalkeepers", "Neuer, Buffon, Casillas")).toEqual(["Neuer", "Buffon", "Casillas"]);
+  });
 });
 
 describe("routeFact", () => {

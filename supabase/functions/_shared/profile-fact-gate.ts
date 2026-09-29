@@ -144,6 +144,17 @@ const NEVER_SPLIT_LABELS = new Set([
 ]);
 
 /**
+ * Labels whose value is a sentence, whatever words they come with ("Goal",
+ * "Professional goal", "Fitness goal", "Task", "Current project status").
+ * Cutting such a value at its commas made facts out of clause fragments: on
+ * 2026-09-30 one sentence about Michael's aims was 44 current
+ * "professional-goal" claims ("or list", "roundabout 5", "while he keeps the
+ * final say"), and "goal" held 35 from one quote. Kept whole, a real list of
+ * goals is one fact with its words intact; cut, a sentence is noise.
+ */
+const PROSE_LABEL_RE = /\b(goals?|tasks?|plans?|aspirations?|dreams?|wish(es)?|intentions?|status)\b/;
+
+/**
  * Explode a stored value into candidate atomic facts.
  *
  * Conservative on purpose: "São Paulo, Brazil" (one separator, short) is ONE
@@ -154,6 +165,7 @@ export function splitToFacts(label: string, value: string): string[] {
   const v = String(value || "").trim();
   if (!v) return [];
   if (NEVER_SPLIT_LABELS.has(String(label || "").trim().toLowerCase())) return [v];
+  if (PROSE_LABEL_RE.test(String(label || "").toLowerCase().replace(/[^a-z]+/g, " "))) return [v];
 
   const scan = (respectBrackets: boolean) => {
     const segments: string[] = [];
