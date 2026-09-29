@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchUserNames } from "@/lib/adminDirectory";
 import { showToast } from "@/lib/toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -42,12 +43,7 @@ const REVIEW_QUEUE_LIMIT = 50;
 type ProfileMap = Record<string, string>;
 
 async function fetchProfileNames(userIds: string[]): Promise<ProfileMap> {
-  if (userIds.length === 0) return {};
-  const unique = [...new Set(userIds)];
-  const { data } = await supabase.from("profiles").select("id, display_name").in("id", unique);
-  const map: ProfileMap = {};
-  (data || []).forEach((p: any) => { map[p.id] = p.display_name || "Unknown"; });
-  return map;
+  return fetchUserNames(userIds).catch(() => ({}));
 }
 
 function UserName({ userId, profiles }: { userId: string; profiles: ProfileMap }) {
