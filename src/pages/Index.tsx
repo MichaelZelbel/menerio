@@ -33,7 +33,7 @@ const homepageFeatures = [
   {
     icon: Network,
     title: "MCP-Ready",
-    description: "Connect any AI tool — Claude, ChatGPT, Cursor — to your brain via the Model Context Protocol. One brain, every AI.",
+    description: "Connect any AI tool (Claude, ChatGPT, Cursor) to your brain via the Model Context Protocol. One brain, every AI.",
   },
   {
     icon: Database,
@@ -160,7 +160,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen overflow-hidden bg-[hsl(var(--background))] text-[hsl(var(--landing-text))] dark:bg-[hsl(var(--landing-page))]">
-      <SEOHead title="Menerio — One Brain. Every AI." description="Capture every thought, organize it by meaning, and make it available to any AI through Menerio." jsonLd={{ "@context": "https://schema.org", "@type": "WebApplication", name: "Menerio", applicationCategory: "ProductivityApplication" }} />
+      <SEOHead title="Menerio | One Brain. Every AI." description="Capture every thought, organize it by meaning, and make it available to any AI through Menerio." jsonLd={{ "@context": "https://schema.org", "@type": "WebApplication", name: "Menerio", applicationCategory: "ProductivityApplication" }} />
       <main className="relative overflow-hidden">
         <div className="absolute inset-0">
           <div className="absolute -left-[160px] -top-[120px] h-[520px] w-[820px] bg-[radial-gradient(ellipse,hsl(var(--brand)/.07),transparent_70%)] blur-3xl dark:landing-aurora-drift dark:-left-[200px] dark:-top-[150px] dark:h-[700px] dark:w-[1100px] dark:bg-[radial-gradient(ellipse,hsl(var(--landing-sky-deep)/.45),transparent_70%)]" />
@@ -188,7 +188,7 @@ const Index = () => {
                 One Brain.<br />
                 <span className="hero-gradient-text">Every AI.</span>
               </h1>
-              <p className="mx-auto mt-[18px] max-w-[600px] text-lg leading-relaxed text-[hsl(var(--landing-body))] md:mx-0">Capture every thought — Menerio organizes it by meaning and makes it available to any AI you talk to.</p>
+              <p className="mx-auto mt-[18px] max-w-[600px] text-lg leading-relaxed text-[hsl(var(--landing-body))] md:mx-0">Capture every thought. Menerio organizes it by meaning and makes it available to any AI you talk to.</p>
             </div>
           </div>
 
@@ -198,7 +198,7 @@ const Index = () => {
 
           <div className="mb-[22px] flex justify-center">
             <Button onClick={() => navigate('/auth?tab=signup')} className="group h-14 rounded-[14px] border border-transparent bg-[hsl(var(--brand))] px-7 py-0 text-[15px] font-semibold leading-none text-[hsl(var(--landing-plain-white))] shadow-[0_8px_20px_rgba(31,96,224,.25)] hover:brightness-105 hover:shadow-[0_10px_24px_rgba(31,96,224,.32)] dark:bg-[linear-gradient(180deg,hsl(var(--landing-button-top)),hsl(var(--landing-button-bottom)))] dark:shadow-[0_0_24px_hsl(var(--landing-sky-primary)/.4),inset_0_1px_0_hsl(var(--landing-plain-white)/.2)] dark:hover:brightness-110">
-              Get Started — Free <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              Get Started Free <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Button>
           </div>
 
