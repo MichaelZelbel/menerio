@@ -2,6 +2,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { runChat } from "../_shared/llm-router.ts";
 import { AI_MODERATE_CONTENT_PROMPT } from "../_shared/llm-defaults.ts";
 import { secretEquals } from "../_shared/secret-equals.ts";
+import { blockedModerationEvent, loadSharedNoteForReview } from "../_shared/moderation-source.ts";
+import { recordStaffAccess } from "../_shared/staff-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -96,7 +98,20 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       try {
-        const classification = await classifyContent(admin, item.content_snapshot, item.user_id);
+        const note = await loadSharedNoteForReview(admin, item.item_id, item.user_id);
+        if (!note) {
+          // Unshared or deleted before review: nothing public left to check.
+          await admin.from("moderation_review_queue")
+            .update({ status: "skipped", reviewed_at: new Date().toISOString() })
+            .eq("id", item.id);
+          results.push({ id: item.id, status: "skipped" });
+          continue;
+        }
+        await recordStaffAccess(admin, {
+          subjectUserId: item.user_id, actorUserId: null, actorKind: "system",
+          action: "moderation_review", noteId: item.item_id,
+        });
+        const classification = await classifyContent(admin, note.text, item.user_id);
 
         if (!classification) {
           // AI call failed
@@ -123,7 +138,6 @@ Deno.serve(async (req) => {
               status: "violation",
               ai_category: classification.category,
               ai_confidence: classification.confidence,
-              ai_reason: classification.reason,
               reviewed_at: new Date().toISOString(),
             })
             .eq("id", item.id)
@@ -145,23 +159,16 @@ Deno.serve(async (req) => {
             .eq("user_id", item.user_id);
 
           // 2. Log moderation event
-          await admin.from("moderation_events").insert({
-            user_id: item.user_id,
-            action: "share_note",
-            item_type: item.item_type,
-            item_id: item.item_id,
-            flagged_content: item.content_snapshot.slice(0, 500),
-            category: classification.category,
-            result: "blocked",
-            tier: "ai",
-            matched_words: [],
-          });
+          await admin.from("moderation_events").insert(blockedModerationEvent({
+            userId: item.user_id, action: "share_note", itemType: item.item_type, itemId: item.item_id,
+            matched: [], category: classification.category ?? "policy violation", tier: "ai",
+          }));
 
           // 3. Increment strikes
           await incrementStrikes(admin, item.user_id);
 
           // 4. Send notification email
-          const noteTitle = extractTitle(item.content_snapshot);
+          const noteTitle = note.title;
           const categoryLabel = classification.category || "policy violation";
           await sendViolationEmail(admin, item.user_id, noteTitle, categoryLabel, lovableKey, resendKey);
 
@@ -174,7 +181,6 @@ Deno.serve(async (req) => {
               status: "reviewed",
               ai_category: classification.category || null,
               ai_confidence: classification.confidence,
-              ai_reason: classification.reason,
               reviewed_at: new Date().toISOString(),
             })
             .eq("id", item.id)
@@ -270,12 +276,6 @@ async function incrementStrikes(admin: any, userId: string) {
 /** The title is the user's own text; unescaped it was HTML in the email. */
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function extractTitle(content: string): string {
-  const firstLine = content.split("\n")[0]?.trim();
-  if (firstLine && firstLine.length > 0) return firstLine.slice(0, 100);
-  return "Untitled Note";
 }
 
 async function sendViolationEmail(

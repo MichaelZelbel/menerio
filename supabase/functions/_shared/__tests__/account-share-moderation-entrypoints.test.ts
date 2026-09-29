@@ -134,11 +134,15 @@ describe("ai-moderate-content", () => {
     const fake = fakeClient({
       tables: {
         user_roles: [],
-        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, content_snapshot: "Title\nbody", status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
         shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: true }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
         moderation_events: [],
       },
-      rpcs: { record_content_strike: () => ({ data: null, error: null }) },
+      rpcs: {
+        record_content_strike: () => ({ data: null, error: null }),
+        record_staff_access: () => ({ data: "log-id", error: null }),
+      },
     });
     // Both runs have read the queue before either decides: the classifier
     // answers only once both have asked.
@@ -168,6 +172,50 @@ describe("ai-moderate-content", () => {
     expect(fake.tables.moderation_events).toHaveLength(1);
     expect(fake.tables.moderation_review_queue[0].status).toBe("violation");
     expect(fake.tables.shared_notes[0].is_active).toBe(false);
+    expect(Object.keys(fake.tables.moderation_events[0])).not.toContain("flagged_content");
+    expect(fake.tables.moderation_review_queue[0]).not.toHaveProperty("ai_reason");
+  });
+
+  it("a queued note whose share is no longer active ends skipped, with no classifier call and no staff-log row", async () => {
+    const fake = fakeClient({
+      tables: {
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: false }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
+      },
+      rpcs: { record_staff_access: () => ({ data: "log-id", error: null }) },
+    });
+    let classifierCalled = false;
+    const run = await loadFunction("ai-moderate-content", fake.client, ENV, {
+      globals: { testRunChat: async () => { classifierCalled = true; return null; } },
+      stubs: [{ filter: /llm-router\.ts$/, contents: "export const runChat = (...a) => globalThis.testRunChat(...a)" }],
+    });
+    const res = await run(new Request("https://synthetic.invalid/ai-moderate-content", { method: "POST", headers: { Authorization: "Bearer service-key" } }));
+    expect(res.status).toBe(200);
+    expect(classifierCalled).toBe(false);
+    expect(fake.tables.moderation_review_queue[0].status).toBe("skipped");
+    expect(fake.log.filter((l) => l === "rpc record_staff_access")).toHaveLength(0);
+  });
+
+  it("when record_staff_access errs, the classifier is never called and the item stays pending with retry_count incremented", async () => {
+    const fake = fakeClient({
+      tables: {
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: true }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
+      },
+      rpcs: { record_staff_access: () => ({ data: null, error: { message: "log store down" } }) },
+    });
+    let classifierCalled = false;
+    const run = await loadFunction("ai-moderate-content", fake.client, ENV, {
+      globals: { testRunChat: async () => { classifierCalled = true; return null; } },
+      stubs: [{ filter: /llm-router\.ts$/, contents: "export const runChat = (...a) => globalThis.testRunChat(...a)" }],
+    });
+    const res = await run(new Request("https://synthetic.invalid/ai-moderate-content", { method: "POST", headers: { Authorization: "Bearer service-key" } }));
+    expect(res.status).toBe(200);
+    expect(classifierCalled).toBe(false);
+    expect(fake.tables.moderation_review_queue[0].status).toBe("pending");
+    expect(fake.tables.moderation_review_queue[0].retry_count).toBe(1);
   });
 
   it("still refuses a caller that is neither the service key nor an admin", async () => {
