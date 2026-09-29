@@ -94,7 +94,10 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   );
 }
 
-type Editing = { fact: ProfileFact; mode: "changed" | "fix" } | null;
+type Editing = { fact: ProfileFact; mode: "changed" | "fix" | "date" } | null;
+
+/** A value that "It changed" dated in the future: not current yet, and not ended. */
+const startsLater = (fact: ProfileFact) => !fact.is_current && fact.valid_to === null;
 
 /**
  * One section of facts, used by both the user's own profile and a person's
@@ -121,6 +124,9 @@ export function CompactCategorySection({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const isOther = section.key === OTHER_SECTION;
+  // The database refuses to delete a private section that still holds facts
+  // (they would fall back to "Other" and reach assistants), so it is not offered.
+  const deleteRefused = section.visibilityScope === "private" && section.slots.length > 0;
   const isFiltering = filterQuery.trim().length > 0;
   const isOpen = isFiltering || expanded;
   const slotMatches = (slot: FactSlot) =>
@@ -272,7 +278,7 @@ export function CompactCategorySection({
 
       {isOpen && !addingEntry && visibleSlots.length === 0 && !isFiltering && (
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
-          <span className="text-sm text-muted-foreground">No facts yet — add one</span>
+          <span className="text-sm text-muted-foreground">No facts yet. Add one.</span>
           <Button
             variant="ghost"
             size="sm"
@@ -307,17 +313,16 @@ export function CompactCategorySection({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{section.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              {section.slots.length > 0
-                ? `Its ${section.slots.length} fact${section.slots.length === 1 ? "" : "s"} move to "Other". No fact is deleted.`
-                : "This category has no facts."}{" "}
-              {section.visibilityScope === "private" && section.slots.length > 0
-                ? "A private section with facts in it cannot be deleted: move or remove its facts first."
-                : ""}
+              {deleteRefused
+                ? `It is private and still holds ${section.slots.length} fact${section.slots.length === 1 ? "" : "s"}. Moved to "Other" they would be shown to assistants, so move or remove them first.`
+                : section.slots.length > 0
+                  ? `Its ${section.slots.length} fact${section.slots.length === 1 ? "" : "s"} move to "Other". No fact is deleted.`
+                  : "This category has no facts."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => onDeleteCategory(section)}>Delete</AlertDialogAction>
+            <AlertDialogCancel>{deleteRefused ? "Close" : "Cancel"}</AlertDialogCancel>
+            {!deleteRefused && <AlertDialogAction onClick={() => onDeleteCategory(section)}>Delete</AlertDialogAction>}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -393,6 +398,11 @@ function SlotRow({
           <DropdownMenuItem onSelect={() => setEditing({ fact, mode: "fix" })}>
             Fix a mistake
           </DropdownMenuItem>
+          {fact.valid_from && (
+            <DropdownMenuItem onSelect={() => setEditing({ fact, mode: "date" })}>
+              Fix the date
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       <DropdownMenu>
@@ -513,11 +523,14 @@ function SlotRow({
       {editing && (
         <div className="px-4 py-3 border-b border-border">
           <EntryForm
+            key={`${editing.fact.claim_id}:${editing.mode}`}
             mode={editing.mode}
-            initial={{ label: slot.label, value: editing.fact.value }}
+            initial={{ label: slot.label, value: editing.fact.value, valid_from: editing.fact.valid_from }}
+            defaultSince={actions.today?.()}
             categorySlug={slot.categorySlug}
             onSave={(data) => {
               if (editing.mode === "changed") actions.changed(editing.fact, data.value, data.valid_from!);
+              else if (editing.mode === "date") actions.redate(editing.fact, data.valid_from!);
               else actions.fix(editing.fact, data.value);
               setEditing(null);
             }}
@@ -554,7 +567,7 @@ function SlotRow({
               single
                 ? undefined
                 : (i) => (
-                    <span className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                    <span className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover/item:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                       {valueActions(slot.current[i])}
                     </span>
                   )
@@ -584,11 +597,46 @@ function SlotRow({
           <CollapsibleContent>
             <ul className="mt-1 space-y-0.5 pl-6 text-xs text-muted-foreground">
               {slot.history.map((fact) => {
-                const range = formatValidityRange(fact);
+                const later = startsLater(fact);
+                const range = formatValidityRange(fact, actions.today?.());
                 return (
-                  <li key={fact.claim_id}>
-                    <span className="text-foreground/80">{fact.value}</span>
-                    {range ? `, ${range}` : ""}
+                  <li key={fact.claim_id} className="group/hist flex items-center gap-1">
+                    <span className="min-w-0">
+                      <span className="text-foreground/80">{fact.value}</span>
+                      {range ? `, ${range}` : ""}
+                    </span>
+                    {/* A history row can hold a mistake too: a mistyped future
+                        date, a typo, or "No longer true" pressed by accident. */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          aria-label={`History entry options: ${fact.value}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0 opacity-0 group-hover/hist:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
+                        >
+                          <MoreHorizontal className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start">
+                        {later ? (
+                          <DropdownMenuItem onSelect={() => setEditing({ fact, mode: "date" })}>
+                            Fix the date
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem onSelect={() => actions.reopen(fact)}>Still true</DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onSelect={() => setEditing({ fact, mode: "fix" })}>
+                          Fix a mistake
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onSelect={() => setPendingRetract(fact)}
+                        >
+                          Was wrong
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </li>
                 );
               })}
@@ -604,8 +652,12 @@ function SlotRow({
               "{slot.label}: {pendingRetract?.value}" was wrong?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              It is deleted with no history kept, and {BRAND.name} will not suggest it again. If it was true once and has
-              changed, use "No longer true" instead.
+              It is deleted with no history kept, and {BRAND.name} will not suggest it again.
+              {pendingRetract?.is_current
+                ? ' If it was true once and has changed, use "No longer true" instead.'
+                : pendingRetract && startsLater(pendingRetract)
+                  ? " The value it was to replace stays current."
+                  : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

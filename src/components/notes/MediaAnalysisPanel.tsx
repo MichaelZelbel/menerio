@@ -6,6 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Copy, ChevronDown, ChevronRight, RefreshCw, Loader2, X, FileText, Search } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { useNavigate } from "react-router-dom";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 interface MediaAnalysisPanelProps {
   entries: MediaAnalysisEntry[];
@@ -27,9 +28,9 @@ export function MediaAnalysisPanel({ entries, noteId, onClose, storagePath }: Me
   const rawAnalysis = mainEntry.raw_analysis as Record<string, unknown> | null;
   const contentType = rawAnalysis?.content_type as string | undefined;
 
-  const copyText = (text: string) => {
-    navigator.clipboard.writeText(text);
-    showToast.success("Copied to clipboard");
+  const copyText = async (text: string) => {
+    if (await copyToClipboard(text)) showToast.success("Copied to clipboard");
+    else showToast.error(COPY_FAILED_MESSAGE);
   };
 
   const handleReanalyze = () => {

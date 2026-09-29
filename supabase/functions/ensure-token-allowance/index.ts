@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { ensureAllowanceForUser } from "../_shared/ensure-allowance.ts";
+import { secretEquals } from "../_shared/secret-equals.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,8 +37,9 @@ Deno.serve(async (req) => {
 
     if (authHeader?.startsWith("Bearer ")) {
       const token = authHeader.replace("Bearer ", "");
-      // Check if it's the service role key itself
-      if (token === serviceRoleKey) {
+      // Check if it's the service role key itself. A digest compare: `===`
+      // stops at the first differing character (see _shared/secret-equals.ts).
+      if (await secretEquals(token, serviceRoleKey)) {
         isServiceRole = true;
       } else {
         const authClient = createClient(supabaseUrl, anonKey);

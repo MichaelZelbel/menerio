@@ -32,7 +32,17 @@ const TOOL_OPTIONS = [
   "CRM",
 ];
 
-const ONBOARDING_KEY = "menerio-first-captures-done";
+// Per account: one flag for the whole browser meant a second account signed in
+// on the same browser never saw the wizard once the first one had closed it.
+const onboardingKey = (userId: string) => `menerio-first-captures-done:${userId}`;
+
+function readDone(userId: string): boolean {
+  try {
+    return localStorage.getItem(onboardingKey(userId)) === "true";
+  } catch {
+    return false;
+  }
+}
 
 interface Suggestion {
   text: string;
@@ -152,7 +162,13 @@ export function FirstCapturesWizard({ onComplete }: { onComplete: () => void }) 
   };
 
   const handleComplete = () => {
-    localStorage.setItem(ONBOARDING_KEY, "true");
+    if (user) {
+      try {
+        localStorage.setItem(onboardingKey(user.id), "true");
+      } catch {
+        /* storage blocked: nothing to remember it in */
+      }
+    }
     onComplete();
   };
 
@@ -173,7 +189,13 @@ export function FirstCapturesWizard({ onComplete }: { onComplete: () => void }) 
             <Lightbulb className="h-5 w-5 text-primary" />
             <h3 className="font-display font-semibold text-foreground">Your First Captures</h3>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleComplete} className="text-muted-foreground">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleComplete}
+            className="text-muted-foreground"
+            aria-label="Close first captures"
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -373,24 +395,25 @@ export function FirstCapturesWizard({ onComplete }: { onComplete: () => void }) 
 export function useShowFirstCaptures() {
   const [show, setShow] = useState(false);
   const { user, role } = useAuth();
+  const userId = user?.id;
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     if (role !== "admin") return; // Only show wizard to admins
-    if (localStorage.getItem(ONBOARDING_KEY) === "true") return;
+    if (readDone(userId)) return;
 
     // Check note count
     supabase
       .from("notes")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_trashed", false)
       .then(({ count }) => {
         if (count !== null && count < 5) {
           setShow(true);
         }
       });
-  }, [user, role]);
+  }, [userId, role]);
 
   return { show, dismiss: () => setShow(false) };
 }

@@ -20,12 +20,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Loader2, Github, CheckCircle2, XCircle, AlertTriangle, Trash2, RefreshCw } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { formatDistanceToNow } from "date-fns";
 import { ImportVaultDialog } from "./ImportVaultDialog";
 import { SyncConflictsPanel } from "./SyncConflictsPanel";
 import { BRAND } from "@/lib/brand";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 
 export function GitHubSyncSettings() {
   const { user } = useAuth();
@@ -86,7 +98,7 @@ export function GitHubSyncSettings() {
       if (data.people_conflicts > 0) parts.push(`${data.people_conflicts} people conflicts`);
       showToast.success(parts.length > 0 ? `Sync complete: ${parts.join(", ")}` : "Everything is up to date");
     },
-    onError: () => showToast.error("Sync failed"),
+    onError: async (err) => showToast.error(await functionErrorMessage(err, "Sync failed. Try again.")),
   });
 
   const handleSave = async () => {
@@ -133,8 +145,8 @@ export function GitHubSyncSettings() {
       setToken("");
       await refetch();
       showToast.success("GitHub connection saved");
-    } catch (err: any) {
-      showToast.error(err.message || "Failed to save");
+    } catch (err) {
+      showToast.error(dbErrorMessage(err, "Could not save the GitHub connection. Try again."));
     } finally {
       setSaving(false);
     }
@@ -212,11 +224,14 @@ export function GitHubSyncSettings() {
               if (total > 0) showToast.success(`Exported ${total} people & groups`);
               if (p.errors > 0) showToast.error(`${p.errors} people/groups failed to sync`);
             },
-            onError: (err: any) => showToast.error(err?.message || "People export failed"),
+            onError: async (err) =>
+              showToast.error(await functionErrorMessage(err, "People and groups could not be exported. Try again.")),
           });
         }
       },
-      onError: (err: any) => showToast.error(err?.message || "Bulk sync failed"),
+      // The hook throws the invoke error, whose own message is always "Edge
+      // Function returned a non-2xx status code"; the function's answer is in it.
+      onError: async (err) => showToast.error(await functionErrorMessage(err, "The export did not finish. Try again.")),
     });
   };
 
@@ -373,10 +388,35 @@ export function GitHubSyncSettings() {
                   {connection?.sync_people !== false ? "Export All" : "Export All Notes"}
                 </Button>
                 <ImportVaultDialog />
-                <Button variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
-                  {disconnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                  Disconnect
-                </Button>
+                {/* One click used to delete the token and the whole note-to-file
+                    mapping at once, so it asks first. */}
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" disabled={disconnecting}>
+                      {disconnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                      Disconnect
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Disconnect GitHub?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Sync stops, the saved token is erased, and {BRAND.name} forgets which note belongs to which
+                        file in the repository. Your notes and the files on GitHub stay as they are. If you connect
+                        again later, files may be imported a second time as new notes.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDisconnect}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Disconnect
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </>
             )}
           </div>

@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { useStickyPanelPreference } from "@/hooks/useStickyPanelPreference";
 import { formatDistanceToNow } from "date-fns";
+import { dbErrorMessage } from "@/lib/function-error";
 
 interface BacklinksPanelProps {
   noteId: string;
@@ -13,7 +14,6 @@ interface BacklinksPanelProps {
 interface Backlink {
   id: string;
   title: string;
-  content: string;
   updated_at: string;
 }
 
@@ -22,32 +22,56 @@ export function BacklinksPanel({ noteId, onNavigate }: BacklinksPanelProps) {
   const [expanded, setExpanded] = useStickyPanelPreference("note-backlinks");
 
 
-  const { data: backlinks = [], isLoading } = useQuery<Backlink[]>({
+  // The list (title and date) feeds the count in the header, so it loads even
+  // while the panel is collapsed. The note bodies it takes to cut a snippet
+  // are fetched below, only once the panel is open.
+  const { data: backlinks = [], isLoading, error } = useQuery<Backlink[]>({
     queryKey: ["backlinks", noteId, user?.id],
     enabled: !!user && !!noteId,
     queryFn: async () => {
       // Find notes that have manual_link connections targeting this note
-      const { data: connections } = await supabase
+      const { data: connections, error: connectionsError } = await supabase
         .from("note_connections" as any)
         .select("source_note_id")
         .eq("target_note_id", noteId)
         .eq("connection_type", "manual_link")
         .eq("user_id", user!.id);
+      if (connectionsError) throw connectionsError;
 
       if (!connections || connections.length === 0) return [];
 
       const sourceIds = connections.map((c: any) => c.source_note_id);
-      const { data: notes } = await supabase
+      const { data: notes, error: notesError } = await supabase
         .from("notes" as any)
-        .select("id, title, content, updated_at")
+        .select("id, title, updated_at")
         .in("id", sourceIds)
         .eq("is_trashed", false);
+      if (notesError) throw notesError;
 
       return (notes || []) as unknown as Backlink[];
     },
   });
 
   const count = backlinks.length;
+  const sourceIds = backlinks.map((bl) => bl.id);
+
+  const { data: snippets } = useQuery<Record<string, string>>({
+    queryKey: ["backlinks", noteId, user?.id, "snippets", sourceIds],
+    enabled: expanded && !!user && sourceIds.length > 0,
+    queryFn: async () => {
+      const { data, error: contentError } = await supabase
+        .from("notes")
+        .select("id, content")
+        .in("id", sourceIds)
+        .eq("user_id", user!.id);
+      if (contentError) throw contentError;
+      const out: Record<string, string> = {};
+      for (const row of (data || []) as unknown as { id: string; content: string | null }[]) {
+        out[row.id] = extractSnippet(row.content ?? "", noteId);
+      }
+      return out;
+    },
+  });
 
   return (
     <div className="border-t border-border">
@@ -57,7 +81,7 @@ export function BacklinksPanel({ noteId, onNavigate }: BacklinksPanelProps) {
       >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <Link2 className="h-3 w-3" />
-        Backlinks ({count})
+        {error ? "Backlinks" : `Backlinks (${count})`}
       </button>
 
       {expanded && (
@@ -65,14 +89,19 @@ export function BacklinksPanel({ noteId, onNavigate }: BacklinksPanelProps) {
           {isLoading && (
             <p className="text-[10px] text-muted-foreground">Loading…</p>
           )}
-          {!isLoading && count === 0 && (
+          {error && (
+            <p role="alert" className="text-[10px] text-destructive">
+              {dbErrorMessage(error, "Could not load the notes that link here.")}
+            </p>
+          )}
+          {!isLoading && !error && count === 0 && (
             <p className="text-[10px] text-muted-foreground">
               No notes link to this one yet. Use [[wikilinks]] in other notes to create connections.
             </p>
           )}
           {backlinks.map((bl) => {
-            // Extract a context snippet containing the wikilink
-            const snippet = extractSnippet(bl.content, noteId);
+            // A context snippet containing the wikilink, once the bodies are in
+            const snippet = snippets?.[bl.id];
             return (
               <button
                 key={bl.id}

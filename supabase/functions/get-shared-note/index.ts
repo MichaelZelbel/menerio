@@ -27,11 +27,30 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { data, error } = await supabase.rpc("get_shared_note_by_token", {
-      p_token: token,
-    });
+    // The same join get_shared_note_by_token makes, plus the trash. That
+    // function never looked at is_trashed, so a note its owner had moved to
+    // the bin went on being served to everyone holding the link until the
+    // bin was emptied. The link stays active: restoring the note brings it back.
+    const { data: share, error: shareError } = await supabase
+      .from("shared_notes")
+      .select("note_id, user_id")
+      .eq("share_token", token)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (shareError) throw shareError;
 
-    if (error) throw error;
+    let data: Record<string, unknown> | null = null;
+    if (share) {
+      const { data: note, error: noteError } = await supabase
+        .from("notes")
+        .select("title, content, tags, entity_type, created_at, updated_at")
+        .eq("id", share.note_id)
+        .eq("user_id", share.user_id)
+        .eq("is_trashed", false)
+        .maybeSingle();
+      if (noteError) throw noteError;
+      data = note;
+    }
 
     if (!data) {
       return new Response(

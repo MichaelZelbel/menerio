@@ -120,6 +120,8 @@ async function generateInAppNotifications(userId: string): Promise<void> {
       .from("contacts")
       .select("id, name, last_contact_date, contact_frequency_days")
       .eq("user_id", userId)
+      // A contact merged into another is the same person counted twice.
+      .is("merged_into", null)
       .not("contact_frequency_days", "is", null)
       .not("last_contact_date", "is", null);
 
@@ -217,10 +219,15 @@ async function processDigestForUser(
       .eq("user_id", userId)
       .eq("status", "open")
       .eq("ai_visibility", "visible"),
+    // These names go into the model prompt: the same people an assistant may
+    // see anywhere else (not merged away, not hidden from AI, not sensitive).
     supabase
       .from("contacts")
       .select("name, last_contact_date, contact_frequency_days")
       .eq("user_id", userId)
+      .is("merged_into", null)
+      .eq("ai_visibility", "visible")
+      .or("is_sensitive.is.null,is_sensitive.eq.false")
       .not("contact_frequency_days", "is", null)
       .not("last_contact_date", "is", null),
   ]);

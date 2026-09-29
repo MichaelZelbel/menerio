@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { BRAND } from "@/lib/brand";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 const MCP_URL = "https://mcp.menerio.com";
 
@@ -220,7 +221,10 @@ export function MCPConnectionManager() {
   }, [userId]);
 
   const handleCopy = async (text: string, key: string) => {
-    await navigator.clipboard.writeText(text);
+    if (!(await copyToClipboard(text))) {
+      toast.error(COPY_FAILED_MESSAGE);
+      return;
+    }
     setCopied(key);
     toast.success("Copied to clipboard");
     setTimeout(() => setCopied(null), 2000);
@@ -241,11 +245,13 @@ export function MCPConnectionManager() {
     fetchTokens();
   };
 
-  const CopyButton = ({ text, id, label }: { text: string; id: string; label?: string }) => (
+  // `name` is the accessible name when the button shows only an icon.
+  const CopyButton = ({ text, id, label, name }: { text: string; id: string; label?: string; name?: string }) => (
     <Button
       variant="outline"
       size={label ? "sm" : "icon"}
       className="shrink-0"
+      aria-label={label ? undefined : copied === id ? "Copied" : name ?? "Copy"}
       onClick={() => handleCopy(text, id)}
     >
       {copied === id ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
@@ -254,25 +260,25 @@ export function MCPConnectionManager() {
   );
 
   const agentPrompt = useMemo(
-    () => `**Set up Menerio as my permanent personal-memory MCP server.** This has two parts: install the server, and save behavior rules so you use it automatically in future sessions. Do both.
+    () => `**Set up ${BRAND.name} as my permanent personal-memory MCP server.** This has two parts: install the server, and save behavior rules so you use it automatically in future sessions. Do both.
 
-**Step 1 — Get my key.** Before anything else, ask me to paste my ${BRAND.name} API key. I'll generate it in Menerio → Settings → API Keys (it starts with \`mnr_\`; the boxes on it decide which of my data it may touch) and send it back. Wait for it.
+**Step 1: Get my key.** Before anything else, ask me to paste my ${BRAND.name} API key. I'll generate it in ${BRAND.name} → Settings → API Keys (it starts with \`mnr_\`; the boxes on it decide which of my data it may touch) and send it back. Wait for it.
 
-**Step 2 — Install the server.** Register Menerio as a **persistent, user-scoped MCP server** using your tool's normal mechanism (a CLI like \`claude mcp add\` / \`gemini mcp add\`, or your MCP config file):
+**Step 2: Install the server.** Register ${BRAND.name} as a **persistent, user-scoped MCP server** using your tool's normal mechanism (a CLI like \`claude mcp add\` / \`gemini mcp add\`, or your MCP config file):
 
 - Transport: HTTP (streamable)
-- URL: \`${MCP_URL}\` *(exactly this — no \`/mcp\`, \`/sse\`, or \`/v1\` suffix)*
+- URL: \`${MCP_URL}\` *(exactly this, with no \`/mcp\`, \`/sse\`, or \`/v1\` suffix)*
 - Auth header: \`Authorization: Bearer <the key I gave you>\`
 
-**Step 3 — Save behavior rules.** Ask my permission, then append the following to your **global / user-level** instructions file (e.g. \`~/.claude/CLAUDE.md\`, \`GEMINI.md\`, \`AGENTS.md\`, or your tool's user-scope rules) so they apply in every future session:
+**Step 3: Save behavior rules.** Ask my permission, then append the following to your **global / user-level** instructions file (e.g. \`~/.claude/CLAUDE.md\`, \`GEMINI.md\`, \`AGENTS.md\`, or your tool's user-scope rules) so they apply in every future session:
 
 - At the start of a session that needs personal context, call \`get_user_profile\` once to personalize, and honor any \`agent_instructions\` it returns.
-- When I reference something I "remember," "wrote down," or "captured," or ask "what do I know about X," call \`search_brain\` (my dated facts, notes and Lexicon pages in one call) before answering — don't answer from memory alone.
+- When I reference something I "remember," "wrote down," or "captured," or ask "what do I know about X," call \`search_brain\` (my dated facts, notes and Lexicon pages in one call) before answering. Don't answer from memory alone.
 - When I share a new fact, decision, idea, or meeting note worth keeping, call \`capture_note\` without asking. Give it a clear \`title\`, and call \`list_note_folders\` first so it goes in the folder of mine that fits (\`folder_path\`). Confirm before saving long-form content. If it clearly fits a user collection, prefer \`add_collection_item\`.
 - For things that happened at a point in time (meetings, milestones), prefer \`create_moment_with_ai\`.
 - After any write, end with a one-line confirmation of what was saved and where. Never invent note ids, titles, or dates.
 
-**Step 4 — Verify.** Confirm the MCP server is connected (list your servers), confirm the rules were written to the file, then call \`get_user_profile\` to prove the connection. Report all three results.`,
+**Step 4: Verify.** Confirm the MCP server is connected (list your servers), confirm the rules were written to the file, then call \`get_user_profile\` to prove the connection. Report all three results.`,
     []
   );
 
@@ -316,7 +322,7 @@ export function MCPConnectionManager() {
               <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
                 {MCP_URL}
               </code>
-              <CopyButton text={MCP_URL} id="url" />
+              <CopyButton text={MCP_URL} id="url" name="Copy MCP server URL" />
             </div>
             <p className="text-xs text-muted-foreground">
               Use a key from{" "}
@@ -394,7 +400,7 @@ export function MCPConnectionManager() {
             <Plug className="h-5 w-5" /> Protocol
           </CardTitle>
           <CardDescription>
-            Menerio exposes a standard MCP server. Point any MCP-compatible client at the endpoint
+            {BRAND.name} exposes a standard MCP server. Point any MCP-compatible client at the endpoint
             below using any API key from Settings → API Keys.
           </CardDescription>
         </CardHeader>
@@ -408,7 +414,7 @@ export function MCPConnectionManager() {
               <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all select-all border">
                 {MCP_URL}
               </code>
-              <CopyButton text={MCP_URL} id="protocol-url" />
+              <CopyButton text={MCP_URL} id="protocol-url" name="Copy MCP endpoint" />
             </div>
 
             <span className="text-muted-foreground">Auth header</span>

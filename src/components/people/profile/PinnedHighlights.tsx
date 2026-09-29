@@ -48,7 +48,7 @@ export function PinnedHighlights({ slots, onTogglePin }: PinnedHighlightsProps) 
             variant="ghost"
             size="icon"
             aria-label={`Unpin ${chip.label}`}
-            className="h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover/chip:opacity-100 hover:text-destructive"
+            className="h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover/chip:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:text-destructive"
             onClick={() => onTogglePin(chip.slot)}
           >
             <X className="h-3 w-3" />

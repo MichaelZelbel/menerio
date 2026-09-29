@@ -30,12 +30,16 @@ function describe(error: unknown): string {
 // production build deletes, tried once per page load and never again.
 export function SyncManager() {
   const { user, loading } = useAuth();
+  // Keyed on the account id, not the User object: supabase-js hands out a new
+  // object on every token refresh and tab return, and each one tore the sync
+  // connection down and opened a new one.
+  const userId = user?.id ?? null;
 
   useEffect(() => {
     if (!OFFLINE_CORE || loading) return;
     const db = getDb();
 
-    if (!user) {
+    if (!userId) {
       if (localStorage.getItem(POWERSYNC_USER_KEY)) {
         // Explicit sign-out (loading is false and there is no session).
         // Offline token-refresh failures do NOT land here: supabase-js keeps
@@ -96,11 +100,11 @@ export function SyncManager() {
       if (cancelled) return;
       try {
         const lastUserId = localStorage.getItem(POWERSYNC_USER_KEY);
-        if (lastUserId && lastUserId !== user.id) {
+        if (lastUserId && lastUserId !== userId) {
           // Different account on this device: local data must not carry over.
           await db.disconnectAndClear();
         }
-        localStorage.setItem(POWERSYNC_USER_KEY, user.id);
+        localStorage.setItem(POWERSYNC_USER_KEY, userId);
 
         if (!POWERSYNC_URL) {
           await reportUnreachable("No sync service is configured for this app.");
@@ -121,7 +125,7 @@ export function SyncManager() {
           return;
         }
 
-        await db.connect(new SupabaseConnector(user.id));
+        await db.connect(new SupabaseConnector(userId));
 
         // connect() returning means the attempt STARTED, nothing more. It starts
         // a background stream that retries on its own and never rejects, so the
@@ -164,7 +168,7 @@ export function SyncManager() {
       stopWatchdog?.();
       unregister?.();
     };
-  }, [user, loading]);
+  }, [userId, loading]);
 
   return null;
 }

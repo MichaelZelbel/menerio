@@ -29,7 +29,7 @@ function ConnectionIndicator() {
     return (
       <Pill>
         <WifiOff className="h-3.5 w-3.5 shrink-0" />
-        <span>Offline — showing saved data</span>
+        <span>Offline: showing saved data</span>
       </Pill>
     );
   }
@@ -40,7 +40,7 @@ function ConnectionIndicator() {
     <Pill tone="warning">
       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
       <span>
-        Not syncing — reading from the server
+        Not syncing, reading from the server
         {sync.pendingUploads > 0 && (
           <>
             {" · "}

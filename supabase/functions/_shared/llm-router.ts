@@ -68,6 +68,40 @@ export function isTruncatedReply(result: any): boolean {
   return reason === "length" || reason === "max_tokens";
 }
 
+/**
+ * Claude models that refuse sampling parameters. From Opus 4.7 and Sonnet 5 on
+ * (Opus 4.7/4.8/5/5.5, Sonnet 5, Fable, Mythos), `temperature`, `top_p` and
+ * `top_k` answer 400, so a call site with a temperature (several defaults set
+ * 0 to 0.2) could not be moved to a current Claude model at all, directly or
+ * through OpenRouter. Opus/Sonnet 4.6 and Haiku 4.5 still accept them.
+ *
+ * Matches "claude-sonnet-5", "anthropic/claude-opus-4.7", "claude-opus-5-5";
+ * a date suffix is not a minor version ("claude-opus-4-20250514" is Opus 4).
+ */
+export function modelRejectsSampling(model: string | null | undefined): boolean {
+  const id = String(model ?? "").toLowerCase();
+  if (!id.includes("claude")) return false;
+  if (/claude-(fable|mythos)\b/.test(id)) return true;
+  const m = id.match(/claude-(opus|sonnet|haiku)-(\d+)(?:[-.](\d{1,2})(?!\d))?/);
+  if (!m) return false;
+  const [, family, majorStr, minorStr] = m;
+  const major = Number(majorStr);
+  const minor = minorStr ? Number(minorStr) : 0;
+  if (family === "opus") return major >= 5 || (major === 4 && minor >= 7);
+  if (family === "sonnet") return major >= 5;
+  return false;
+}
+
+const SAMPLING_KEYS = ["temperature", "top_p", "top_k"] as const;
+
+/** Extra options without the sampling keys a model would refuse. */
+function withoutRefusedSampling(model: string, extra: Record<string, unknown>): Record<string, unknown> {
+  if (!modelRejectsSampling(model)) return extra;
+  const out = { ...extra };
+  for (const k of SAMPLING_KEYS) delete out[k];
+  return out;
+}
+
 const FALLBACK_TOKENS: Record<string, number> = {
   "deepseek/deepseek-v4-flash": 500,
   "google/gemini-2.5-flash": 500,
@@ -465,7 +499,13 @@ export async function runChat(args: {
     ? `${interpolated ?? ""}${interpolated ? "\n\n" : ""}${args.systemSuffix}`
     : interpolated;
   const messages = buildMessagesWithSystem(args.messages, suffixed);
-  const extra = { ...(effective.extra_options ?? {}), ...(args.callOptions ?? {}) };
+  const extra = withoutRefusedSampling(
+    effective.model,
+    { ...(effective.extra_options ?? {}), ...(args.callOptions ?? {}) },
+  );
+  // A temperature from the code default or the admin row is dropped for a
+  // model that answers 400 to it, rather than failing the call.
+  const temperature = modelRejectsSampling(effective.model) ? null : effective.temperature;
 
   // Loop guard. The balance check above answers "can this user afford a call";
   // this one answers "has this call already been made, repeatedly, to no effect".
@@ -494,7 +534,7 @@ export async function runChat(args: {
         headers: { "Lovable-API-Key": key },
         model: effective.model,
         messages,
-        temperature: effective.temperature,
+        temperature,
         maxTokens: effective.max_tokens,
         extra,
       });
@@ -508,7 +548,7 @@ export async function runChat(args: {
         apiKey: key,
         model: effective.model,
         messages,
-        temperature: effective.temperature,
+        temperature,
         maxTokens: effective.max_tokens,
         extra,
       });
@@ -522,7 +562,7 @@ export async function runChat(args: {
         apiKey: key,
         model: effective.model,
         messages,
-        temperature: effective.temperature,
+        temperature,
         maxTokens: effective.max_tokens,
         extra,
       });
@@ -535,7 +575,7 @@ export async function runChat(args: {
         apiKey: key,
         model: effective.model,
         messages,
-        temperature: effective.temperature,
+        temperature,
         maxTokens: effective.max_tokens,
       });
       break;
@@ -548,7 +588,7 @@ export async function runChat(args: {
         apiKey: key,
         model: effective.model,
         messages,
-        temperature: effective.temperature,
+        temperature,
         maxTokens: effective.max_tokens,
         extra,
       });
@@ -561,7 +601,7 @@ export async function runChat(args: {
         apiKey: key,
         model: effective.model,
         messages,
-        temperature: effective.temperature,
+        temperature,
         maxTokens: effective.max_tokens,
       });
       break;

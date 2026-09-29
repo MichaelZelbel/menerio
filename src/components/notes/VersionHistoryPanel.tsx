@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useGitHubVersionHistory, useGitHubFileAtCommit, useSyncLogForNote } from "@/hooks/useGitHubSync";
-import { markdownToHtml } from "@/utils/markdown-converter";
 import { useNote, useUpdateNote } from "@/hooks/useNotes";
+import { functionErrorMessage } from "@/lib/function-error";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { Loader2, GitCommit, X, ChevronRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { showToast } from "@/lib/toast";
@@ -20,18 +21,34 @@ interface CommitMeta {
   message?: string | null;
 }
 
+/**
+ * A YAML scalar as the export writes it: double-quoted with `\"` and `\\`
+ * escaped, single-quoted with `''` for a quote, or bare. Restoring used to
+ * keep the backslashes, so `Say \"hi\"` became the note's title.
+ */
+function unquoteYamlScalar(value: string): string {
+  const v = value.trim();
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) {
+    return v.slice(1, -1).replace(/\\(["\\])/g, "$1");
+  }
+  if (v.length >= 2 && v.startsWith("'") && v.endsWith("'")) {
+    return v.slice(1, -1).replace(/''/g, "'");
+  }
+  return v;
+}
+
 /** Browser-safe frontmatter split (gray-matter needs Node Buffer and throws in the browser). */
 function splitFrontmatter(raw: string): { title: string; body: string } {
   const text = raw.replace(/^\uFEFF/, "");
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   if (!match) return { title: "", body: text };
   const titleLine = /^title:\s*(.*)$/m.exec(match[1]);
-  const title = (titleLine?.[1] ?? "").trim().replace(/^["']|["']$/g, "");
+  const title = unquoteYamlScalar(titleLine?.[1] ?? "");
   return { title, body: text.slice(match[0].length) };
 }
 
 export function VersionHistoryPanel({ noteId, onClose }: Props) {
-  const { data: versions, isLoading } = useGitHubVersionHistory(noteId);
+  const { data: versions, isLoading, isError: historyFailed, refetch: retryHistory } = useGitHubVersionHistory(noteId);
   const { data: syncLog } = useSyncLogForNote(noteId);
   const { data: currentNote } = useNote(noteId);
   const fetchFile = useGitHubFileAtCommit();
@@ -39,17 +56,22 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
   const [selected, setSelected] = useState<CommitMeta | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [loadingSha, setLoadingSha] = useState<string | null>(null);
-  // `content` is HTML for the preview dialog; `markdown` is what gets written
-  // back on restore. Notes are stored as Markdown, and restoring the preview
-  // HTML put HTML into the note body until the next autosave.
-  const [parsed, setParsed] = useState<{ title: string; content: string; markdown: string } | null>(null);
+  // `markdown` is both what the preview shows (the preview editor converts
+  // Markdown itself, like the current note's content beside it) and what gets
+  // written back on restore. Converting here as well ran the conversion twice,
+  // so an escaped \* showed as italics.
+  const [parsed, setParsed] = useState<{ sha: string; title: string; markdown: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Only the newest click may fill the preview. Opening version A (slow) and
+  // then B used to land A's content under B's header, and Restore wrote A.
+  const loadRequest = useRef(0);
 
   const loadVersion = async (commit: CommitMeta) => {
     if (!syncLog?.github_path) {
       showToast.error("This note isn't linked to a GitHub file yet");
       return;
     }
+    const request = ++loadRequest.current;
     setSelected(commit);
     setPreviewOpen(true);
     setParsed(null);
@@ -57,21 +79,32 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
     setLoadingSha(commit.sha);
     try {
       const raw = await fetchFile.mutateAsync({ path: syncLog.github_path, commitSha: commit.sha });
+      if (request !== loadRequest.current) return;
       const { title, body } = splitFrontmatter(raw);
-      setParsed({ title: title || "Untitled", content: markdownToHtml(body), markdown: body });
+      setParsed({ sha: commit.sha, title: title || "Untitled", markdown: body });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
-      setError(msg ? `Couldn't load this version: ${msg}` : "Couldn't load this version from GitHub.");
+      // The function's own reason when it is written for people; never the
+      // "Edge Function returned a non-2xx status code" of the client library.
+      // Only the client's Functions* errors go through that reader; the hook's
+      // own error (an answer without content) gets the plain fallback.
+      const fallback = "Couldn't load this version from GitHub.";
+      const fromFunction = e instanceof Error && e.name.startsWith("Functions");
+      const msg = fromFunction ? await functionErrorMessage(e, fallback) : fallback;
+      if (request !== loadRequest.current) return;
+      setError(msg);
     } finally {
-      setLoadingSha(null);
+      if (request === loadRequest.current) setLoadingSha(null);
     }
   };
 
+  // Belt and braces: never restore content that is not the selected commit's.
+  const shownVersion = parsed && parsed.sha === selected?.sha ? parsed : null;
 
   const handleRestore = async () => {
-    if (!parsed) return;
+    const version = shownVersion;
+    if (!version) return;
     try {
-      await updateNote.mutateAsync({ id: noteId, title: parsed.title, content: parsed.markdown });
+      await updateNote.mutateAsync({ id: noteId, title: version.title, content: version.markdown });
       showToast.success("Version restored");
       setPreviewOpen(false);
     } catch {
@@ -97,6 +130,15 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
       {isLoading ? (
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : historyFailed ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 p-4 text-center" role="alert">
+          <p className="text-xs text-destructive">
+            The version history could not be loaded from GitHub. Check the GitHub connection in Settings and try again.
+          </p>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => void retryHistory()}>
+            Try again
+          </Button>
         </div>
       ) : !versions?.length ? (
         <div className="flex-1 flex items-center justify-center p-4 text-center">
@@ -160,8 +202,8 @@ export function VersionHistoryPanel({ noteId, onClose }: Props) {
         isLoading={!!loadingSha}
         error={error}
         onRetry={selected ? () => loadVersion(selected) : undefined}
-        versionTitle={parsed?.title ?? ""}
-        versionContent={parsed?.content ?? ""}
+        versionTitle={shownVersion?.title ?? ""}
+        versionContent={shownVersion?.markdown ?? ""}
         currentTitle={currentNote?.title ?? ""}
         currentContent={currentNote?.content ?? ""}
         onRestore={handleRestore}

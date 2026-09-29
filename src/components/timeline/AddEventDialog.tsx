@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useAICreditsGate } from "@/hooks/useAICreditsGate";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
+import { OUT_OF_CREDITS_MESSAGE, dbErrorMessage, functionErrorMessage, readFunctionError } from "@/lib/function-error";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import PeopleMultiSelect from "./PeopleMultiSelect";
@@ -56,6 +57,7 @@ interface AddEventDialogProps {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const AI_FALLBACK = "The suggestion could not be made. Try again.";
 
 export default function AddEventDialog({ people, onCreated, editEvent, open: controlledOpen, onOpenChange }: AddEventDialogProps) {
   const { user, session } = useAuth();
@@ -133,7 +135,9 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
     setSuggestionApplied(true);
   };
 
-  const friendlyAiError = (code?: string, message?: string): { title: string; description?: string } => {
+  // Known draft-event codes get their own sentence; anything else goes through
+  // functionErrorMessage, so raw provider or runtime text never reaches the toast.
+  const friendlyAiError = (code?: string | null): { title: string; description: string } | null => {
     switch (code) {
       case "AI_NO_DRAFT":
         return { title: "Kein Vorschlag möglich", description: "Die AI konnte aus dieser Beschreibung keinen Vorschlag bilden. Bitte etwas konkreter formulieren oder kürzen." };
@@ -142,9 +146,11 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
       case "AI_TRUNCATED":
         return { title: "Beschreibung zu lang", description: "Die Beschreibung ist zu lang für einen Vorschlag. Bitte kürzen." };
       case "PROVIDER_ERROR":
-        return { title: "AI-Provider-Fehler", description: message || "Der AI-Provider hat einen Fehler zurückgegeben." };
+        return { title: "AI-Provider-Fehler", description: "Der AI-Provider hat einen Fehler zurückgegeben." };
+      case "INSUFFICIENT_CREDITS":
+        return { title: "No AI credits left", description: OUT_OF_CREDITS_MESSAGE };
       default:
-        return { title: "AI error", description: message || "AI request failed" };
+        return null;
     }
   };
 
@@ -159,37 +165,26 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         body: { messages: [{ role: "user", content: description.trim() }], today, people: people.map((p) => ({ name: p.name })) },
       });
       if (error) {
-        // Try to read structured error body from FunctionsHttpError
-        let body: any = null;
-        try {
-          const ctx: any = (error as any).context;
-          if (ctx && typeof ctx.json === "function") body = await ctx.json();
-          else if (ctx && typeof ctx.text === "function") {
-            const t = await ctx.text();
-            try { body = JSON.parse(t); } catch { body = { error: t }; }
-          }
-        } catch { /* ignore */ }
-        if (body?.code === "INSUFFICIENT_CREDITS" || error.message?.includes("402")) {
-          return;
-        }
-        const f = friendlyAiError(body?.code, body?.error || error.message);
-        toast({ title: f.title, description: f.description, variant: "destructive" });
+        const details = await readFunctionError(error);
+        const f = friendlyAiError(details.code);
+        toast({
+          title: f?.title ?? "No suggestion",
+          description: f?.description ?? (await functionErrorMessage(error, AI_FALLBACK)),
+          variant: "destructive",
+        });
         return;
       }
-      if ((data as any)?.code === "INSUFFICIENT_CREDITS") {
-        return;
-      }
-      if ((data as any)?.code) {
-        const f = friendlyAiError((data as any).code, (data as any).error);
-        toast({ title: f.title, description: f.description, variant: "destructive" });
+      const code = (data as { code?: string } | null)?.code;
+      if (code) {
+        const f = friendlyAiError(code);
+        toast({ title: f?.title ?? "No suggestion", description: f?.description ?? AI_FALLBACK, variant: "destructive" });
         return;
       }
       if ((data as any)?.error) throw new Error((data as any).error);
       applyDraft((data as any).draft as MomentDraft);
       triggerCreditsRefresh();
-    } catch (err: any) {
-      const f = friendlyAiError(undefined, err?.message);
-      toast({ title: f.title, description: f.description, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "No suggestion", description: await functionErrorMessage(err, AI_FALLBACK), variant: "destructive" });
     } finally {
       setAiLoading(false);
     }
@@ -253,9 +248,16 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
         // participant whenever the dialog opened without them loaded, and even
         // in the normal flow a throw between the delete and the insert wiped
         // them with no recovery. Now an unchanged edit touches nothing.
-        const existingIds = isEditMode
-          ? (((await supabase.from("moment_participants" as any).select("person_id").eq("moment_id", momentId)).data || []) as any[]).map((r) => r.person_id)
-          : [];
+        let existingIds: string[] = [];
+        if (isEditMode) {
+          const { data: existingRows, error: existingError } = await supabase
+            .from("moment_participants" as any)
+            .select("person_id")
+            .eq("moment_id", momentId);
+          // Read as "nobody" this re-inserted everyone and hit the primary key.
+          if (existingError) throw existingError;
+          existingIds = ((existingRows || []) as unknown as { person_id: string }[]).map((r) => r.person_id);
+        }
         const toAdd = desiredIds.filter((id) => !existingIds.includes(id));
         const toRemove = existingIds.filter((id) => !desiredIds.includes(id));
         if (toRemove.length > 0) {
@@ -277,8 +279,12 @@ export default function AddEventDialog({ people, onCreated, editEvent, open: con
       setOpen(false);
       onCreated();
 
-    } catch (err: any) {
-      toast({ title: isEditMode ? "Failed to update moment" : "Failed to create moment", description: err?.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({
+        title: isEditMode ? "Failed to update moment" : "Failed to create moment",
+        description: dbErrorMessage(err, "Your changes were not saved. Try again."),
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }

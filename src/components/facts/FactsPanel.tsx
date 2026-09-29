@@ -164,7 +164,7 @@ export function FactsPanel({ subjectType, subjectId, subjectLabel }: FactsPanelP
             className="h-7 w-7 text-destructive"
             onClick={() => setPendingDelete(claim)}
             aria-label="Remove fact"
-            title="Remove — use only for facts that were never true"
+            title="Remove: use only for facts that were never true"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>

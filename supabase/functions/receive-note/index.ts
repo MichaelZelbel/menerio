@@ -35,9 +35,16 @@ Deno.serve(async (req: Request) => {
       .from("connected_apps")
       .select("id, user_id, app_name, is_active, permissions, connection_status")
       .eq("key_hash", await sha256Hex(apiKey))
-      .single();
+      .maybeSingle();
 
-    if (appErr || !app) {
+    // A failed read is not a verdict on the key. `.single()` folded a
+    // statement timeout into 401 "unauthorized", which tells the connected
+    // app its key is dead; 503 tells it to try again.
+    if (appErr) {
+      console.error("receive-note: key lookup failed:", appErr);
+      return json({ error: "Could not check this API key right now. Try again in a moment." }, 503);
+    }
+    if (!app) {
       return json({ error: "unauthorized" }, 401);
     }
     if (!app.is_active) {
@@ -65,7 +72,16 @@ Deno.serve(async (req: Request) => {
     const appName = app.app_name as string;
 
     // --- Parse & validate body ---
-    const body = await req.json();
+    // A malformed body is the caller's mistake: 400, not a 500 it retries.
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "Body must be JSON" }, 400);
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return json({ error: "Body must be a JSON object" }, 400);
+    }
     const {
       source_id,
       title,

@@ -281,6 +281,37 @@ describe("executeNoteCreateTool: list_note_folders", () => {
   });
 });
 
+describe("executeNoteCreateTool: the mission control mirror's folder", () => {
+  it.each(["godspeed", "Godspeed/rules", " /GODSPEED/notes/ "])("refuses to create a note in %j", async (folder) => {
+    const db = makeDb({ folders: [{ path: "godspeed" }, { path: "godspeed/rules" }] });
+    const session = createNoteCreateSession();
+    const res = JSON.parse(
+      await executeNoteCreateTool(db, "u1", session, "create_note", { title: "T", content: "Body", folder }),
+    );
+    expect(res.error).toBe("folder_refused");
+    expect(db.state.inserted).toHaveLength(0);
+    expect(db.state.upserted).toHaveLength(0);
+    expect(session.created).toHaveLength(0);
+  });
+
+  it("still files into a user folder whose name only starts with the same letters", async () => {
+    const db = makeDb();
+    const session = createNoteCreateSession();
+    const res = JSON.parse(
+      await executeNoteCreateTool(db, "u1", session, "create_note", { title: "T", content: "Body", folder: "Godspeedy" }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.folder_path).toBe("Godspeedy");
+  });
+
+  it("leaves the mirror's tree out of list_note_folders", async () => {
+    const db = makeDb({ folders: [{ path: "godspeed" }, { path: "Health" }], notes: [{ folder_path: "godspeed/rules/deep" }] });
+    const session = createNoteCreateSession();
+    const res = JSON.parse(await executeNoteCreateTool(db, "u1", session, "list_note_folders", {}));
+    expect(res.folders).toEqual(["Health"]);
+  });
+});
+
 describe("executeNoteCreateTool: unknown tool", () => {
   it("returns an error rather than throwing", async () => {
     const db = makeDb();

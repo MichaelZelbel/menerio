@@ -303,8 +303,8 @@ async function lintUser(userId: string, contactId: string | null, repair: boolea
       admin.from("profile_facts").select("id:claim_id,contact_id,label,value").eq("user_id", userId).eq("is_current", true)
         .in("subject_type", ["self", "contact"]).order("claim_id").range(from, to)
     ),
-    selectAllRows<ContactRow>((from, to) =>
-      admin.from("contacts").select("id,name").eq("user_id", userId).order("id").range(from, to)
+    selectAllRows<ContactRow & { merged_into?: string | null }>((from, to) =>
+      admin.from("contacts").select("id,name,merged_into").eq("user_id", userId).order("id").range(from, to)
     ),
   ]);
   const contactName = new Map(contacts.map((c) => [c.id, c.name || "Unnamed"]));
@@ -368,9 +368,13 @@ async function lintUser(userId: string, contactId: string | null, repair: boolea
     });
   }
 
-  // 2) Duplicate people (same normalized name).
+  // 2) Duplicate people (same normalized name). A merged-away record is not a
+  // person any more, but it keeps its name: two namesakes merged on the
+  // People page came back the next night as "Possible duplicate", naming a
+  // record the merge then refuses.
   const byName = new Map<string, ContactRow[]>();
   for (const c of contacts) {
+    if (c.merged_into) continue;
     const key = normalizeName(c.name);
     if (!key) continue;
     if (contactId && c.id !== contactId) {

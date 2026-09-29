@@ -101,10 +101,12 @@ function scheduledFunctionNames() {
   return found;
 }
 
-// notify-admin is reached by pg_net from a row trigger rather than by the
-// scheduler, and it authenticates with the service-role key instead of the cron
-// key. It is gated, just not by this mechanism.
-const NOT_CRON_GATED = new Set(["notify-admin"]);
+// notify-admin is reached by a row trigger rather than by the scheduler, but
+// through the same internal.call_edge and x-cron-key (20260929201100), so it is
+// checked like the scheduled functions. Its trigger used to send a service-role
+// key from a database setting that does not exist, and every signup e-mail was
+// refused; nothing here noticed, because notify-admin was exempt.
+const NOT_CRON_GATED = new Set([]);
 
 // Four scheduled jobs (cron.job 9, 10, 11, 15; inventory in docs/CRON_JOBS.md)
 // predate internal.call_edge and were created in the dashboard, never as a

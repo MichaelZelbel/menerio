@@ -25,6 +25,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { showToast } from "@/lib/toast";
+import { BRAND } from "@/lib/brand";
+import { functionErrorMessage } from "@/lib/function-error";
 
 interface VaultFile {
   path: string;
@@ -76,8 +78,8 @@ export function ImportVaultDialog() {
       if (error) throw error;
       setFiles(data.files || []);
       setStep("preview");
-    } catch (err: any) {
-      showToast.error(err.message || "Failed to scan vault");
+    } catch (err) {
+      showToast.error(await functionErrorMessage(err, "Could not scan the repository. Check the GitHub connection and try again."));
       setStep("idle");
     }
   };
@@ -89,14 +91,17 @@ export function ImportVaultDialog() {
         body: {
           action: "import",
           skip_existing: skipExisting,
+          // The folders unticked above. Without them the import took every
+          // file while the button promised only the ticked ones.
+          exclude_folders: Array.from(excludedFolders),
         },
       });
       if (error) throw error;
       setImportSummary(data);
       setStep("done");
       showToast.success(`Imported ${data.imported} notes`);
-    } catch (err: any) {
-      showToast.error(err.message || "Import failed");
+    } catch (err) {
+      showToast.error(await functionErrorMessage(err, "The import did not finish. Try again."));
       setStep("preview");
     }
   };
@@ -132,8 +137,8 @@ export function ImportVaultDialog() {
         <DialogHeader>
           <DialogTitle>Import from Obsidian Vault</DialogTitle>
           <DialogDescription>
-            Import Markdown files from your connected GitHub repository into Menerio.
-            The People/ and Groups/ folders are skipped — they belong to People &amp; Groups sync.
+            Import Markdown files from your connected GitHub repository into {BRAND.name}.
+            The People/ and Groups/ folders are skipped, because they belong to People &amp; Groups sync.
           </DialogDescription>
         </DialogHeader>
 

@@ -13,7 +13,10 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 
 // Code-default models (used as fallback when DB config is disabled/missing).
 const OCR_MODEL = "mistral-ocr-latest";
-const VISION_MODEL = "pixtral-12b-2409";
+// Pixtral 12B (pixtral-12b-2409) is deprecated by Mistral; Ministral 3 14B is
+// its named replacement and reads images. The live model is the
+// analyze-media.vision row in llm_call_configs (migration 20260929202000).
+const VISION_MODEL = "ministral-14b-2512";
 const TEXT_MODEL = "mistral-small-latest";
 
 /**

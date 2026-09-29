@@ -43,6 +43,35 @@ function verifyDiscordSignature(
   }
 }
 
+/**
+ * Of several connections whose public key verifies one interaction, the one
+ * whose bot token Discord says belongs to that application. Null when none or
+ * more than one does, or when there is no application id to compare with.
+ * Only runs on a tie, which a correctly set up account never produces.
+ */
+async function pickConnectionOwningApplication(conns: any[], appId: string | null): Promise<any | null> {
+  if (!appId) return null;
+  // In parallel: Discord gives an interaction three seconds in all.
+  const owns = await Promise.all(conns.map(async (c) => {
+    try {
+      const res = await fetch("https://discord.com/api/v10/applications/@me", {
+        headers: { Authorization: `Bot ${c.bot_token}` },
+        signal: AbortSignal.timeout(1_500),
+      });
+      if (!res.ok) {
+        await res.body?.cancel();
+        return false;
+      }
+      const app = await res.json();
+      return app?.id === appId;
+    } catch {
+      return false; // unreachable or not JSON: this row proves nothing
+    }
+  }));
+  const owners = conns.filter((_, i) => owns[i]);
+  return owners.length === 1 ? owners[0] : null;
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -153,62 +182,76 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch {
     return json({ error: "Invalid JSON" }, 400);
   }
+  if (!interaction || typeof interaction !== "object") {
+    return json({ error: "Invalid JSON" }, 400);
+  }
 
-  // For PING (type 1), we need to verify with any matching public key
-  // For other interactions, we look up the specific connection
-
-  // Try to find a connection that matches this interaction's application_id
-  const appId = interaction.application_id;
-  let conn: any = null;
+  // Every active connection that claims this interaction's application.
+  //
+  // application_id and public_key are typed in by the user in Settings and
+  // nothing makes them unique, so a second account can save the same pair (the
+  // application id is in every invite link and the public key is a verification
+  // key, not a secret). This used to be `.single()`: with two such rows it
+  // errored, `conn` stayed null, the scan below ran, and the first row whose key
+  // verified won, so one account's /capture thoughts could be written into
+  // another account. All candidates are collected now, and a tie is settled by
+  // which row's bot token actually belongs to the application.
+  const appId = typeof interaction.application_id === "string" ? interaction.application_id : null;
+  let candidates: any[] = [];
 
   if (appId) {
     const { data } = await supabase
       .from("discord_connections")
       .select("*")
       .eq("application_id", appId)
-      .eq("is_active", true)
-      .single();
-    conn = data;
+      .eq("is_active", true);
+    candidates = data ?? [];
   }
 
-  // If no connection found by app_id, try all active connections for signature verification
-  if (!conn) {
+  // If no connection is saved under this app_id, try all active connections
+  // (a mistyped application id with the right public key still verifies).
+  if (candidates.length === 0) {
     const { data: conns } = await supabase
       .from("discord_connections")
       .select("*")
       .eq("is_active", true);
+    candidates = conns ?? [];
+  }
 
-    if (conns) {
-      for (const c of conns) {
-        if (verifyDiscordSignature(c.public_key, signature, timestamp, rawBody)) {
-          conn = c;
-          break;
-        }
-      }
-    }
+  const verified = candidates.filter((c) =>
+    verifyDiscordSignature(c.public_key, signature, timestamp, rawBody)
+  );
+
+  // No saved key signs this request. A PING used to be answered PONG here
+  // without any check; an unsigned request now gets 401 whatever its type.
+  if (verified.length === 0) {
+    return json({ error: "Invalid signature" }, 401);
   }
 
   // Handle PING - Discord sends this during endpoint URL verification
   if (interaction.type === 1) {
-    // Verify signature if we have a connection
-    if (conn) {
-      const valid = verifyDiscordSignature(conn.public_key, signature, timestamp, rawBody);
-      if (!valid) return json({ error: "Invalid signature" }, 401);
-    }
-    // Respond with PONG
     return json({ type: 1 });
   }
 
-  // For all other interactions, we need a valid connection
-  if (!conn) {
-    console.error("No matching discord connection found");
-    return json({ error: "No connection" }, 401);
-  }
-
-  // Verify signature
-  const valid = verifyDiscordSignature(conn.public_key, signature, timestamp, rawBody);
-  if (!valid) {
-    return json({ error: "Invalid signature" }, 401);
+  let conn: any = verified[0];
+  if (verified.length > 1) {
+    conn = await pickConnectionOwningApplication(verified, appId);
+    if (!conn) {
+      console.error(
+        `discord-capture: ${verified.length} active connections verify for application ${appId}; ` +
+          "none (or more than one) is proven by its bot token, so nothing is captured"
+      );
+      if (interaction.type === 2) {
+        return json({
+          type: 4,
+          data: {
+            content: "❌ This Discord app is linked to more than one Menerio account, so nothing was saved. Re-save the connection in Menerio Settings → Integrations → Discord.",
+            flags: 64,
+          },
+        });
+      }
+      return json({ error: "Ambiguous connection" }, 401);
+    }
   }
 
   try {

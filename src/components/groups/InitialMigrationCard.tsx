@@ -12,6 +12,8 @@ import { GROUP_TEMPLATES, instantiateTemplate } from "@/lib/group-templates";
 import { useCreateGroup } from "@/hooks/useGroups";
 import { useAddMembership } from "@/hooks/useGroupMemberships";
 import { showToast } from "@/lib/toast";
+import { dbErrorMessage } from "@/lib/function-error";
+import { fetchAllPages } from "@/lib/postgrest";
 
 type TaggedContact = { id: string; tags: string[] | null };
 
@@ -27,15 +29,18 @@ export function InitialMigrationCard() {
   const { data: contacts = [], isLoading } = useQuery<TaggedContact[]>({
     queryKey: ["contacts", user?.id, "tag-migration"],
     enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("contacts")
-        .select("id, tags")
-        .eq("user_id", user!.id)
-        .is("merged_into", null);
-      if (error) throw error;
-      return (data || []) as TaggedContact[];
-    },
+    // Read to the end: an unpaged select stops at 1,000 people and counted
+    // only the tags of those.
+    queryFn: () =>
+      fetchAllPages<TaggedContact>((from, to) =>
+        supabase
+          .from("contacts")
+          .select("id, tags")
+          .eq("user_id", user!.id)
+          .is("merged_into", null)
+          .order("id")
+          .range(from, to),
+      ),
   });
 
   const candidates = useMemo(() => {
@@ -67,8 +72,8 @@ export function InitialMigrationCard() {
       showToast.success(`Created group from '${selectedCandidate.tag}'`);
       setSelectedCandidate(null);
       setTemplateId("");
-    } catch (error: any) {
-      showToast.error(error.message || "Migration failed");
+    } catch (error: unknown) {
+      showToast.error(dbErrorMessage(error, "Could not create the group from this tag."));
     }
   };
 
@@ -85,7 +90,7 @@ export function InitialMigrationCard() {
           <CardContent className="flex items-center justify-between gap-3 p-4">
             <div className="flex min-w-0 items-center gap-3">
               <Tags className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <p className="truncate text-sm">{candidate.count} people are tagged with '{candidate.tag}' — convert to a group?</p>
+              <p className="truncate text-sm">{candidate.count} people are tagged with '{candidate.tag}'. Convert to a group?</p>
             </div>
             <Button size="sm" variant="outline" onClick={() => setSelectedCandidate(candidate)}>Convert</Button>
           </CardContent>

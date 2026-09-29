@@ -101,6 +101,16 @@ export function DashboardSearch() {
     if (pendingRef.current) setVisible(pendingRef.current);
   }, [setVisible]);
 
+  // The dropdown closes under the pointer when a result is clicked (or on
+  // Escape), and React fires no mouseleave for an element that is removed, so
+  // the hover flag stayed set: every later search then parked its semantic
+  // results in pendingRef and never showed them. A closed dropdown is never
+  // hovered.
+  const dropdownVisible = open && !!query.trim();
+  useEffect(() => {
+    if (!dropdownVisible) isHoveringRef.current = false;
+  }, [dropdownVisible]);
+
 
   // Close on click outside
   useEffect(() => {

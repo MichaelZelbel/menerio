@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { LayoutGrid, Plus, Sparkles, type LucideIcon } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -19,9 +19,13 @@ import { cn } from "@/lib/utils";
 import type { Database } from "@/integrations/supabase/types";
 import { AICollectionDialog } from "@/components/collections/AICollectionDialog";
 import { BRAND } from "@/lib/brand";
+import { dbErrorMessage } from "@/lib/function-error";
+import { LoadErrorState } from "@/components/collections/LoadErrorState";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
-type CollectionWithCount = Collection & { itemCount: number };
+// itemCount is null when the count could not be read: "0 items" would be a
+// claim about the collection that nobody checked.
+type CollectionWithCount = Collection & { itemCount: number | null };
 
 const iconMap: Record<string, LucideIcon> = { LayoutGrid, Sparkles };
 const emojiOptions = ["📚", "🏠", "💼", "🎯", "🍳", "✏️", "🎨", "💡", "🔧", "🌱"];
@@ -95,32 +99,35 @@ function EmptyCollectionsState({ onNewBlank, onCreateWithAI, onBrowseTemplates }
 }
 
 function CollectionCard({ collection }: { collection: CollectionWithCount }) {
-  const navigate = useNavigate();
-
+  // A real link, so the card is reachable with Tab and opens with Enter.
   return (
-    <Card
-      className="cursor-pointer transition-colors hover:bg-accent/50"
-      onClick={() => navigate(`/collections/${collection.slug}`)}
+    <Link
+      to={`/collections/${collection.slug}`}
+      className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <CardHeader className="pb-3">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <CollectionIcon icon={collection.icon} />
+      <Card className="cursor-pointer transition-colors hover:bg-accent/50">
+        <CardHeader className="pb-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <CollectionIcon icon={collection.icon} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <CardTitle className="truncate text-base">{collection.name}</CardTitle>
+              <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted-foreground">
+                {collection.description || "No description"}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <CardTitle className="truncate text-base">{collection.name}</CardTitle>
-            <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted-foreground">
-              {collection.description || "No description"}
-            </p>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <p className="text-xs text-muted-foreground">
-          {collection.itemCount} item{collection.itemCount === 1 ? "" : "s"}
-        </p>
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground">
+            {collection.itemCount === null
+              ? "Item count not available"
+              : `${collection.itemCount} item${collection.itemCount === 1 ? "" : "s"}`}
+          </p>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
@@ -252,55 +259,65 @@ export default function Collections() {
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [collections, setCollections] = useState<CollectionWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const userId = user?.id;
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
 
     let cancelled = false;
     const fetchCollections = async () => {
       setIsLoading(true);
+      setLoadFailed(false);
       const { data, error } = await supabase
         .from("collections")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .order("updated_at", { ascending: false });
 
       if (error) {
+        // Shown as a failure with Retry. The empty state ("No collections
+        // yet") would tell the person their collections are gone.
         if (!cancelled) {
-          toast.error("Could not load collections", { description: error.message });
+          setLoadFailed(true);
           setIsLoading(false);
         }
         return;
       }
 
       const rows = data ?? [];
+      let countError: unknown = null;
       const counts = await Promise.all(
         rows.map(async (collection) => {
-          const { count, error: countError } = await supabase
+          const { count, error: rowCountError } = await supabase
             .from("collection_items")
             .select("id", { count: "exact", head: true })
             .eq("collection_id", collection.id)
-            .eq("user_id", user.id);
+            .eq("user_id", userId);
 
-          if (countError) throw countError;
+          if (rowCountError) {
+            countError = rowCountError;
+            return [collection.id, null] as const;
+          }
           return [collection.id, count ?? 0] as const;
         }),
-      ).catch((countError: Error) => {
-        if (!cancelled) toast.error("Could not load item counts", { description: countError.message });
-        return [] as readonly (readonly [string, number])[];
-      });
+      );
+      if (countError && !cancelled)
+        toast.error("Could not load item counts", {
+          description: dbErrorMessage(countError, "Please try again."),
+        });
 
-      const countById = new Map(counts);
+      const countById = new Map<string, number | null>(counts);
       if (!cancelled) {
-        setCollections(rows.map((collection) => ({ ...collection, itemCount: countById.get(collection.id) ?? 0 })));
+        setCollections(rows.map((collection) => ({ ...collection, itemCount: countById.get(collection.id) ?? null })));
         setIsLoading(false);
       }
     };
 
     fetchCollections();
     return () => { cancelled = true; };
-  }, [user, refreshKey]);
+  }, [userId, refreshKey]);
 
   const hasCollections = useMemo(() => collections.length > 0, [collections.length]);
 
@@ -327,6 +344,12 @@ export default function Collections() {
 
       {isLoading ? (
         <CollectionsSkeleton />
+      ) : loadFailed ? (
+        <LoadErrorState
+          className="min-h-[40vh]"
+          title="Your collections could not be loaded."
+          onRetry={() => setRefreshKey((key) => key + 1)}
+        />
       ) : collections.length === 0 ? (
         <EmptyCollectionsState onNewBlank={() => setDialogOpen(true)} onCreateWithAI={() => setAiDialogOpen(true)} onBrowseTemplates={() => navigate("/collections/templates")} />
       ) : (

@@ -44,145 +44,26 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { Database, Json } from "@/integrations/supabase/types";
+import type { Database } from "@/integrations/supabase/types";
+import { dbErrorMessage } from "@/lib/function-error";
+import { LoadErrorState } from "@/components/collections/LoadErrorState";
+import {
+  defaultField,
+  duplicateField,
+  indexableTypes,
+  newField,
+  normalizePrimary,
+  optionTypes,
+  parseSchema,
+  relabelField,
+  toJsonSchema,
+  validateFields,
+  type FieldErrors,
+  type FieldType,
+  type SchemaField,
+} from "@/components/collections/schemaFields";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
-type FieldType =
-  | "text"
-  | "longtext"
-  | "number"
-  | "date"
-  | "datetime"
-  | "boolean"
-  | "select"
-  | "multiselect"
-  | "currency"
-  | "url"
-  | "email"
-  | "phone"
-  | "link_note"
-  | "link_person"
-  | "link_collection_item";
-type SchemaField = {
-  id: string;
-  key: string;
-  label: string;
-  type: FieldType;
-  primary?: boolean;
-  indexable?: boolean;
-  options?: string[];
-  target_collection_slug?: string | null;
-};
-type FieldErrors = Record<string, string[]>;
-
-const defaultField = (): SchemaField => ({
-  id: crypto.randomUUID(),
-  key: "name",
-  label: "Name",
-  type: "text",
-  primary: true,
-});
-const indexableTypes = new Set<FieldType>(["date", "number", "select"]);
-const optionTypes = new Set<FieldType>(["select", "multiselect"]);
-
-function fieldKey(label: string) {
-  return (
-    label
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "") || "field"
-  );
-}
-
-function parseSchema(value: Json): SchemaField[] {
-  if (!Array.isArray(value) || value.length === 0) return [defaultField()];
-  return value.map((raw, index) => {
-    const item =
-      raw && typeof raw === "object" && !Array.isArray(raw)
-        ? (raw as Record<string, Json | undefined>)
-        : {};
-    const label =
-      typeof item.label === "string" ? item.label : `Field ${index + 1}`;
-    const type =
-      typeof item.type === "string" ? (item.type as FieldType) : "text";
-    return {
-      id: typeof item.id === "string" ? item.id : crypto.randomUUID(),
-      key: typeof item.key === "string" ? item.key : fieldKey(label),
-      label,
-      type,
-      primary: item.primary === true,
-      indexable: item.indexable === true,
-      options: Array.isArray(item.options)
-        ? item.options.filter(
-            (option): option is string => typeof option === "string",
-          )
-        : undefined,
-      target_collection_slug:
-        typeof item.target_collection_slug === "string"
-          ? item.target_collection_slug
-          : typeof item.collection_id === "string"
-            ? item.collection_id
-            : null,
-    };
-  });
-}
-
-function toJsonSchema(fields: SchemaField[]): Json[] {
-  return fields.map(({ id: _id, ...field }) => {
-    const clean: Record<string, Json> = {
-      key: field.key,
-      label: field.label.trim(),
-      type: field.type,
-    };
-    if (field.primary) clean.primary = true;
-    if (field.indexable) clean.indexable = true;
-    if (optionTypes.has(field.type)) clean.options = field.options ?? [];
-    if (field.type === "link_collection_item" && field.target_collection_slug)
-      clean.target_collection_slug = field.target_collection_slug;
-    return clean;
-  });
-}
-
-function normalizePrimary(fields: SchemaField[]) {
-  if (fields.some((field) => field.primary)) return fields;
-  const fallback = fields.find((field) => field.type === "text") ?? fields[0];
-  return fields.map((field) => ({
-    ...field,
-    primary: field.id === fallback?.id,
-  }));
-}
-
-function validateFields(fields: SchemaField[]) {
-  const errors: FieldErrors = {};
-  const labels = new Map<string, number>();
-  fields.forEach((field) =>
-    labels.set(
-      field.label.trim().toLowerCase(),
-      (labels.get(field.label.trim().toLowerCase()) ?? 0) + 1,
-    ),
-  );
-  fields.forEach((field) => {
-    const fieldErrors: string[] = [];
-    if (!field.label.trim()) fieldErrors.push("Label is required.");
-    if (
-      field.label.trim() &&
-      (labels.get(field.label.trim().toLowerCase()) ?? 0) > 1
-    )
-      fieldErrors.push("Label must be unique.");
-    if (
-      optionTypes.has(field.type) &&
-      (field.options ?? []).filter(Boolean).length === 0
-    )
-      fieldErrors.push("Add at least one option.");
-    if (field.type === "link_collection_item" && !field.target_collection_slug)
-      fieldErrors.push("Choose a target collection.");
-    if (fieldErrors.length) errors[field.id] = fieldErrors;
-  });
-  if (fields.filter((field) => field.indexable).length > 4)
-    errors.__form = ["Use at most 4 indexable fields."];
-  return errors;
-}
 
 function SortableFieldRow({
   field,
@@ -260,15 +141,15 @@ function SortableFieldRow({
             <Input
               value={field.label}
               onChange={(event) =>
-                onChange({
-                  ...field,
-                  label: event.target.value,
-                  key: fieldKey(event.target.value),
-                })
+                onChange(relabelField(field, event.target.value))
               }
               placeholder="Field label"
+              aria-label="Field label"
             />
-            <p className="text-xs text-muted-foreground">key: {field.key}</p>
+            <p className="text-xs text-muted-foreground">
+              key: {field.key}
+              {!field.isNew && " (stays the same when you rename the field)"}
+            </p>
             {errors?.map((error) => (
               <p key={error} className="text-xs text-destructive">
                 {error}
@@ -465,6 +346,9 @@ export default function CollectionSchema() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [loadFailure, setLoadFailure] = useState<"error" | "missing" | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const userId = user?.id;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
@@ -474,30 +358,33 @@ export default function CollectionSchema() {
   );
   const isDirty = serialized !== initialSchema;
 
+  // Depends on the user's id, not the user object: a token refresh must not
+  // reload the schema and throw away edits in progress.
   useEffect(() => {
-    if (!user || !slug) return;
+    if (!userId || !slug) return;
     let cancelled = false;
     const load = async () => {
       setIsLoading(true);
+      setLoadFailure(null);
       const [{ data: current, error }, { data: allCollections }] =
         await Promise.all([
           supabase
             .from("collections")
             .select("*")
-            .eq("user_id", user.id)
+            .eq("user_id", userId)
             .eq("slug", slug)
             .maybeSingle(),
           supabase
             .from("collections")
             .select("*")
-            .eq("user_id", user.id)
+            .eq("user_id", userId)
             .order("name"),
         ]);
       if (cancelled) return;
       if (error || !current) {
-        toast.error("Could not load collection", {
-          description: error?.message ?? "Collection not found.",
-        });
+        // Without the saved schema this page would show a blank default
+        // field, which is not what the collection holds.
+        setLoadFailure(error ? "error" : "missing");
         setIsLoading(false);
         return;
       }
@@ -512,7 +399,7 @@ export default function CollectionSchema() {
     return () => {
       cancelled = true;
     };
-  }, [slug, user]);
+  }, [slug, userId, reloadTick]);
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -547,16 +434,7 @@ export default function CollectionSchema() {
     setFields((current) =>
       current.map((field) => (field.id === id ? next : field)),
     );
-  const addField = () =>
-    setFields((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        key: "new_field",
-        label: "New field",
-        type: "text",
-      },
-    ]);
+  const addField = () => setFields((current) => [...current, newField()]);
   const cancel = () => {
     if (isDirty && !window.confirm("Discard unsaved schema changes?")) return;
     navigate(`/collections/${slug}`);
@@ -577,7 +455,9 @@ export default function CollectionSchema() {
       .eq("user_id", collection.user_id);
     setIsSaving(false);
     if (error) {
-      toast.error("Could not save schema", { description: error.message });
+      toast.error("Could not save schema", {
+        description: dbErrorMessage(error, "Please try again."),
+      });
       return;
     }
     setInitialSchema(JSON.stringify(schema));
@@ -602,6 +482,32 @@ export default function CollectionSchema() {
         <Skeleton className="h-8 w-80" />
         <Skeleton className="h-20 w-full" />
         <Skeleton className="h-20 w-full" />
+      </div>
+    );
+
+  if (loadFailure)
+    return (
+      <div className="w-full max-w-5xl">
+        <SEOHead title="Collection Schema - Menerio" noIndex />
+        <LoadErrorState
+          title={
+            loadFailure === "missing"
+              ? "This collection could not be found."
+              : "The collection could not be loaded."
+          }
+          description={
+            loadFailure === "missing"
+              ? "It may have been renamed or deleted."
+              : undefined
+          }
+          onRetry={
+            loadFailure === "error"
+              ? () => setReloadTick((tick) => tick + 1)
+              : undefined
+          }
+          backTo="/collections"
+          backLabel="Back to Collections"
+        />
       </div>
     );
 
@@ -675,16 +581,7 @@ export default function CollectionSchema() {
                   })
                 }
                 onDuplicate={() =>
-                  setFields((current) => [
-                    ...current,
-                    {
-                      ...field,
-                      id: crypto.randomUUID(),
-                      label: `${field.label} copy`,
-                      key: fieldKey(`${field.label} copy`),
-                      primary: false,
-                    },
-                  ])
+                  setFields((current) => [...current, duplicateField(field)])
                 }
                 onDelete={() =>
                   setFields((current) =>

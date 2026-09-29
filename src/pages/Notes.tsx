@@ -84,7 +84,8 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { showToast } from "@/lib/toast";
-import { useSearchParams, useParams, useNavigate } from "react-router-dom";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
+import { useSearchParams, useParams, useNavigate, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { brandLogo } from "@/lib/brand-assets";
 import { escapeLike, pgOrValue } from "@/lib/postgrest";
@@ -116,6 +117,7 @@ export default function Notes() {
   const params = useParams();
   const urlNoteId = params["*"] || undefined;
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
@@ -242,7 +244,7 @@ export default function Notes() {
   const folderErrorMessage = useCallback((err: unknown, action: string) => {
     const message = err instanceof Error ? err.message : String(err ?? "");
     if (/failed to fetch|network|timeout|fetch failed/i.test(message)) {
-      return `Couldn't reach the server — ${action} was not applied. Please try again.`;
+      return `Couldn't reach the server, so ${action} was not applied. Please try again.`;
     }
     return message || `Could not ${action}`;
   }, []);
@@ -286,14 +288,26 @@ export default function Notes() {
   }, [activeFolderPath, createFolderAtPath, newFolderPath]);
 
 
+  // Opening a note is a history step, so Back undoes it. With every open
+  // replacing the entry, Back on a phone (where the note covers the list)
+  // left Notes altogether instead of returning to the list. Re-selecting the
+  // open note and closing one still replace, so no duplicate entries pile up.
   const selectNote = useCallback((id: string | null) => {
     setSelectedId(id);
     if (id) {
-      navigate(`/dashboard/notes/${id}`, { replace: true });
+      if (id === urlNoteId) return;
+      navigate(`/dashboard/notes/${id}`, { state: { openedFromNotes: true } });
     } else {
       navigate("/dashboard/notes", { replace: true });
     }
-  }, [navigate]);
+  }, [navigate, urlNoteId]);
+
+  // The phone's "Notes" button steps back when the note was opened from the
+  // list, so the list comes back and the history does not grow.
+  const closeNoteOnMobile = useCallback(() => {
+    if ((location.state as { openedFromNotes?: boolean } | null)?.openedFromNotes) navigate(-1);
+    else selectNote(null);
+  }, [location.state, navigate, selectNote]);
 
   const handleCreate = useCallback(async () => {
     try {
@@ -346,7 +360,7 @@ export default function Notes() {
           await queryClient.invalidateQueries({ queryKey: ["notes"] });
           showToast.success(`Moved ${ids.length} empty note${ids.length === 1 ? "" : "s"} to Trash`);
         } catch (err) {
-          showToast.error(err instanceof Error ? err.message : "Could not trash empty notes");
+          showToast.error(dbErrorMessage(err, "Could not move the empty notes to Trash. Please try again."));
         } finally {
           setIsTrashingEmpty(false);
         }
@@ -503,7 +517,7 @@ export default function Notes() {
               : "Folder deleted"
           );
         } catch (err) {
-          showToast.error(err instanceof Error ? err.message : "Failed to delete folder");
+          showToast.error(dbErrorMessage(err, "Could not delete the folder. Please try again."));
         }
       },
     });
@@ -521,7 +535,7 @@ export default function Notes() {
         n === 1 ? "Note restored" : `${n} notes restored`,
       );
     } catch (err) {
-      showToast.error(err instanceof Error ? err.message : "Failed to restore note");
+      showToast.error(dbErrorMessage(err, "Could not restore the note. Please try again."));
     }
   }, [queryClient]);
 
@@ -543,7 +557,7 @@ export default function Notes() {
             n === 1 ? "Note deleted permanently" : `${n} notes deleted permanently`,
           );
         } catch (err) {
-          showToast.error(err instanceof Error ? err.message : "Failed to delete note");
+          showToast.error(dbErrorMessage(err, "Could not delete the note. Please try again."));
         }
       },
     });
@@ -802,8 +816,8 @@ export default function Notes() {
       if (res.error) throw res.error;
       const data = res.data as { processed: number; total: number; message: string };
       showToast.success(data.message);
-    } catch (err: any) {
-      showToast.error(err.message || "Backfill failed");
+    } catch (err: unknown) {
+      showToast.error(await functionErrorMessage(err, "Could not classify the notes. Please try again."));
     } finally {
       setIsBackfilling(false);
     }
@@ -1277,7 +1291,7 @@ export default function Notes() {
                   variant="ghost"
                   size="sm"
                   className="h-8 gap-1 px-2 text-xs"
-                  onClick={() => selectNote(null)}
+                  onClick={closeNoteOnMobile}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   Notes

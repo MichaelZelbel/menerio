@@ -84,6 +84,8 @@ export interface PeopleTreeProps {
   totalPeople?: number;
   hasMore?: boolean;
   loadingMore?: boolean;
+  /** The first page of the list (or of a search) has not arrived yet. */
+  loading?: boolean;
   onLoadMore?: () => void;
   onSelectPerson: (id: string) => void;
   onToggleFavorite: (id: string, isFavorite: boolean) => void;
@@ -524,6 +526,7 @@ export function PeopleTree({
   totalPeople,
   hasMore = false,
   loadingMore = false,
+  loading = false,
   onLoadMore,
   onSelectPerson,
   onToggleFavorite,
@@ -562,9 +565,33 @@ export function PeopleTree({
     [groups],
   );
 
+  // Loaded pages last, so a row the list has refreshed wins over the pinned copy.
+  const knownPeople = useMemo(
+    () => [...new Map([...pinnedPeople, ...people].map((p) => [p.id, p])).values()],
+    [pinnedPeople, people],
+  );
+
+  // Every group member, whatever page of the name-sorted list they sit on.
+  const memberPeople = useMemo(() => {
+    const byId = new Map<string, PersonLite>();
+    for (const m of memberships) {
+      const c = m.contacts;
+      if (!c || c.merged_into) continue;
+      byId.set(c.id, {
+        id: c.id,
+        name: c.name,
+        aliases: c.aliases ?? [],
+        is_favorite: !!c.is_favorite,
+        last_viewed_at: c.last_viewed_at,
+      });
+    }
+    for (const p of knownPeople) if (byId.has(p.id)) byId.set(p.id, p);
+    return [...byId.values()];
+  }, [memberships, knownPeople]);
+
   const tree = useMemo(
-    () => buildPeopleTree({ people, groups: groupLites, memberships }),
-    [people, groupLites, memberships],
+    () => buildPeopleTree({ people, groups: groupLites, memberships, members: memberPeople }),
+    [people, groupLites, memberships, memberPeople],
   );
 
   const groupOptions = useMemo(
@@ -573,12 +600,6 @@ export function PeopleTree({
         .filter((g) => !g.archived_at && !g.is_trashed)
         .sort((a, b) => a.name.localeCompare(b.name)),
     [groupLites],
-  );
-
-  // Loaded pages last, so a row the list has refreshed wins over the pinned copy.
-  const knownPeople = useMemo(
-    () => [...new Map([...pinnedPeople, ...people].map((p) => [p.id, p])).values()],
-    [pinnedPeople, people],
   );
 
   const favorites = useMemo(
@@ -795,7 +816,11 @@ export function PeopleTree({
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-2">
         {searching ? (
           searchResults.length === 0 ? (
-            <div className="px-2 py-6 text-center text-sm text-muted-foreground">No people found</div>
+            // While the search runs there is no answer yet, not "no people"
+            // (the page says it is loading).
+            loading ? null : (
+              <div className="px-2 py-6 text-center text-sm text-muted-foreground">No people found</div>
+            )
           ) : (
             searchResults.map((person) => (
               <PersonRow
@@ -899,7 +924,7 @@ export function PeopleTree({
               {allExpanded && (
                 <div>
                   {tree.roots.length === 0 && tree.ungrouped.length === 0 ? (
-                    <div
+                    loading ? null : <div
                       className="text-[11px] italic text-muted-foreground"
                       style={{ paddingLeft: `${basePad + depthStep}px`, paddingTop: "2px", paddingBottom: "2px" }}
                     >

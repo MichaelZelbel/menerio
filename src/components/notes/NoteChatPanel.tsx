@@ -4,6 +4,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "react-router-dom";
 import { Note } from "@/hooks/useNotes";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
+import { summarizeChat } from "@/lib/chat-summary";
+import { dbErrorMessage, functionErrorMessage, OUT_OF_CREDITS_MESSAGE } from "@/lib/function-error";
 import { Button } from "@/components/ui/button";
 import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,8 +14,7 @@ import {
   saveChatState,
   clearChatState,
   buildApiMessages,
-  CHAT_WINDOW_SIZE,
-  SUMMARY_THRESHOLD,
+  withSummary,
   NOTE_MODIFYING_TOOLS,
   NOTE_CREATING_TOOLS,
   type PersistedChatMessage,
@@ -82,38 +83,48 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
     }
   }, [state.messages, isLoading]);
 
-  const refreshSummaryIfNeeded = useCallback(
-    async (current: PersistedChatState): Promise<PersistedChatState> => {
-      // Only summarize when we have enough fresh history above the window
-      const olderCount = current.messages.length - CHAT_WINDOW_SIZE;
-      if (olderCount < SUMMARY_THRESHOLD - CHAT_WINDOW_SIZE) return current;
-      if (current.summarizedUpTo >= current.messages.length - CHAT_WINDOW_SIZE) return current;
-      try {
-        const olderMessages = current.messages.slice(0, current.messages.length - CHAT_WINDOW_SIZE);
-        const transcript = olderMessages.map((m) => ({ role: m.role, content: m.content }));
-        const { data } = await supabase.functions.invoke("note-chat", {
-          body: { mode: "summarize", messages: transcript },
-        });
-        if (data?.summary) {
-          return {
-            ...current,
-            summary: data.summary,
-            summarizedUpTo: current.messages.length - CHAT_WINDOW_SIZE,
-          };
-        }
-      } catch {
-        // ignore summary failures, keep going
-      }
-      return current;
+  // The panel lives inside the note's editor, which is replaced when another
+  // note opens. A reply that arrives after that was set on an unmounted
+  // component and lost; it now goes into this note's saved history instead.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const summarizingRef = useRef(false);
+
+  const deliver = useCallback(
+    (userId: string | undefined, ctx: string, next: PersistedChatState) => {
+      if (mountedRef.current) setState(next);
+      else saveChatState(userId, ctx, next);
     },
     [],
   );
+
+  /** Fold older turns into the summary after the reply is shown, without holding it back. */
+  const summarizeLater = useCallback((userId: string | undefined, ctx: string, from: PersistedChatState) => {
+    if (summarizingRef.current) return;
+    summarizingRef.current = true;
+    void summarizeChat("note-chat", from)
+      .then((res) => {
+        if (!res) return;
+        if (mountedRef.current) setState((prev) => withSummary(prev, res.summary, res.upTo, res.messageCount));
+        else saveChatState(userId, ctx, withSummary(loadChatState(userId, ctx), res.summary, res.upTo, res.messageCount));
+      })
+      .finally(() => {
+        summarizingRef.current = false;
+      });
+  }, []);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || isLoading || !session) return;
 
     setError(null);
+    const sentUserId = user?.id;
+    const sentContext = contextKey;
     const userMsg: ChatMessage = { role: "user", content: text };
     const nextState: PersistedChatState = {
       ...state,
@@ -139,21 +150,18 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         },
       });
 
+      // A non-2xx answer (out of credits is a 402) arrives as fnErr with
+      // data null, so the reason is read from the answer itself.
       if (fnErr) {
-        const msg = fnErr.message || "Chat request failed";
-        if (msg.includes("Failed to send") || msg.includes("FunctionsFetchError")) {
-          throw new Error("Edge function call failed. This may work on the published URL — try publishing first.");
-        }
-        throw new Error(msg);
+        throw new Error(await functionErrorMessage(fnErr, "The assistant could not answer. Please try again."));
       }
 
       if (data?.error) {
-        if (data.error === "Insufficient AI credits") {
-          setError("You're out of AI credits for this period.");
-        } else {
-          throw new Error(data.error);
-        }
-        return;
+        throw new Error(
+          data.error === "Insufficient AI credits" || data.code === "INSUFFICIENT_CREDITS"
+            ? OUT_OF_CREDITS_MESSAGE
+            : "The assistant could not answer. Please try again.",
+        );
       }
 
       const noteEdit: NoteEditPayload | null = data.note_edit ?? null;
@@ -174,7 +182,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
             }
           : {}),
       };
-      let updated: PersistedChatState = {
+      const updated: PersistedChatState = {
         ...nextState,
         messages: [...nextState.messages, assistantMsg],
       };
@@ -194,7 +202,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         );
         if (applyResult.status === "failed") {
           setError(
-            "Saved. The editor view may be out of date — reload the note to see the change.",
+            "Saved. The editor view may be out of date. Reload the note to see the change.",
           );
 
         }
@@ -211,17 +219,17 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         onNoteChanged();
       }
 
-      // Roll the summary forward when needed.
-      updated = await refreshSummaryIfNeeded(updated);
-      setState(updated);
+      deliver(sentUserId, sentContext, updated);
+      // Roll the summary forward when needed, after the reply is on screen.
+      summarizeLater(sentUserId, sentContext, updated);
 
       triggerCreditsRefresh();
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      if (mountedRef.current) setError(err.message || "Something went wrong");
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) setIsLoading(false);
     }
-  }, [input, isLoading, session, state, note.id, note.content, onNoteChanged, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, note.id, note.content, onNoteChanged, user?.id, contextKey, deliver, summarizeLater]);
 
   /** Restore the note to the version from before an AI edit. */
   const undoNoteEdit = useCallback(
@@ -235,7 +243,7 @@ export function NoteChatPanel({ note, onClose, onNoteChanged }: NoteChatPanelPro
         .select("updated_at")
         .single();
       if (updErr) {
-        setError(updErr.message);
+        setError(dbErrorMessage(updErr, "Could not restore the earlier version. Please try again."));
         return;
       }
       onNoteChanged();

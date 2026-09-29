@@ -59,12 +59,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (note_id) {
       const { data: note } = await supabase
         .from("notes")
-        .select("id, title, content, metadata, embedding")
+        .select("id, title, content, metadata, embedding, ai_visibility")
         .eq("id", note_id)
         .eq("user_id", user.id)
         .single();
 
       if (!note) return json({ error: "Note not found" }, 404);
+      // Hidden from AI: its title and opening lines went into the insight
+      // prompt (and its body to the embedding provider when it had no vector).
+      // suggest-connections and compute-connections already skip it.
+      if ((note as any).ai_visibility === "hidden") {
+        return json({
+          connections: [], related_contacts: [], related_actions: [], insight: null,
+          source_note: { id: note.id, title: note.title }, credits: null, skipped: "ai_hidden",
+        });
+      }
       sourceNote = note;
 
       if (note.embedding) {
@@ -139,27 +148,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
     }
 
+    // Shown to the owner as found; only what is not hidden from AI reaches the
+    // insight prompt below.
     let relatedContacts: { id: string; name: string; relationship: string | null }[] = [];
+    let promptContacts: string[] = [];
     if (allPeople.size > 0) {
       const { data: contacts } = await supabase
         .from("contacts")
-        .select("id, name, relationship")
+        .select("id, name, relationship, ai_visibility")
         .eq("user_id", user.id);
-      relatedContacts = (contacts || []).filter((c) =>
+      const matched = (contacts || []).filter((c) =>
         allPeople.has(c.name.toLowerCase())
       );
+      relatedContacts = matched.map(({ id, name, relationship }) => ({ id, name, relationship }));
+      promptContacts = matched.filter((c) => c.ai_visibility !== "hidden").map((c) => c.name);
     }
 
     const relatedNoteIds = filtered.map((n: { id: string }) => n.id);
     let relatedActions: { id: string; content: string; status: string; source_note_id: string | null }[] = [];
+    let promptActions: string[] = [];
     if (relatedNoteIds.length > 0) {
       const { data: actions } = await supabase
         .from("action_items")
-        .select("id, content, status, source_note_id")
+        .select("id, content, status, source_note_id, ai_visibility")
         .eq("user_id", user.id)
         .in("source_note_id", relatedNoteIds)
         .limit(10);
-      relatedActions = actions || [];
+      relatedActions = (actions || []).map(({ id, content, status, source_note_id }) => ({ id, content, status, source_note_id }));
+      promptActions = (actions || []).filter((a) => a.ai_visibility !== "hidden").map((a) => a.content);
     }
 
     // Generate AI insight (with credits)
@@ -171,11 +187,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         ...filtered.slice(0, 5).map((n: { title: string; similarity: number }) =>
           `- "${n.title}" (similarity: ${(n.similarity * 100).toFixed(0)}%)`
         ),
-        relatedContacts.length > 0
-          ? `Related people: ${relatedContacts.map((c) => c.name).join(", ")}`
+        promptContacts.length > 0
+          ? `Related people: ${promptContacts.join(", ")}`
           : "",
-        relatedActions.length > 0
-          ? `Related action items: ${relatedActions.map((a) => a.content).join("; ")}`
+        promptActions.length > 0
+          ? `Related action items: ${promptActions.join("; ")}`
           : "",
       ].filter(Boolean).join("\n");
 

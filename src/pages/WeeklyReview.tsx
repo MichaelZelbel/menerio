@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { SEOHead } from "@/components/SEOHead";
 import { showToast } from "@/lib/toast";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
+import { parseDateOnly } from "@/lib/local-date";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -76,7 +78,7 @@ export default function WeeklyReview() {
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [reviewDays, setReviewDays] = useState("7");
 
-  const { data: reviews = [], isLoading } = useQuery<WeeklyReview[]>({
+  const { data: reviewsData, isLoading, isError: reviewsFailed, error: reviewsError, refetch: refetchReviews } = useQuery<WeeklyReview[]>({
     queryKey: ["weekly_reviews", user?.id],
     enabled: !!user,
     queryFn: async () => {
@@ -90,6 +92,7 @@ export default function WeeklyReview() {
       return (data as unknown as WeeklyReview[]) || [];
     },
   });
+  const reviews = reviewsData ?? [];
 
   const generateReview = useMutation({
     mutationFn: async (days: number) => {
@@ -98,7 +101,9 @@ export default function WeeklyReview() {
         body: { days },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
-      if (res.error) throw new Error(res.error.message || "Failed to generate review");
+      // The invoke error itself, not its message: functionErrorMessage reads
+      // the function's answer (402 out of credits, "No notes found") from it.
+      if (res.error) throw res.error;
       if (res.data?.error) throw new Error(res.data.error);
       return res.data;
     },
@@ -113,13 +118,10 @@ export default function WeeklyReview() {
         showToast.success("Weekly review request completed.");
       }
     },
-    onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Failed to generate review";
-      showToast.error(
-        message.includes("No notes found")
-          ? "No notes found for this period yet. Capture a few notes first, then try again."
-          : message,
-      );
+    onError: async (err: unknown) => {
+      const message = await functionErrorMessage(err, "The review could not be created. Try again.");
+      const noNotes = message.includes("No notes found") || (err instanceof Error && err.message.includes("No notes found"));
+      showToast.error(noNotes ? "No notes found for this period yet. Capture a few notes first, then try again." : message);
     },
   });
 
@@ -192,6 +194,13 @@ export default function WeeklyReview() {
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
+      ) : reviewsFailed && !reviewsData ? (
+        // A failed read is not "no reviews yet", which offers a paid Create.
+        <div role="alert" className="text-center py-16 text-muted-foreground space-y-4">
+          <p className="text-lg font-medium text-foreground">Your reviews could not be loaded</p>
+          <p className="text-sm">{dbErrorMessage(reviewsError, "Something went wrong on our side. Try again.")}</p>
+          <Button variant="outline" size="sm" onClick={() => void refetchReviews()}>Try again</Button>
+        </div>
       ) : !currentReview ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
@@ -224,8 +233,9 @@ export default function WeeklyReview() {
                 <ChevronLeft className="h-4 w-4 mr-1" /> Older
               </Button>
               <span className="text-sm text-muted-foreground">
-                {new Date(currentReview.week_start).toLocaleDateString()} –{" "}
-                {new Date(currentReview.week_end).toLocaleDateString()}
+                {/* Date columns: new Date("2026-09-21") is UTC midnight and showed the day before west of UTC. */}
+                {parseDateOnly(currentReview.week_start)?.toLocaleDateString()} –{" "}
+                {parseDateOnly(currentReview.week_end)?.toLocaleDateString()}
               </span>
               <Button
                 variant="ghost"

@@ -76,7 +76,7 @@ export function ContactProfileTab({
       if (notes.error) throw notes.error;
       if (moments.error) throw moments.error;
       if (lexicon.error) throw lexicon.error;
-      showToast.success("Enrichment started — new facts will appear shortly.");
+      showToast.success("Enrichment started. New facts will appear shortly.");
     } catch (err: any) {
       showToast.error(err.message ?? "Enrichment failed");
     } finally {

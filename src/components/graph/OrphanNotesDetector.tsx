@@ -9,12 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText,
   Sparkles,
-  Ban,
+  EyeOff,
   Loader2,
   ArrowRight,
 } from "lucide-react";
 import { getNotePreviewText } from "@/lib/note-content";
 import { showToast } from "@/lib/toast";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface OrphanNotesDetectorProps {
@@ -24,7 +25,7 @@ interface OrphanNotesDetectorProps {
 export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data, isLoading } = useOrphanNotes({ withContent: !compact });
+  const { data, isLoading, isError, error, refetch } = useOrphanNotes({ withContent: !compact });
   const [computing, setComputing] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
@@ -48,24 +49,56 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
       queryClient.invalidateQueries({ queryKey: ["graph-data"] });
       queryClient.invalidateQueries({ queryKey: ["orphan-notes"] });
       showToast.success("Connections computed");
-    } catch {
-      showToast.error("Failed to compute connections");
+    } catch (err) {
+      showToast.error(await functionErrorMessage(err, "Failed to compute connections"));
     } finally {
       setComputing(null);
     }
   };
 
-  const handleMarkStandalone = (noteId: string) => {
+  // Only hides the note in this view until it is opened again; nothing is
+  // saved, so the label and the toast say exactly that.
+  const handleHideForNow = (noteId: string) => {
     setDismissed((prev) => new Set(prev).add(noteId));
-    showToast.success("Marked as standalone");
+    showToast.success("Hidden for now");
   };
+
+  // A failed read is not "everything is connected".
+  if (isError && !data) {
+    const message = dbErrorMessage(error, "Something went wrong while checking your notes. Try again.");
+    const retry = (
+      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => void refetch()}>
+        Try again
+      </Button>
+    );
+    if (compact) {
+      return (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Orphan Notes</CardTitle>
+          </CardHeader>
+          <CardContent role="alert" className="space-y-2">
+            <p className="text-xs text-muted-foreground">Orphan notes could not be loaded. {message}</p>
+            {retry}
+          </CardContent>
+        </Card>
+      );
+    }
+    return (
+      <div role="alert" className="space-y-2">
+        <p className="text-sm font-medium text-foreground">Orphan notes could not be loaded</p>
+        <p className="text-sm text-muted-foreground">{message}</p>
+        {retry}
+      </div>
+    );
+  }
 
   if (isLoading && totalOrphans === 0) return null;
   if (!isLoading && totalOrphans === 0) {
     if (compact) return null;
     return (
       <p className="text-sm text-muted-foreground">
-        No orphan notes — everything is connected.
+        No orphan notes. Everything is connected.
       </p>
     );
   }
@@ -81,7 +114,7 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground mb-3">
-            {totalOrphans} note{totalOrphans !== 1 ? "s" : ""} with zero connections — consider linking them.
+            {totalOrphans} note{totalOrphans !== 1 ? "s" : ""} with zero connections. Consider linking them.
           </p>
           <div className="space-y-1.5">
             {orphanNotes.slice(0, 3).map((note) => (
@@ -165,10 +198,10 @@ export function OrphanNotesDetector({ compact }: OrphanNotesDetectorProps) {
                       variant="ghost"
                       size="sm"
                       className="h-7 text-xs gap-1"
-                      onClick={() => handleMarkStandalone(note.id)}
+                      onClick={() => handleHideForNow(note.id)}
                     >
-                      <Ban className="h-3 w-3" />
-                      Standalone
+                      <EyeOff className="h-3 w-3" />
+                      Hide for now
                     </Button>
                   </div>
                 </div>

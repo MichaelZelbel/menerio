@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ArrowUpRight, ChevronDown, ChevronRight } from "lucide-react";
 import { useStickyPanelPreference } from "@/hooks/useStickyPanelPreference";
 import { formatDistanceToNow } from "date-fns";
+import { dbErrorMessage } from "@/lib/function-error";
 
 interface OutgoingLinksPanelProps {
   noteId: string;
@@ -21,27 +22,30 @@ export function OutgoingLinksPanel({ noteId, onNavigate }: OutgoingLinksPanelPro
   const [expanded, setExpanded] = useStickyPanelPreference("note-links");
 
 
-  const { data: links = [], isLoading } = useQuery<OutgoingLink[]>({
+  const { data: links = [], isLoading, error } = useQuery<OutgoingLink[]>({
     queryKey: ["outgoing-links", noteId, user?.id],
     enabled: !!user && !!noteId,
     queryFn: async () => {
-      const { data: connections } = await supabase
+      const { data: connections, error: connectionsError } = await supabase
         .from("note_connections" as any)
         .select("target_note_id")
         .eq("source_note_id", noteId)
         .eq("connection_type", "manual_link")
         .eq("user_id", user!.id);
+      // A failed read is not "no links": let the panel say so.
+      if (connectionsError) throw connectionsError;
 
       if (!connections || connections.length === 0) return [];
 
       const targetIds = Array.from(
         new Set((connections as any[]).map((c) => c.target_note_id))
       );
-      const { data: notes } = await supabase
+      const { data: notes, error: notesError } = await supabase
         .from("notes" as any)
         .select("id, title, updated_at")
         .in("id", targetIds)
         .eq("is_trashed", false);
+      if (notesError) throw notesError;
 
       return (notes || []) as unknown as OutgoingLink[];
     },
@@ -57,7 +61,7 @@ export function OutgoingLinksPanel({ noteId, onNavigate }: OutgoingLinksPanelPro
       >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <ArrowUpRight className="h-3 w-3" />
-        Links ({count})
+        {error ? "Links" : `Links (${count})`}
       </button>
 
       {expanded && (
@@ -65,7 +69,12 @@ export function OutgoingLinksPanel({ noteId, onNavigate }: OutgoingLinksPanelPro
           {isLoading && (
             <p className="text-[10px] text-muted-foreground">Loading…</p>
           )}
-          {!isLoading && count === 0 && (
+          {error && (
+            <p role="alert" className="text-[10px] text-destructive">
+              {dbErrorMessage(error, "Could not load the notes this one links to.")}
+            </p>
+          )}
+          {!isLoading && !error && count === 0 && (
             <p className="text-[10px] text-muted-foreground">
               This note doesn't link to any other notes yet. Use [[wikilinks]] in the editor to create connections.
             </p>

@@ -107,7 +107,7 @@ export function RichTextEditor({
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false, link: false, underline: false }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: false, underline: false }),
       UnderlineExt,
       LinkExt.configure({ openOnClick: false, HTMLAttributes: { rel: "noopener noreferrer", target: null } }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),

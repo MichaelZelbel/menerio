@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Archive, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,21 +35,70 @@ function parseObject<T extends Record<string, unknown>>(value: Json | null | und
   return value && typeof value === "object" && !Array.isArray(value) ? (value as T) : ({} as T);
 }
 
+/** The free-text fields as typed, before they are saved. */
+type Draft = { reason: string; notes: string; attributes: Record<string, string> };
+
+function draftFrom(membership: GroupMembershipWithPerson | null): Draft {
+  const attributes = parseObject<Record<string, string | number>>(membership?.attributes ?? {});
+  return {
+    reason: membership?.reason || "",
+    notes: membership?.notes || "",
+    attributes: Object.fromEntries(Object.entries(attributes).map(([key, value]) => [key, String(value ?? "")])),
+  };
+}
+
+// Render keyed by membership id (GroupDetail does), so the draft starts from
+// the member that is open.
 export function MembershipSheet({ group, membership, notes, open, onOpenChange }: { group: ContactGroup; membership: GroupMembershipWithPerson | null; notes: NoteSummary[]; open: boolean; onOpenChange: (open: boolean) => void }) {
   const updateMembership = useUpdateMembership();
   const removeMembership = useRemoveMembership();
   const archiveMembership = useArchiveMembership();
+  // Reason, Notes and text attributes are held here and saved on blur AND
+  // when the sheet closes. Saving on blur alone lost the text when the sheet
+  // was closed with Escape or a click outside: the field unmounted before it
+  // ever blurred.
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(membership));
+  // What has been sent to the server, so a blur followed by a close does not
+  // save the same text twice.
+  const saved = useRef<Draft>(draftFrom(membership));
   const stages = parseArray<Stage>(group.stages);
   const schema = parseObject<AttributeSchema>(group.attributes_schema);
   const values = parseObject<Record<string, string | number>>(membership?.attributes ?? {});
   if (!membership) return <Sheet open={open} onOpenChange={onOpenChange} />;
 
   const update = (updates: Parameters<typeof updateMembership.mutate>[0]) => updateMembership.mutate(updates, { onSuccess: () => showToast.success("Membership updated") });
-  const updateField = (field: "status" | "priority" | "reason" | "notes", value: string | null) => update({ id: membership.id, groupId: group.id, personId: membership.contact_id, [field]: value });
-  const updateAttribute = (key: string, value: string | number) => update({ id: membership.id, groupId: group.id, personId: membership.contact_id, attributes: { ...values, [key]: value } as Json });
+  const updateField = (field: "status" | "priority", value: string | null) => update({ id: membership.id, groupId: group.id, personId: membership.contact_id, [field]: value });
+  const attributeValue = (key: string, text: string) => (schema[key]?.type === "number" ? Number(text || 0) : text);
+  // Saves every change not saved yet, in one update. `picked` is a select
+  // attribute chosen right now (state updates land after this call). While
+  // the sheet is open the draft is the truth for every attribute, so a save
+  // made before the previous one has reloaded cannot put an old value back.
+  const saveDraft = (picked?: Record<string, string>) => {
+    const current: Draft = picked ? { ...draft, attributes: { ...draft.attributes, ...picked } } : draft;
+    if (picked) setDraft(current);
+    const updates: Omit<Parameters<typeof updateMembership.mutate>[0], "id" | "groupId" | "personId"> = {};
+    if (current.reason !== saved.current.reason) updates.reason = current.reason || null;
+    if (current.notes !== saved.current.notes) updates.notes = current.notes || null;
+    const attributesChanged = Object.entries(current.attributes).some(([key, text]) => text !== saved.current.attributes[key]);
+    if (attributesChanged) {
+      const next: Record<string, string | number> = { ...values };
+      Object.entries(current.attributes).forEach(([key, text]) => {
+        if (key in schema && String(values[key] ?? "") !== text) next[key] = attributeValue(key, text);
+      });
+      updates.attributes = next as Json;
+    }
+    if (Object.keys(updates).length === 0) return;
+    saved.current = { ...current, attributes: { ...current.attributes } };
+    update({ id: membership.id, groupId: group.id, personId: membership.contact_id, ...updates });
+  };
+  const setDraftAttribute = (key: string, text: string) => setDraft((current) => ({ ...current, attributes: { ...current.attributes, [key]: text } }));
+  const handleOpenChange = (next: boolean) => {
+    if (!next) saveDraft();
+    onOpenChange(next);
+  };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-3 pr-6">
@@ -61,14 +111,14 @@ export function MembershipSheet({ group, membership, notes, open, onOpenChange }
             <div className="space-y-2"><Label>Status</Label><Select value={membership.status || ""} onValueChange={(value) => updateField("status", value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{stages.map((stage) => <SelectItem key={stage.id} value={stage.id}>{stage.label}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-2"><Label>Priority</Label><Select value={membership.priority} onValueChange={(value) => updateField("priority", value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PRIORITIES.map((p) => <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>)}</SelectContent></Select></div>
           </div>
-          <div className="space-y-2"><Label>Reason</Label><Textarea defaultValue={membership.reason || ""} onBlur={(e) => updateField("reason", e.target.value || null)} /></div>
-          <div className="space-y-2"><Label>Notes</Label><Textarea defaultValue={membership.notes || ""} onBlur={(e) => updateField("notes", e.target.value || null)} className="min-h-24" /></div>
+          <div className="space-y-2"><Label htmlFor="membership-reason">Reason</Label><Textarea id="membership-reason" value={draft.reason} onChange={(e) => setDraft((current) => ({ ...current, reason: e.target.value }))} onBlur={() => saveDraft()} /></div>
+          <div className="space-y-2"><Label htmlFor="membership-notes">Notes</Label><Textarea id="membership-notes" value={draft.notes} onChange={(e) => setDraft((current) => ({ ...current, notes: e.target.value }))} onBlur={() => saveDraft()} className="min-h-24" /></div>
           <div className="space-y-3">
             <h3 className="text-sm font-medium">Attributes</h3>
             {Object.entries(schema).length === 0 ? <p className="text-sm text-muted-foreground">No attributes configured.</p> : Object.entries(schema).map(([key, config]) => (
               <div key={key} className="space-y-2">
                 <Label>{config.label}</Label>
-                {config.type === "select" ? <Select value={String(values[key] ?? "")} onValueChange={(value) => updateAttribute(key, value)}><SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger><SelectContent>{(config.options || []).map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select> : <Input type={config.type === "number" ? "number" : "text"} min={config.min} max={config.max} defaultValue={String(values[key] ?? "")} onBlur={(e) => updateAttribute(key, config.type === "number" ? Number(e.target.value || 0) : e.target.value)} />}
+                {config.type === "select" ? <Select value={draft.attributes[key] ?? ""} onValueChange={(value) => saveDraft({ [key]: value })}><SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger><SelectContent>{(config.options || []).map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select> : <Input aria-label={config.label} type={config.type === "number" ? "number" : "text"} min={config.min} max={config.max} value={draft.attributes[key] ?? ""} onChange={(e) => setDraftAttribute(key, e.target.value)} onBlur={() => saveDraft()} />}
               </div>
             ))}
           </div>

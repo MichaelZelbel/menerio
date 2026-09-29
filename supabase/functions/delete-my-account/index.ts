@@ -105,13 +105,10 @@ serve(async (req) => {
     const storage = await removeUserStorage(adminClient, user.id);
     for (const err of storage.errors) console.error("[DELETE-ACCOUNT] storage cleanup:", err);
 
-    // Delete user roles
-    await adminClient.from("user_roles").delete().eq("user_id", user.id);
-
-    // Delete profile
-    await adminClient.from("profiles").delete().eq("id", user.id);
-
-    // Delete auth user
+    // Delete auth user. Its role and profile rows cascade with it, and are only
+    // swept up by hand below once it is gone: deleting them first meant a
+    // failed auth delete left a live account with no profile and no role, so a
+    // premium account came back from "Failed to delete account" as a free one.
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(user.id);
 
     if (deleteError) {
@@ -121,6 +118,9 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    await adminClient.from("user_roles").delete().eq("user_id", user.id);
+    await adminClient.from("profiles").delete().eq("id", user.id);
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,

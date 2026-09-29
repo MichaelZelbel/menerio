@@ -248,7 +248,10 @@ export function smartChunkMarkdown(
   let prevContent = "";
   for (const s of merged) {
     const cleaned = s.content.replace(/[ \t]+\n/g, "\n").trim();
-    if (cleaned.replace(/\W+/g, "").length < 12) continue;
+    // Letters and digits of any script. `\W` is ASCII-only, so a note written
+    // in Chinese, Russian or Greek counted as empty, got no chunk, no embedding
+    // and no place in search by meaning.
+    if (cleaned.replace(/[^\p{L}\p{N}]+/gu, "").length < 12) continue;
 
     let body = cleaned;
     const overlap = trailingSentences(prevContent, opts.overlapSentences);

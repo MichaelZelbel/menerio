@@ -4,6 +4,7 @@ import {
   openRouterWithCredits,
   insufficientCreditsResponse,
   balanceUnavailableResponse,
+  repeatBlockedResponse,
 } from "../_shared/llm-credits.ts";
 import { resolveSystemPrompt, resolveConfig } from "../_shared/llm-router.ts";
 import {
@@ -68,6 +69,19 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+/**
+ * The standard answer for a refusal from the credit layer, or null for any
+ * other error. Only INSUFFICIENT_CREDITS was mapped: an unreadable balance or a
+ * blocked repeat call answered 500 with the bare code as its message.
+ */
+function creditErrorResponse(err: unknown): Response | null {
+  const message = (err as { message?: string } | null)?.message;
+  if (message === "INSUFFICIENT_CREDITS" || message === "NO_ACTIVE_PERIOD") return insufficientCreditsResponse(corsHeaders);
+  if (message === "BALANCE_UNAVAILABLE") return balanceUnavailableResponse(corsHeaders);
+  if (message === "REPEAT_CALL_BLOCKED") return repeatBlockedResponse(corsHeaders);
+  return null;
 }
 
 // Tool definitions for the LLM. The read tools (semantic/text/media search,
@@ -137,6 +151,11 @@ const WRITE_TOOLS = [
     },
   },
 ];
+
+/** The metadata keys update_note_metadata may write (as its description says). */
+const NOTE_METADATA_TOOL_KEYS = new Set([
+  "topics", "type", "sentiment", "people", "summary", "action_items", "dates_mentioned",
+]);
 
 // Full tool set = shared read tools + safe content-edit tools + note-local
 // metadata/tag/link write tools.
@@ -226,9 +245,24 @@ async function executeTool(
 
   switch (name) {
     case "update_note_metadata": {
-
-
-      const newMeta = args.metadata as Record<string, unknown>;
+      // Only the keys the tool documents. metadata also holds fields the app
+      // owns (matched_people, source, source_url, web_clip, is_quick_capture),
+      // and a model, or an instruction it read, could overwrite those too.
+      const raw = args.metadata;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return JSON.stringify({ error: "metadata must be an object" });
+      }
+      const newMeta = Object.fromEntries(
+        Object.entries(raw as Record<string, unknown>).filter(([key]) => NOTE_METADATA_TOOL_KEYS.has(key)),
+      );
+      const ignored = Object.keys(raw as Record<string, unknown>).filter((key) => !NOTE_METADATA_TOOL_KEYS.has(key));
+      if (Object.keys(newMeta).length === 0) {
+        return JSON.stringify({
+          error: "no supported metadata keys",
+          supported_keys: [...NOTE_METADATA_TOOL_KEYS],
+          ignored_keys: ignored,
+        });
+      }
       const { data: note } = await db
         .from("notes")
         .select("metadata")
@@ -247,6 +281,7 @@ async function executeTool(
         success: true,
         action: "update_note_metadata",
         updated_fields: Object.keys(newMeta),
+        ...(ignored.length ? { ignored_keys: ignored } : {}),
       });
     }
 
@@ -381,9 +416,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
             : null,
         });
       } catch (err: any) {
-        if (err.message === "INSUFFICIENT_CREDITS") {
-          return insufficientCreditsResponse(corsHeaders);
-        }
+        const refused = creditErrorResponse(err);
+        if (refused) return refused;
         return json({ error: err.message || "Summarize failed" }, 500);
       }
     }
@@ -400,7 +434,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { data: note, error: noteErr } = await db
         .from("notes")
         .select(
-          "id, title, content, tags, metadata, entity_type, related, structured_fields"
+          "id, title, content, tags, metadata, entity_type, related, structured_fields, ai_visibility"
         )
         .eq("id", note_id)
         .eq("user_id", user.id)
@@ -408,6 +442,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       if (noteErr || !note)
         return json({ error: "Note not found" }, 404);
+
+      // "Hidden from AI" promises the note is kept out of AI Chat. Opening the
+      // chat on it sent the whole body and its OCR text to the model provider.
+      if (note.ai_visibility === "hidden")
+        return json({
+          error: "This note is hidden from AI. Make it visible to AI to chat about it.",
+          code: "NOTE_HIDDEN_FROM_AI",
+        }, 403);
 
       // Fetch media analysis (OCR, descriptions) for this note
       const { data: mediaData } = await db
@@ -613,9 +655,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
 
     } catch (err: any) {
-      if (err?.message === "INSUFFICIENT_CREDITS") {
-        return insufficientCreditsResponse(corsHeaders);
-      }
+      const refused = creditErrorResponse(err);
+      if (refused) return refused;
       throw err;
     } finally {
       await mcp?.close();

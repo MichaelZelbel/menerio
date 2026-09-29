@@ -78,6 +78,36 @@ describe("ensureAllowanceForUser", () => {
     expect(row.tokens_granted).toBe(2_000_000);
     expect(row.metadata.rollover_tokens).toBe(1_000_000);
   });
+
+  it("writes nothing when the role cannot be read, instead of a free month for a premium account", async () => {
+    const db = fakeDb({ role: "premium" });
+    const failing = { ...db, rpc: async () => ({ data: null, error: { message: "canceling statement due to statement timeout" } }) };
+    await expect(ensureAllowanceForUser(failing, "u1")).rejects.toMatchObject({ message: expect.stringMatching(/timeout/) });
+    expect(db.periods).toHaveLength(0);
+    // The next call, with the database back, grants the premium month.
+    const row = await ensureAllowanceForUser(db, "u1");
+    expect(row.source).toBe("role_based");
+    expect(row.tokens_granted).toBe(1500 * 2000);
+  });
+
+  it("writes nothing when last month cannot be read, instead of dropping its rollover", async () => {
+    const now = new Date(Date.UTC(2026, 8, 20));
+    const db = fakeDb({ periods: [{ user_id: "u1", period_start: "2026-08-01T00:00:00.000Z", period_end: "2026-09-01T00:00:00.000Z", tokens_granted: 5_000_000, tokens_used: 0 }] });
+    let reads = 0;
+    const failing = {
+      ...db,
+      from: (table: string) => {
+        const q = db.from(table);
+        if (table !== "ai_allowance_periods") return q;
+        const maybeSingle = q.maybeSingle;
+        // First read: this month's row (none). Second: last month, which fails.
+        q.maybeSingle = async () => (++reads === 2 ? { data: null, error: { message: "connection reset" } } : maybeSingle());
+        return q;
+      },
+    };
+    await expect(ensureAllowanceForUser(failing, "u1", now)).rejects.toMatchObject({ message: "connection reset" });
+    expect(db.periods).toHaveLength(1);
+  });
 });
 
 describe("checkBalance on an account nobody opened this month", () => {

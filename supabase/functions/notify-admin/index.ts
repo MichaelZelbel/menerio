@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { isValidCronRequest } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -99,9 +100,15 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Only trusted server-side callers (DB triggers, other edge functions) may invoke this.
+  // Only trusted server-side callers may invoke this: other edge functions
+  // (delete-my-account) with the service-role key, and the signup trigger
+  // through internal.call_edge with the scheduler's x-cron-key. The trigger
+  // used to send the service-role key from a database setting that does not
+  // exist on the hosted project, so every signup e-mail was refused with a 401
+  // (migration 20260929201100).
   const authHeader = req.headers.get("Authorization") || "";
-  if (!SERVICE_ROLE_KEY || authHeader !== `Bearer ${SERVICE_ROLE_KEY}`) {
+  const serviceCaller = Boolean(SERVICE_ROLE_KEY) && authHeader === `Bearer ${SERVICE_ROLE_KEY}`;
+  if (!serviceCaller && !(await isValidCronRequest(req))) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -134,7 +141,8 @@ Deno.serve(async (req) => {
     const subject = `${config.emoji} ${config.subjectPrefix}: ${userEmail}`;
     const html = buildEmailHtml(eventType, body);
 
-    console.log(`[NOTIFY-ADMIN] Sending ${eventType} notification for ${userEmail}`);
+    // The address goes into the e-mail, never into the function log.
+    console.log(`[NOTIFY-ADMIN] Sending ${eventType} notification`);
 
     const resendResponse = await fetch(`${GATEWAY_URL}/emails`, {
       method: "POST",

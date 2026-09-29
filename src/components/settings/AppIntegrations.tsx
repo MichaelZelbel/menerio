@@ -28,6 +28,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Copy, Check, Trash2, Plug, Loader2 } from "lucide-react";
+import { BRAND } from "@/lib/brand";
+import { dbErrorMessage } from "@/lib/function-error";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 interface KnownApp {
   id: string;
@@ -43,7 +46,7 @@ const KNOWN_APPS: KnownApp[] = [
   {
     id: "querino",
     name: "Querino",
-    description: "AI research assistant — syncs artefacts as notes to Menerio.",
+    description: `AI research assistant. Syncs artefacts as notes to ${BRAND.name}.`,
     supabaseUrl: "https://bqsovmbjnkftsjfwdlia.supabase.co",
     webhookPath: "/functions/v1/menerio-webhook",
     icon: "🔬",
@@ -64,6 +67,8 @@ interface ConnectedApp {
   created_at: string;
   updated_at: string;
 }
+
+const WEBHOOK_NOT_ALLOWED = "This app's webhook URL is not allowed (public HTTPS addresses only).";
 
 function generateApiKey(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -138,7 +143,7 @@ export function AppIntegrations() {
       const keyPrefix = apiKey.slice(0, 12);
       const webhookUrl = `${known.supabaseUrl}${known.webhookPath}`;
       if (!isSafeWebhookUrl(webhookUrl)) {
-        throw new Error("This app's webhook URL is not allowed (public HTTPS addresses only).");
+        throw new Error(WEBHOOK_NOT_ALLOWED);
       }
       const { error } = await supabase.from("connected_apps" as any).insert({
         user_id: user!.id,
@@ -158,7 +163,13 @@ export function AppIntegrations() {
     },
     onError: (err: Error) => {
       setConnectingAppId(null);
-      showToast.error(err.message || "Failed to connect app");
+      // Only the sentence written here is shown as is; a database refusal is
+      // written for developers.
+      showToast.error(
+        err?.message === WEBHOOK_NOT_ALLOWED
+          ? WEBHOOK_NOT_ALLOWED
+          : dbErrorMessage(err, "Could not connect the app. Try again."),
+      );
     },
   });
 
@@ -168,6 +179,7 @@ export function AppIntegrations() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["connected_apps"] }),
+    onError: (err) => showToast.error(dbErrorMessage(err, "Could not change the connection. Try again.")),
   });
 
   const deleteApp = useMutation({
@@ -179,10 +191,15 @@ export function AppIntegrations() {
       qc.invalidateQueries({ queryKey: ["connected_apps"] });
       showToast.success("Connection removed");
     },
+    onError: (err) => showToast.error(dbErrorMessage(err, "Could not remove the connection. Try again.")),
   });
 
   const handleCopy = async (text: string) => {
-    await navigator.clipboard.writeText(text);
+    // The key is shown only once: a refused copy must say so.
+    if (!(await copyToClipboard(text))) {
+      showToast.error(COPY_FAILED_MESSAGE);
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -201,7 +218,7 @@ export function AppIntegrations() {
             <Plug className="h-5 w-5" /> App Integrations
           </CardTitle>
           <CardDescription>
-            Connect Querino to sync research artefacts with Menerio.
+            Connect Querino to sync research artefacts with {BRAND.name}.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -244,6 +261,7 @@ export function AppIntegrations() {
                     {existing ? (
                       <div className="flex items-center gap-3">
                         <Switch
+                          aria-label={existing.is_active ? `Pause ${known.name}` : `Resume ${known.name}`}
                           checked={existing.is_active}
                           onCheckedChange={(checked) => toggleActive.mutate({ id: existing.id, is_active: checked })}
                         />
@@ -257,7 +275,7 @@ export function AppIntegrations() {
                             <AlertDialogHeader>
                               <AlertDialogTitle>Disconnect {known.name}?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                This revokes the API key. {known.name} will no longer be able to sync with Menerio.
+                                This revokes the API key. {known.name} will no longer be able to sync with {BRAND.name}.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
@@ -300,7 +318,7 @@ export function AppIntegrations() {
           <DialogHeader>
             <DialogTitle>Connection Key Generated</DialogTitle>
             <DialogDescription>
-              Copy this key and paste it into Querino's Menerio settings. You won't see it again.
+              Copy this key and paste it into Querino. You won't see it again.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

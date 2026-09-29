@@ -10,9 +10,30 @@ import { installQuerySyncListener } from "@/lib/query-sync";
 import { OFFLINE_CORE } from "@/lib/flags";
 import { getDb } from "@/sync/db";
 import { preserveUploadsBeforeAccountClear } from "@/sync/recovery";
+import { safeReturnPath } from "@/lib/return-to";
+import { browserTimeZone, timeZoneToAdopt } from "@/lib/profile-timezone";
 
 const LAST_USER_KEY = "menerio:last-user-id";
 const UPLOAD_FLUSH_TIMEOUT_MS = 5000;
+
+/**
+ * The same account announced again (a token refresh, or supabase-js
+ * re-reading the session each time the tab becomes visible) arrives as a new
+ * User object with the same content. Handing that new object to React re-ran
+ * every effect keyed on `user` and reloaded forms from the server over what
+ * the person had typed: switching tabs to copy a value from a setup guide
+ * reverted the Settings fields, and an open collection item lost its edits.
+ * Keep the previous object unless something in it actually changed.
+ */
+function sameUser(prev: User | null, next: User | null): boolean {
+  if (prev === next) return true;
+  if (!prev || !next || prev.id !== next.id) return false;
+  try {
+    return JSON.stringify(prev) === JSON.stringify(next);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Give PowerSync a few seconds to upload queued edits before signing out, so
@@ -56,7 +77,8 @@ interface AuthContextType {
    */
   roleLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName: string) => Promise<{ success: boolean; alreadyExists?: boolean }>;
+  /** `returnPath` is where the confirmation link lands (a path inside the app, e.g. from /auth?redirect=). */
+  signUp: (email: string, password: string, displayName: string, returnPath?: string) => Promise<{ success: boolean; alreadyExists?: boolean }>;
   signOut: () => Promise<void>;
   signInWithOAuth: (provider: "google" | "github") => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -83,10 +105,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = useCallback(async (userId: string, epoch = generation.current) => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, display_name, avatar_url")
+      .select("id, display_name, avatar_url, timezone")
       .eq("id", userId)
       .single();
-    if (!error && data && epoch === generation.current && owner.current === userId) setProfile(data as Profile);
+    if (error || !data || epoch !== generation.current || owner.current !== userId) return;
+    const { timezone, ...rest } = data as Profile & { timezone?: string | null };
+    setProfile(rest);
+    // Best effort: a failed write leaves the default, as before.
+    const adopt = timeZoneToAdopt(timezone, browserTimeZone());
+    if (adopt) {
+      try {
+        const { error: tzError } = await supabase.from("profiles").update({ timezone: adopt }).eq("id", userId);
+        if (!tzError) void cacheRef.current.client.invalidateQueries({ queryKey: ["profile-timezone", userId] });
+      } catch {
+        // Never let this break sign-in.
+      }
+    }
   }, []);
 
   const fetchRole = useCallback(async (userId: string, epoch = generation.current) => {
@@ -121,7 +155,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const nextOwner = newSession?.user.id ?? null;
       if (owner.current === nextOwner) {
         setSession(newSession);
-        setUser(newSession?.user ?? null);
+        const nextUser = newSession?.user ?? null;
+        setUser(prev => (sameUser(prev, nextUser) ? prev : nextUser));
         return;
       }
       const epoch = ++generation.current;
@@ -197,13 +232,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) { handleAuthError(error); throw error; }
   };
 
-  const signUp = async (email: string, password: string, displayName: string): Promise<{ success: boolean; alreadyExists?: boolean }> => {
+  const signUp = async (email: string, password: string, displayName: string, returnPath?: string): Promise<{ success: boolean; alreadyExists?: boolean }> => {
+    // The confirmation link opens in a new tab, so the page a new user was on
+    // the way to (a mission control's connection request, say) must travel in
+    // the link itself; landing on the dashboard lost it.
+    const path = safeReturnPath(returnPath);
     const { data, error } = await supabase.auth.signUp({
       email, password,
       // `brand` records which brand the user signed up on; the Supabase auth
       // email templates branch on it ({{ .Data.brand }}) and backend emails
       // can use it as the per-user brand signal.
-      options: { emailRedirectTo: window.location.origin, data: { full_name: displayName, brand: BRAND.id } },
+      options: { emailRedirectTo: window.location.origin + (path ?? ""), data: { full_name: displayName, brand: BRAND.id } },
     });
     if (error) { handleAuthError(error); throw error; }
     if (data.user?.identities?.length === 0) {

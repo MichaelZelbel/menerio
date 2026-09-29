@@ -45,6 +45,37 @@ const MAX_SERVERS = 5;
 const MAX_TOOLS = 15;
 const CONNECT_TIMEOUT_MS = 8000;
 const CALL_TIMEOUT_MS = 20000;
+/**
+ * Most characters of one tool result handed to the model. The agent loop sends
+ * every earlier tool result again on each of its rounds, so one oversized
+ * result was billed up to six times over, or overflowed the context and ended
+ * the turn.
+ */
+export const MAX_MCP_RESULT_CHARS = 20_000;
+
+/**
+ * Flatten MCP content blocks into text for the model. Text blocks pass through.
+ * Image and audio blocks, and binary embedded resources, are base64 data the
+ * model cannot read as text: a single screenshot was megabytes of "tokens".
+ * They are replaced by a one-line placeholder. The result is capped.
+ */
+export function flattenMcpContent(content: unknown): string {
+  const blocks = Array.isArray(content) ? content : [];
+  const text = blocks
+    .map((c: any) => {
+      if (c?.type === "text") return String(c.text ?? "");
+      if (c?.type === "image" || c?.type === "audio") {
+        return `[${c.type} omitted${c.mimeType ? ` (${c.mimeType})` : ""}]`;
+      }
+      if (c?.type === "resource" && typeof c?.resource?.blob === "string") {
+        return `[binary resource omitted${c.resource.uri ? `: ${c.resource.uri}` : ""}]`;
+      }
+      return JSON.stringify(c);
+    })
+    .join("\n");
+  if (text.length <= MAX_MCP_RESULT_CHARS) return text;
+  return `${text.slice(0, MAX_MCP_RESULT_CHARS)}\n[Result truncated: ${text.length - MAX_MCP_RESULT_CHARS} more characters not shown.]`;
+}
 
 interface UserMcpServerRow {
   id: string;
@@ -237,9 +268,7 @@ export async function loadUserMcpTools(
           `callTool ${name}`
         );
         // MCP returns content blocks; flatten text for the model.
-        const text = ((result?.content || []) as any[])
-          .map((c) => (c?.type === "text" ? c.text : JSON.stringify(c)))
-          .join("\n");
+        const text = flattenMcpContent(result?.content);
         return JSON.stringify({
           tool: name,
           is_error: !!result?.isError,

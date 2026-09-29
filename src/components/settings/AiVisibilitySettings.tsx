@@ -21,20 +21,23 @@ export function AiVisibilitySettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Keyed on the id: a new user object for the same account (a token refresh
+  // on returning to the tab) must not reload the switch.
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     (async () => {
       const { data } = await (supabase as any)
         .from("mcp_preferences")
         .select("hide_sensitive_from_ai")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .maybeSingle();
       if (data?.hide_sensitive_from_ai !== undefined && data?.hide_sensitive_from_ai !== null) {
         setHideSensitive(!!data.hide_sensitive_from_ai);
       }
       setLoading(false);
     })();
-  }, [user]);
+  }, [userId]);
 
   const onToggle = async (next: boolean) => {
     if (!user) return;

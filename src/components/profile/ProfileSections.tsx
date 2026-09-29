@@ -15,6 +15,7 @@ import { ProfileFieldFilter } from "@/components/people/profile/ProfileFieldFilt
 import { CompactCategorySection, type SectionOption } from "@/components/people/profile/CompactCategorySection";
 import { PROFILE_TAXONOMY, taxonomyBySlug, taxonomyOrder } from "@/lib/profile-taxonomy";
 import { filterEntries } from "@/lib/profile-field-filter";
+import { showToast } from "@/lib/toast";
 import type { ProfileCategory } from "@/hooks/useProfile";
 import { groupFacts, groupSlots, type FactActions, type FactSection, type ProfileFact } from "@/hooks/useFacts";
 
@@ -54,6 +55,28 @@ export function moveTargets(categories: Pick<ProfileCategory, "slug" | "name">[]
     (a, b) => taxonomyOrder(a.slug!) - taxonomyOrder(b.slug!) || a.name.localeCompare(b.name),
   );
   return [...sorted, { slug: null, name: "Other" }];
+}
+
+/**
+ * The slug for a new custom section. Only a-z and 0-9 survive, so a name like
+ * "健康" or "Здоровье" became "-", and the next such name collided with it on
+ * the (user, person, slug) unique index, a raw database error. Accents are
+ * folded ("Über mich" -> "uber-mich"), an empty result falls back to
+ * "section", and a slug the subject already uses gets a number.
+ */
+export function customSectionSlug(name: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  const base =
+    name
+      .trim()
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "section";
+  let slug = base;
+  for (let n = 2; used.has(slug); n += 1) slug = `${base}-${n}`;
+  return slug;
 }
 
 /**
@@ -116,10 +139,16 @@ export function ProfileSections({
   };
 
   const handleAddCategory = () => {
-    if (!newCatName.trim()) return;
-    const slug = newCatName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const name = newCatName.trim();
+    if (!name) return;
+    const sameName = categories.find((c) => c.name.trim().toLowerCase() === name.toLowerCase());
+    if (sameName) {
+      showToast.error(`There is already a section called "${sameName.name}".`);
+      return;
+    }
+    const slug = customSectionSlug(name, [...categories.map((c) => c.slug), ...excludeSlugs]);
     onAddCategory({
-      name: newCatName.trim(),
+      name,
       slug,
       icon: newCatIcon,
       visibility_scope: newCatScope,

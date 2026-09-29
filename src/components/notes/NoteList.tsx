@@ -17,6 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useBulkSelect } from "./useBulkSelect";
 import { BulkActionBar } from "./BulkActionBar";
 import { CaptureEmptyState } from "./CaptureEmptyState";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 interface NoteListProps {
   notes: (Note | SemanticSearchResult)[];
@@ -70,12 +71,12 @@ const NoteRow = memo(function NoteRow({
   );
 
   const handleCopy = useCallback(
-    (e: React.MouseEvent) => {
+    async (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
       const url = `${window.location.origin}/dashboard/notes/${note.id}`;
-      navigator.clipboard.writeText(url);
-      showToast.copied();
+      if (await copyToClipboard(url)) showToast.copied();
+      else showToast.error(COPY_FAILED_MESSAGE);
     },
     [note.id]
   );

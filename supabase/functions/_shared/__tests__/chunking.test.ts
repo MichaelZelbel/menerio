@@ -21,4 +21,18 @@ describe("smartChunkMarkdown", () => {
       expect(c.content).not.toMatch(/^[\uDC00-\uDFFF]/);
     }
   });
+
+  it.each([
+    ["Chinese", "今天和我的朋友王伟一起吃了午饭，我们聊了很多关于工作和家庭的事情。"],
+    ["Russian", "Сегодня я обедал с моим другом Иваном, мы говорили о работе."],
+    ["Greek", "Σήμερα έφαγα μεσημεριανό με τον φίλο μου τον Γιώργο."],
+  ])("keeps a note written in %s (the trivial-content filter was ASCII-only)", (_script, text) => {
+    const chunks = smartChunkMarkdown(text);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].content).toBe(text);
+  });
+
+  it("still drops a chunk with no real content", () => {
+    expect(smartChunkMarkdown("--- *** ...\n\n- [ ] ,")).toEqual([]);
+  });
 });

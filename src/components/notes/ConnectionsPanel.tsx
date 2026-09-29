@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { functionErrorMessage } from "@/lib/function-error";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -108,8 +109,12 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
-      if (res.error || res.data?.error) {
-        setError(res.data?.error || "Failed to find connections");
+      if (res.error) {
+        // On a non-2xx answer `res.data` is null; the reason (out of credits,
+        // offline) sits in the error's response.
+        setError(await functionErrorMessage(res.error, "Failed to find connections"));
+      } else if (res.data?.error) {
+        setError(res.data.error);
       } else {
         setData(res.data);
         writeCachedConnections(noteId, res.data);
@@ -209,7 +214,7 @@ export function ConnectionsPanel({ noteId }: { noteId: string }) {
                 {data.related_contacts.map((contact) => (
                   <button
                     key={contact.id}
-                    onClick={() => navigate("/dashboard/people")}
+                    onClick={() => navigate(`/dashboard/people/${contact.id}`)}
                     className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent transition-colors"
                   >
                     <UserCircle className="h-3 w-3 text-info shrink-0" />

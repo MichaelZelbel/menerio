@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, type DragEndEvent } from "@dnd-kit/core";
 import { ArrowLeft, Archive, ArchiveRestore, CalendarDays, Check, Clapperboard, Compass, ExternalLink, Handshake, Landmark, Loader2, Podcast, Sparkles, Trash2, UserSearch, Users, UsersRound } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -39,6 +39,8 @@ import { MembershipSheet } from "@/components/groups/MembershipSheet";
 import { PipelineColumn, type GroupStage } from "@/components/groups/PipelineColumn";
 import { SuggestMembersButton } from "@/components/groups/SuggestMembersButton";
 import { StagesEditor } from "@/components/groups/StagesEditor";
+import { LoadErrorState } from "@/components/collections/LoadErrorState";
+import { dbErrorMessage } from "@/lib/function-error";
 
 const GROUP_TYPES = ["outreach", "relationship_care", "sales", "investors", "hiring", "research", "community", "learning", "creators", "other"];
 const SENSITIVITIES = ["normal", "sensitive", "private"];
@@ -58,7 +60,8 @@ export default function GroupDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { data: group, isLoading } = useGroup(slug);
+  const queryClient = useQueryClient();
+  const { data: group, isLoading, isError, refetch } = useGroup(slug);
   const { data: memberships = [] } = useGroupMemberships(group?.id);
   const updateGroup = useUpdateGroup();
   const archiveGroup = useArchiveGroup();
@@ -105,6 +108,8 @@ export default function GroupDetail() {
   });
 
   if (isLoading) return <div className="flex max-w-5xl justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  // A failed load is not a missing group: say so and offer Retry.
+  if (isError) return <div className="max-w-5xl"><SEOHead title="Groups - Menerio" noIndex /><Button variant="ghost" size="sm" onClick={() => navigate("/dashboard/groups")}><ArrowLeft className="mr-1 h-4 w-4" />Back to Groups</Button><LoadErrorState className="mt-8" title="This group could not be loaded." onRetry={() => refetch()} /></div>;
   if (!group) return <div className="max-w-5xl"><SEOHead title="Group not found — Menerio" noIndex /><Button variant="ghost" size="sm" onClick={() => navigate("/dashboard/groups")}><ArrowLeft className="mr-1 h-4 w-4" />Back to Groups</Button><p className="mt-8 text-sm text-muted-foreground">Group not found.</p></div>;
 
   const form: AboutForm = aboutForm || { name: group.name, description: group.description, purpose: group.purpose, type: group.type, sensitivity: group.sensitivity, icon: group.icon, color: group.color, stages };
@@ -120,7 +125,13 @@ export default function GroupDetail() {
     const orphaned = memberships.filter((m) => m.status && !newStageIds.has(m.status));
     if (orphaned.length > 0 && fallback) {
       const { error } = await supabase.from("contact_group_memberships").update({ status: fallback }).in("id", orphaned.map((m) => m.id));
-      if (error) { showToast.error(error.message); return; }
+      if (error) { showToast.error(dbErrorMessage(error, "Could not move the members of the removed stages.")); return; }
+      // The moved members have a new stage. Without this the cached lists
+      // kept the old one, and the Pipeline showed no column for them for up
+      // to five minutes.
+      queryClient.invalidateQueries({ queryKey: ["contact_group_memberships", group.id] });
+      queryClient.invalidateQueries({ queryKey: ["contact_group_memberships", "all"] });
+      new Set(orphaned.map((m) => m.contact_id)).forEach((personId) => queryClient.invalidateQueries({ queryKey: ["person_groups", personId] }));
     }
     const { stages: nextStages, ...rest } = form;
     updateGroup.mutate({ id: group.id, ...rest, stages: nextStages as unknown as Database["public"]["Tables"]["contact_groups"]["Update"]["stages"] }, { onSuccess: () => { setAboutForm(null); showToast.success("Group updated"); } });
@@ -187,7 +198,7 @@ export default function GroupDetail() {
           <BriefingTab groupId={group.id} />
         </TabsContent>
         <TabsContent value="list" className="mt-0">
-          <Card><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Status</TableHead><TableHead>Priority</TableHead><TableHead>Joined</TableHead><TableHead>Last Movement</TableHead><TableHead>Reason</TableHead></TableRow></TableHeader><TableBody>{memberships.map((membership) => <TableRow key={membership.id} className="cursor-pointer" onClick={() => setSelectedMembershipId(membership.id)}><TableCell className="font-medium">{membership.contacts?.name || "Unknown"}</TableCell><TableCell>{stages.find((s) => s.id === membership.status)?.label || membership.status}</TableCell><TableCell><Badge variant="secondary" className="capitalize">{membership.priority}</Badge></TableCell><TableCell>{new Date(membership.joined_at).toLocaleDateString()}</TableCell><TableCell>{relativeDate(membership.last_movement_at)}</TableCell><TableCell className="max-w-48 truncate">{membership.reason || "—"}</TableCell></TableRow>)}</TableBody></Table></Card>
+          <Card><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Status</TableHead><TableHead>Priority</TableHead><TableHead>Joined</TableHead><TableHead>Last Movement</TableHead><TableHead>Reason</TableHead></TableRow></TableHeader><TableBody>{memberships.map((membership) => <TableRow key={membership.id} className="cursor-pointer" onClick={() => setSelectedMembershipId(membership.id)}><TableCell className="font-medium">{/* A button, so the row is reachable with Tab and opens with Enter. */}<button type="button" className="rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(event) => { event.stopPropagation(); setSelectedMembershipId(membership.id); }}>{membership.contacts?.name || "Unknown"}</button></TableCell><TableCell>{stages.find((s) => s.id === membership.status)?.label || membership.status}</TableCell><TableCell><Badge variant="secondary" className="capitalize">{membership.priority}</Badge></TableCell><TableCell>{new Date(membership.joined_at).toLocaleDateString()}</TableCell><TableCell>{relativeDate(membership.last_movement_at)}</TableCell><TableCell className="max-w-48 truncate">{membership.reason || "—"}</TableCell></TableRow>)}</TableBody></Table></Card>
         </TabsContent>
         <TabsContent value="goals" className="mt-0">
           <GoalsTab group={group} />
@@ -196,7 +207,8 @@ export default function GroupDetail() {
           <Card><CardHeader><div className="flex items-center justify-between gap-3"><CardTitle className="text-base">About</CardTitle><Button asChild variant="outline" size="sm"><Link to={`/lexicon/group-${group.slug}`}><ExternalLink className="mr-2 h-4 w-4" />Open in Lexicon</Link></Button></div></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Name</Label><Input value={form.name} onChange={(e) => setAboutForm({ ...form, name: e.target.value })} /></div><div className="space-y-2"><Label>Type</Label><Select value={form.type} onValueChange={(value) => setAboutForm({ ...form, type: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{GROUP_TYPES.map((type) => <SelectItem key={type} value={type}>{pretty(type)}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Description</Label><Textarea value={form.description || ""} onChange={(e) => setAboutForm({ ...form, description: e.target.value || null })} /></div><div className="space-y-2"><Label>Purpose</Label><Textarea value={form.purpose || ""} onChange={(e) => setAboutForm({ ...form, purpose: e.target.value || null })} /></div><div className="grid gap-4 sm:grid-cols-3"><div className="space-y-2"><Label>Sensitivity</Label><Select value={form.sensitivity} onValueChange={(value) => setAboutForm({ ...form, sensitivity: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SENSITIVITIES.map((value) => <SelectItem key={value} value={value}>{pretty(value)}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Icon</Label><Select value={form.icon && form.icon in iconMap ? form.icon : "Users"} onValueChange={(value) => setAboutForm({ ...form, icon: value })}><SelectTrigger>{(() => { const Icon = iconMap[(form.icon && form.icon in iconMap ? form.icon : "Users") as keyof typeof iconMap]; return <span className="flex items-center gap-2"><Icon className="h-4 w-4" />{form.icon && form.icon in iconMap ? form.icon : "Users"}</span>; })()}</SelectTrigger><SelectContent>{ICON_OPTIONS.map(([name, Icon]) => <SelectItem key={name} value={name}><span className="flex items-center gap-2"><Icon className="h-4 w-4" />{name}</span></SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Color</Label><Input value={form.color || ""} onChange={(e) => setAboutForm({ ...form, color: e.target.value || null })} /></div></div><StagesEditor stages={form.stages} onChange={(next) => setAboutForm({ ...form, stages: next })} membershipCounts={membershipCounts} /><Button onClick={saveAbout} disabled={updateGroup.isPending}>{updateGroup.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save changes</Button></CardContent></Card>
         </TabsContent>
       </Tabs>
-      <MembershipSheet group={group} membership={selectedMembership} notes={sourceNotes} open={!!selectedMembershipId} onOpenChange={(open) => !open && setSelectedMembershipId(null)} />
+      {/* Keyed by membership so its unsaved text starts from that member. */}
+      <MembershipSheet key={selectedMembershipId ?? "closed"} group={group} membership={selectedMembership} notes={sourceNotes} open={!!selectedMembershipId} onOpenChange={(open) => !open && setSelectedMembershipId(null)} />
     </div>
   );
 }

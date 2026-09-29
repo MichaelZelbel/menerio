@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, Loader2, Play, RefreshCw, RotateCcw, Scissors } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 
 type WikiPage = Pick<Database["public"]["Tables"]["wiki_pages"]["Row"], "id" | "slug" | "title" | "page_type" | "updated_at">;
 type WikiLog = Pick<Database["public"]["Tables"]["wiki_log"]["Row"], "id" | "created_at" | "details">;
@@ -123,6 +124,7 @@ function PageLink({ slug, title }: { slug: string; title?: string }) {
 
 export default function WikiLintPlaceholder() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { pagesQuery, lastRunQuery } = useWikiLintData();
   const [result, setResult] = useState<LintResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,9 +133,15 @@ export default function WikiLintPlaceholder() {
   // rebuild a paid model call), and a second click used to start another.
   const [cleanupBusy, setCleanupBusy] = useState<string | null>(null);
   const [confirm, confirmDialog] = useConfirmDialog();
+  // "Ignore" hides one unresolved link for this visit; nothing is saved.
+  const [ignoredLinks, setIgnoredLinks] = useState<Set<string>>(() => new Set());
+  const linkKey = (item: { source_page_slug: string; target_slug: string }) => JSON.stringify([item.source_page_slug, item.target_slug]);
 
   const pageTitles = useMemo(() => new Map((pagesQuery.data || []).map((page) => [page.slug, page.title])), [pagesQuery.data]);
   const findings = result?.findings || emptyFindings;
+  const unresolvedLinks = findings.unresolved_wikilinks.filter((item) => !ignoredLinks.has(linkKey(item)));
+  // A failed read of the page list is not "no pages to lint".
+  const pagesFailed = pagesQuery.isError && !pagesQuery.data;
   const hasNoPages = !pagesQuery.isLoading && (pagesQuery.data || []).length === 0;
 
   const runLint = async () => {
@@ -145,13 +153,23 @@ export default function WikiLintPlaceholder() {
       setResult(data as LintResponse);
       await lastRunQuery.refetch();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Lexicon health check failed");
+      setError(await functionErrorMessage(err, "The health check could not finish. Try again."));
     } finally {
       setIsRunning(false);
     }
   };
 
   const openPage = (slug: string) => navigate(pagePath(slug));
+
+  // Strip and rebuild rewrite pages on the server; every open view of them
+  // (a page, the index, the sidebar, the revisions) was left showing the old text.
+  const refreshLexiconViews = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["wiki-page"] }),
+      queryClient.invalidateQueries({ queryKey: ["wiki-pages"] }),
+      queryClient.invalidateQueries({ queryKey: ["wiki-revisions"] }),
+      queryClient.invalidateQueries({ queryKey: ["wiki-backlinks"] }),
+    ]);
 
   const stripDeadLinks = async () => {
     if (cleanupBusy) return;
@@ -161,9 +179,10 @@ export default function WikiLintPlaceholder() {
       const { data, error: invokeError } = await supabase.functions.invoke("wiki-cleanup", { body: { mode: "strip_dead_links" } });
       if (invokeError) throw invokeError;
       toast.success(`Stripped ${data?.links_removed ?? 0} dead links across ${data?.pages_changed ?? 0} pages`);
+      void refreshLexiconViews();
       await runLint();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Strip failed");
+      toast.error(await functionErrorMessage(err, "The dead links could not be stripped. Try again."));
     } finally {
       setCleanupBusy(null);
     }
@@ -180,10 +199,13 @@ export default function WikiLintPlaceholder() {
         body: { mode: "rebuild_page", page_id: page.id },
       });
       if (invokeError) throw invokeError;
-      if (!data?.ok) throw new Error(data?.error || "Rebuild failed");
+      // data.error is the function's own text (it can carry raw model output);
+      // functionErrorMessage below shows a plain sentence instead.
+      if (!data?.ok) throw new Error("Rebuild failed");
       toast.success(`Rebuilt "${page.title}"`);
+      void refreshLexiconViews();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Rebuild failed");
+      toast.error(await functionErrorMessage(err, `"${page.title}" could not be rebuilt. Try again.`));
     } finally {
       setCleanupBusy(null);
     }
@@ -214,6 +236,15 @@ export default function WikiLintPlaceholder() {
 
       {pagesQuery.isLoading ? (
         <Card><CardContent className="space-y-3 py-8"><Skeleton className="h-5 w-40" /><Skeleton className="h-4 w-full" /></CardContent></Card>
+      ) : pagesFailed ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Your Lexicon pages could not be loaded</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{dbErrorMessage(pagesQuery.error, "Something went wrong on our side. Try again.")}</p>
+            <Button variant="outline" size="sm" onClick={() => void pagesQuery.refetch()}><RotateCcw className="h-4 w-4" /> Try again</Button>
+          </AlertDescription>
+        </Alert>
       ) : hasNoPages ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
@@ -247,7 +278,7 @@ export default function WikiLintPlaceholder() {
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>AI audit failed</AlertTitle>
-              <AlertDescription>Deterministic findings are still shown. AI error: {findings.llm_error}</AlertDescription>
+              <AlertDescription>The AI part of the check could not finish, so drift, contradictions, gaps and stale syntheses may be missing. The other findings are still shown. Run the check again later.</AlertDescription>
             </Alert>
           )}
 
@@ -260,11 +291,11 @@ export default function WikiLintPlaceholder() {
             </CardHeader>
           </Card>
 
-          <LintSection title="Unresolved Lexicon links" count={findings.unresolved_wikilinks.length}>
-            {findings.unresolved_wikilinks.map((item, index) => (
+          <LintSection title="Unresolved Lexicon links" count={unresolvedLinks.length}>
+            {unresolvedLinks.map((item, index) => (
               <div key={`${item.source_page_slug}-${item.target_slug}-${index}`} className="flex flex-col gap-3 rounded-md border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm"><PageLink slug={item.source_page_slug} title={item.source_page_title} /> <span className="text-muted-foreground">links to missing</span> <code className="rounded bg-muted px-1.5 py-0.5 text-xs">[[{item.target_slug}]]</code></div>
-                <div className="flex gap-2"><Button size="sm" variant="outline" asChild><Link to={pagePath(item.source_page_slug)}>Open page</Link></Button><Button size="sm" variant="ghost">Ignore</Button></div>
+                <div className="flex gap-2"><Button size="sm" variant="outline" asChild><Link to={pagePath(item.source_page_slug)}>Open page</Link></Button><Button size="sm" variant="ghost" onClick={() => setIgnoredLinks((prev) => new Set(prev).add(linkKey(item)))}>Ignore</Button></div>
               </div>
             ))}
           </LintSection>

@@ -25,9 +25,9 @@ interface ProfileCompletenessProps {
 }
 
 function getCompletenessMessage(pct: number): string {
-  if (pct <= 20) return "Just getting started — every entry helps AI understand you better";
+  if (pct <= 20) return "Just getting started. Every entry helps AI understand you better";
   if (pct <= 50) return "Nice progress! Your agents are getting to know you";
-  if (pct <= 80) return "Looking great — your AI context is getting rich";
+  if (pct <= 80) return "Looking great. Your AI context is getting rich";
   return "Impressive! Your agents have excellent context about who you are";
 }
 

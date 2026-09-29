@@ -15,11 +15,13 @@ import {
   contactProfileText,
   entityFacts,
   getClaims,
+  entityForAgent,
   resolveEntityByName,
+  sharedInstructions,
   userProfileFacts,
 } from "../../menerio-mcp/fact-tools";
 import { getUserProfile } from "../user-profile";
-import { loadPersonProfile } from "../read-tools";
+import { executeReadTool, findPersonForAssistant, loadPersonProfile } from "../read-tools";
 import { factsForPage, loadPeopleData } from "../people-sync-core";
 import { factDb, queriesWithoutUser, type FixtureFact, type Row } from "./fact-db";
 
@@ -124,6 +126,19 @@ describe("readFacts", () => {
 
   it("refuses to run without a user", async () => {
     await expect(readFacts(db(), "")).rejects.toThrow(/no user/);
+  });
+
+  // Review 2026-09-29: search_contacts asks for 2,000 facts, and one .limit()
+  // above the server's 1,000-row cap was cut to 1,000 without a word.
+  it("a row cap above the server's own is read page by page", async () => {
+    const many: FixtureFact[] = Array.from({ length: 1500 }, (_, i) => ({
+      claim_id: `m${String(i).padStart(4, "0")}`, user_id: ME, subject_type: "contact", subject_id: ANNA,
+      attribute: `fact-${String(i).padStart(4, "0")}`, value: `v${i}`,
+    }));
+    const d = factDb({ facts: many, maxRows: 1000, tables: { contacts: contacts.map((c) => ({ ...c })), entities: [] } });
+    expect(await readFacts(d, ME, { subjectType: "contact", subjectIds: [ANNA], limit: 2000 })).toHaveLength(1500);
+    expect(await readFacts(d, ME, { subjectType: "contact", subjectIds: [ANNA], limit: 1200 })).toHaveLength(1200);
+    expect(await readFacts(d, ME, { subjectType: "contact", subjectIds: [ANNA], limit: 10 })).toHaveLength(10);
   });
 });
 
@@ -318,6 +333,30 @@ describe("get_user_profile and the chats' user digest", () => {
     expectEveryQueryNamesItsUser(d);
   });
 
+  // Review 2026-09-29: get_user_profile with scope "private" returned exactly
+  // the instructions the owner marked "Private (never shared)".
+  it("a private instruction never reaches an assistant, whatever scope is asked for", () => {
+    const rows = [
+      { instruction: "Be brief.", applies_to: "all" },
+      { instruction: "Use my title at work.", applies_to: "professional" },
+      { instruction: "SECRET-private-instruction", applies_to: "private" },
+      { instruction: "  ", applies_to: "all" },
+    ];
+    expect(sharedInstructions(rows)).toEqual(["Be brief.", "Use my title at work."]);
+    expect(sharedInstructions(rows, "professional")).toEqual(["Be brief.", "Use my title at work."]);
+    expect(sharedInstructions(rows, "personal")).toEqual(["Be brief."]);
+    expect(sharedInstructions(rows, "private")).toEqual(["Be brief."]);
+  });
+
+  it("an entity row: hidden is nothing, sensitive is its name only", () => {
+    const row = (over: Row) => ({ id: "e", name: "Acme Clinic", entity_type: "organization", description: "SECRET-description", aliases: ["SECRET-alias"], ai_visibility: "visible", is_sensitive: false, ...over });
+    expect(entityForAgent(row({}))).toMatchObject({ description: "SECRET-description" });
+    expect(entityForAgent(row({ ai_visibility: "hidden" }))).toBeNull();
+    const sensitive = entityForAgent(row({ is_sensitive: true }));
+    expect(sensitive).toMatchObject({ id: "e", name: "Acme Clinic", entity_type: "organization", is_sensitive: true });
+    expectNoSecret(sensitive);
+  });
+
   it("getUserProfile: agent_facts for self, current rows only", async () => {
     const d = db({ agent_instructions: [{ user_id: ME, instruction: "Be brief.", applies_to: "all", is_active: true, sort_order: 1 }] });
     const profile = await getUserProfile(d, ME);
@@ -353,6 +392,57 @@ describe("the chats' person profile", () => {
   it("nothing at all for a hidden or sensitive person", async () => {
     expect(await loadPersonProfile(db(), ME, HIDDEN)).toBeNull();
     expect(await loadPersonProfile(db(), ME, SENSITIVE)).toBeNull();
+  });
+
+  // Review 2026-09-29: the name lookup searched every person, so an ambiguous
+  // name listed hidden and sensitive people with their ids, and a hidden
+  // person's exact name answered "hidden from AI by the user".
+  const withNamesakes = () => {
+    const d = db({ contact_relationships: rels });
+    d.tables.contacts.push(
+      { id: "c-anna-hidden", user_id: ME, name: "Anna SECRET-hidden-name", aliases: [], ai_visibility: "hidden", is_sensitive: false },
+      { id: "c-anna-sensitive", user_id: ME, name: "Anna SECRET-sensitive-name", aliases: ["Annie"], ai_visibility: "visible", is_sensitive: true },
+      { id: "c-anna-merged", user_id: ME, name: "Anna SECRET-merged-name", aliases: [], ai_visibility: "visible", is_sensitive: false, merged_into: ANNA },
+    );
+    return d;
+  };
+  const ask = async (d: ReturnType<typeof db>, args: Record<string, unknown>) =>
+    JSON.parse(await executeReadTool(d, "no-key", ME, "get_person_profile", args));
+
+  it("get_person_profile never names a hidden, sensitive or merged-away person", async () => {
+    const d = withNamesakes();
+    const out = await ask(d, { name: "anna" });
+    expect(out).toMatchObject({ found: true, person: { id: ANNA } });
+    expectNoSecret(out);
+    const hidden = await ask(d, { name: "Hidden Person" });
+    const sensitive = await ask(d, { name: "annie" });
+    const missing = await ask(d, { name: "Nobody Here" });
+    expect(hidden.found).toBe(false);
+    expect(hidden.message.replace("Hidden Person", "X")).toBe(missing.message.replace("Nobody Here", "X"));
+    expect(sensitive.message.replace("annie", "X")).toBe(missing.message.replace("Nobody Here", "X"));
+    expectEveryQueryNamesItsUser(d);
+  });
+
+  it("an exact name wins over a longer one; several are listed; contact_id picks one", async () => {
+    const d = withNamesakes();
+    d.tables.contacts.push(
+      { id: "c-tom", user_id: ME, name: "Tom", aliases: [], ai_visibility: "visible", is_sensitive: false },
+      { id: "c-tom-becker", user_id: ME, name: "Tom Becker", aliases: [], ai_visibility: "visible", is_sensitive: false },
+      { id: "c-tomas", user_id: ME, name: "Tomas_Ruiz", aliases: [], ai_visibility: "visible", is_sensitive: false },
+    );
+    expect(await findPersonForAssistant(d, ME, "TOM")).toEqual({ person: { id: "c-tom", name: "Tom" } });
+    expect(await ask(d, { name: "tom becker" })).toMatchObject({ found: true, person: { id: "c-tom-becker" } });
+    const ambiguous = await ask(d, { name: "om" });
+    expect(ambiguous.ambiguous).toBe(true);
+    expect(ambiguous.candidates.map((c: { id: string }) => c.id)).toEqual(["c-tom", "c-tom-becker", "c-tomas"]);
+    // A literal underscore, not a wildcard.
+    expect(await findPersonForAssistant(d, ME, "tomas_")).toEqual({ person: { id: "c-tomas", name: "Tomas_Ruiz" } });
+    expect(await findPersonForAssistant(d, ME, "tomasxr")).toEqual({ none: true });
+    const picked = await ask(d, { name: "anna", contact_id: ANNA });
+    expect(picked).toMatchObject({ found: true, person: { id: ANNA } });
+    const pickedHidden = await ask(d, { name: "anna", contact_id: HIDDEN });
+    expect(pickedHidden.found).toBe(false);
+    expectNoSecret(pickedHidden);
   });
 });
 

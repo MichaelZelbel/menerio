@@ -1,5 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { openRouterWithCredits, insufficientCreditsResponse } from "../_shared/llm-credits.ts";
+import {
+  openRouterWithCredits,
+  insufficientCreditsResponse,
+  balanceUnavailableResponse,
+  repeatBlockedResponse,
+} from "../_shared/llm-credits.ts";
 import { resolveSystemPrompt, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { DRAFT_EVENT_PROMPT } from "../_shared/llm-defaults.ts";
 import { sanitizePromptText } from "../_shared/prompt-safety.ts";
@@ -155,7 +160,11 @@ Deno.serve(async (req) => {
       credits = resp.credits;
     } catch (providerErr) {
       const msg = providerErr instanceof Error ? providerErr.message : String(providerErr);
+      // Refusals from the credit layer, not provider errors: an unreadable
+      // balance or a blocked repeat was answered 502 "PROVIDER_ERROR".
       if (msg === "INSUFFICIENT_CREDITS" || msg === "NO_ACTIVE_PERIOD") throw providerErr;
+      if (msg === "BALANCE_UNAVAILABLE") return balanceUnavailableResponse(corsHeaders);
+      if (msg === "REPEAT_CALL_BLOCKED") return repeatBlockedResponse(corsHeaders);
       console.error("[draft-event] provider error:", msg);
       return json({ error: msg.slice(0, 400), code: "PROVIDER_ERROR" }, 502);
     }

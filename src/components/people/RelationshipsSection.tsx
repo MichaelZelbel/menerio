@@ -16,7 +16,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import { useContactRelationships, type ContactRelationship } from "@/hooks/useContactRelationships";
+import {
+  isDuplicateRelationshipError,
+  useContactRelationships,
+  type ContactRelationship,
+} from "@/hooks/useContactRelationships";
+import { fetchAllPages } from "@/lib/postgrest";
 import { ALL_RELATIONSHIP_LABELS, getInverseLabel, impliedGenderFromLabel } from "@/lib/relationship-labels";
 import {
   canonicalLabel,
@@ -82,19 +87,24 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
   });
   const myName = profile?.display_name || "Me";
 
-  // Fetch contacts for the picker
+  // Everyone the picker can offer. Keyed under "contacts" so adding, renaming,
+  // merging or deleting a person refreshes it (its own key was never
+  // invalidated: a person added a minute ago was missing), and read to the end
+  // (an unpaged read stopped at 1,000 people).
   const { data: allContacts = [] } = useQuery({
-    queryKey: ["contacts-for-relationship-picker"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("contacts")
-        .select("id, name")
-        .eq("user_id", user!.id)
-        .is("merged_into", null)
-        .order("name");
-      return data || [];
-    },
-    enabled: !!user,
+    queryKey: ["contacts", user?.id, "relationship-picker"],
+    queryFn: () =>
+      fetchAllPages<{ id: string; name: string }>((from, to) =>
+        supabase
+          .from("contacts")
+          .select("id, name")
+          .eq("user_id", user!.id)
+          .is("merged_into", null)
+          .order("name")
+          .order("id")
+          .range(from, to),
+      ),
+    enabled: !!user && adding,
   });
 
   // Gender / pronoun facts for everyone, so a role can be rendered in the
@@ -195,7 +205,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
       const reason = "reason" in decision ? decision.reason : "";
       showToast.error(
         reason === "unrecognized_relationship_label"
-          ? "That is not a relationship — pick a family, social or professional role"
+          ? "That is not a relationship. Pick a family, social or professional role."
           : "This relationship cannot be saved",
       );
       return;
@@ -221,7 +231,9 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
           resetForm();
         },
         onError: (err: any) => {
-          if (err.message?.includes("uq_contact_relationship")) {
+          // The hook's own duplicate check says "pair_key: ...", which reached
+          // the screen as it was.
+          if (isDuplicateRelationshipError(err)) {
             showToast.error("This relationship already exists");
           } else {
             showToast.error(err.message || "Failed to save");
@@ -417,7 +429,7 @@ export function RelationshipsSection({ contactId, contactName, milestones = [] }
 
       {expanded && rows.length === 0 && !adding && (
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
-          <span className="text-sm text-muted-foreground">No relationships yet — add one</span>
+          <span className="text-sm text-muted-foreground">No relationships yet. Add one.</span>
           <Button variant="ghost" size="sm" className="h-7 gap-1 shrink-0" onClick={() => setAdding(true)}>
             <Plus className="h-3.5 w-3.5" /> Add
           </Button>

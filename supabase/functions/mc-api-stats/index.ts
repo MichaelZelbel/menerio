@@ -9,6 +9,7 @@ import {
   parsePath,
 } from "../_shared/mc-helpers.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
+import { notHidden } from "../_shared/mc-visibility.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return handleOptions();
@@ -34,27 +35,30 @@ Deno.serve(async (req) => {
   try {
     // GET /mc-api-stats/overview
     if (req.method === "GET" && action === "overview") {
+      // Hidden from AI means hidden from this key (mc-visibility.ts), and the
+      // MCP server's get_stats already counts visible notes only. top_tags was
+      // built from hidden notes too, so their tags reached the key here.
       const [noteRes, contactRes, actionRes, recentNotesRes] = await Promise.all([
-        supabase
+        notHidden(supabase
           .from("notes")
           .select("id", { count: "exact", head: true })
           .eq("user_id", userId)
-          .eq("is_trashed", false),
-        supabase
+          .eq("is_trashed", false)),
+        notHidden(supabase
           .from("contacts")
           .select("id", { count: "exact", head: true })
-          .eq("user_id", userId),
-        supabase
+          .eq("user_id", userId)),
+        notHidden(supabase
           .from("action_items")
           .select("id", { count: "exact", head: true })
           .eq("user_id", userId)
-          .eq("status", "open"),
-        supabase
+          .eq("status", "open")),
+        notHidden(supabase
           .from("notes")
           .select("tags")
           .eq("user_id", userId)
           .eq("is_trashed", false)
-          .not("tags", "eq", "{}")
+          .not("tags", "eq", "{}"))
           .order("updated_at", { ascending: false })
           .limit(200),
       ]);

@@ -1,5 +1,4 @@
-import { useNavigate } from "react-router-dom";
-import { Card, CardContent } from "@/components/ui/card";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Send, Globe, Brain, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -43,8 +42,38 @@ const OPTIONS: CaptureOption[] = [
   },
 ];
 
+// The look of a Card, on the button or link itself: these tiles were clickable
+// divs, so a keyboard could not reach them.
+const TILE_CLASS =
+  "block w-full text-left rounded-xl border bg-card text-card-foreground shadow-md cursor-pointer hover:bg-accent/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
+
+function TileBody({
+  icon: Icon,
+  title,
+  description,
+  iconWrapClassName,
+  iconClassName,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  iconWrapClassName: string;
+  iconClassName: string;
+}) {
+  return (
+    <span className="flex items-start gap-3 p-4">
+      <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", iconWrapClassName)}>
+        <Icon className={cn("h-5 w-5", iconClassName)} />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium mb-0.5">{title}</span>
+        <span className="block text-xs text-muted-foreground">{description}</span>
+      </span>
+    </span>
+  );
+}
+
 export function CaptureEmptyState({ onCreateNote, variant = "full", className }: CaptureEmptyStateProps) {
-  const navigate = useNavigate();
   const compact = variant === "compact";
 
   return (
@@ -60,44 +89,28 @@ export function CaptureEmptyState({ onCreateNote, variant = "full", className }:
 
       <div className={cn("grid gap-3", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
         {onCreateNote && (
-          <Card
-            className="border-dashed cursor-pointer hover:bg-accent/50 transition-colors"
-            onClick={onCreateNote}
-          >
-            <CardContent className="flex items-start gap-3 p-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <Plus className="h-5 w-5 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-medium mb-0.5">Quick Capture</div>
-                <p className="text-xs text-muted-foreground">
-                  Write a note right here in your browser.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <button type="button" className={cn(TILE_CLASS, "border-dashed")} onClick={onCreateNote}>
+            <TileBody
+              icon={Plus}
+              title="Quick Capture"
+              description="Write a note right here in your browser."
+              iconWrapClassName="bg-primary/10"
+              iconClassName="text-primary"
+            />
+          </button>
         )}
 
-        {OPTIONS.map((opt) => {
-          const Icon = opt.icon;
-          return (
-            <Card
-              key={opt.key}
-              className="cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => navigate(opt.to)}
-            >
-              <CardContent className="flex items-start gap-3 p-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-                  <Icon className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-medium mb-0.5">{opt.title}</div>
-                  <p className="text-xs text-muted-foreground">{opt.description}</p>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+        {OPTIONS.map((opt) => (
+          <Link key={opt.key} to={opt.to} className={TILE_CLASS}>
+            <TileBody
+              icon={opt.icon}
+              title={opt.title}
+              description={opt.description}
+              iconWrapClassName="bg-muted"
+              iconClassName="text-muted-foreground"
+            />
+          </Link>
+        ))}
       </div>
 
       {onCreateNote && !compact && (

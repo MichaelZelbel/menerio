@@ -3,6 +3,21 @@ import { NoteAIJobError, classifyNoteAIError, createNoteAIJobs, type NoteAILease
 export type WikiJob = { user_id: string; id: string; lease_id: string; note_id?: string; snapshot?: any; pipeline?: string };
 type RpcClient = { rpc: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: any; error: any }> };
 
+/**
+ * The status wiki-ingest answers the drain worker with when a job ends in an
+ * error. drainNoteAiJobs (note-ai-worker.ts) reads a 500 as "uncertain": it
+ * files that on the job and closes its slot for the tick. wiki-ingest answered
+ * 500 for every failure, so an exhausted allowance (a plain INSUFFICIENT_CREDITS
+ * Error from runChat, already parked by the endpoint) closed a worker slot on
+ * each hourly retry, 126 times on 2026-09-29, and a transient lease-RPC failure
+ * raised before the job was touched was fenced for good as "uncertain".
+ * The same statuses process-note answers since 2026-09-23.
+ */
+export function wikiIngestErrorStatus(error: unknown): 402 | 409 | 422 | 500 | 503 {
+  if (!(error instanceof NoteAIJobError) && classifyNoteAIError(error) !== 'no_credit') return 500;
+  return ({ no_credit: 402, transient: 503, stale: 409, permanent: 422, uncertain: 500 } as const)[classifyNoteAIError(error)];
+}
+
 export async function runWikiStage<T>(db: RpcClient, job: WikiJob, stage: string, produce: () => Promise<T>): Promise<T> {
   // Shared runtime owns the lease, stage start, and checkpoint protocol.
   const result = await createNoteAIJobs(db).runStage(job as NoteAILease, stage, async () => {

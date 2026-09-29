@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -17,6 +17,7 @@ import {
   Loader2,
   CheckCircle2,
   Circle,
+  CircleHelp,
   HardDrive,
 } from "lucide-react";
 import { BRAND } from "@/lib/brand";
@@ -36,7 +37,9 @@ type StatusKey =
   | "mcp"
   | "apikeys";
 
-type Statuses = Partial<Record<StatusKey, boolean>>;
+// true = connected, false = not connected, null = the check itself failed, so
+// the overview does not know (and must not claim "Not connected").
+type Statuses = Partial<Record<StatusKey, boolean | null>>;
 
 interface IntegrationDef {
   key: StatusKey;
@@ -63,13 +66,19 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
   const [loading, setLoading] = useState(true);
   const [statuses, setStatuses] = useState<Statuses>({});
 
+  const userId = user?.id;
+
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     let cancelled = false;
 
     (async () => {
       setLoading(true);
 
+      // Each filter names a column the table really has. The old ones
+      // (connected_apps.app_type, telegram_user_id, discord_user_id,
+      // mcp_api_tokens.is_active) do not exist, so every query failed and every
+      // integration read "Not connected".
       const [
         connectedApps,
         telegram,
@@ -80,42 +89,51 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
       ] = await Promise.all([
         supabase
           .from("connected_apps" as never)
-          .select("id, app_type", { count: "exact", head: false })
-          .eq("user_id", user.id)
+          .select("app_name, connection_status")
+          .eq("user_id", userId)
           .eq("is_active", true),
         supabase
           .from("telegram_connections" as never)
           .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .not("telegram_user_id", "is", null),
+          .eq("user_id", userId)
+          .eq("is_active", true)
+          .eq("is_paired", true),
         supabase
           .from("discord_connections" as never)
           .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .not("discord_user_id", "is", null),
+          .eq("user_id", userId)
+          .eq("is_active", true),
         supabase
           .from("github_connections" as never)
           .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id),
+          .eq("user_id", userId),
         supabase
           .from("gdrive_connections" as never)
           .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id),
+          .eq("user_id", userId),
         supabase
           .from("mcp_api_tokens" as never)
           .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("is_active", true),
+          .eq("user_id", userId)
+          .is("revoked_at", null),
       ]);
 
-      // Detect Slack (connected_apps with type slack)
-      const apps = (connectedApps.data as Array<{ app_type?: string }> | null) || [];
-      const slackOn = apps.some((a) => (a.app_type || "").toLowerCase().includes("slack"));
-      const otherApps = apps.filter((a) => !((a.app_type || "").toLowerCase().includes("slack"))).length > 0;
+      const hasRows = (res: { error: unknown; count: number | null }) =>
+        res.error ? null : (res.count || 0) > 0;
+
+      // Slack is the connected_apps row named "slack"; the other rows are the
+      // apps on the Apps tab, connected once their handshake finished.
+      let slackOn: boolean | null = null;
+      let otherApps: boolean | null = null;
+      if (!connectedApps.error) {
+        const apps = (connectedApps.data as Array<{ app_name?: string; connection_status?: string }> | null) || [];
+        slackOn = apps.some((a) => a.app_name === "slack");
+        otherApps = apps.some((a) => a.app_name !== "slack" && a.connection_status === "active");
+      }
 
       // API keys via edge function
-      let apiKeysOn = false;
-      let singleFileOn = false;
+      let apiKeysOn: boolean | null = null;
+      let singleFileOn: boolean | null = null;
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const res = await supabase.functions.invoke("mc-api-keys", {
@@ -124,31 +142,33 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
           method: "GET",
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
-        const list = (res.data?.keys || res.data || []) as Array<{ is_active?: boolean; scopes?: string[]; name?: string }>;
-        const active = list.filter((k) => k.is_active !== false);
-        apiKeysOn = active.length > 0;
-        singleFileOn = active.some(
-          (k) =>
-            (k.scopes || []).includes("notes") &&
-            ((k.name || "").toLowerCase().includes("singlefile") ||
-              (k.name || "").toLowerCase().includes("clipper") ||
-              (k.name || "").toLowerCase().includes("web")),
-        );
+        if (!res.error && !res.data?.error) {
+          const list = (res.data?.keys || res.data || []) as Array<{ is_active?: boolean; scopes?: string[]; name?: string }>;
+          const active = list.filter((k) => k.is_active !== false);
+          apiKeysOn = active.length > 0;
+          singleFileOn = active.some(
+            (k) =>
+              (k.scopes || []).includes("notes") &&
+              ((k.name || "").toLowerCase().includes("singlefile") ||
+                (k.name || "").toLowerCase().includes("clipper") ||
+                (k.name || "").toLowerCase().includes("web")),
+          );
+        }
       } catch {
-        // ignore — function may not be reachable
+        // Unreachable function: the two statuses stay unknown.
       }
 
       if (cancelled) return;
 
       setStatuses({
         connections: otherApps,
-        telegram: (telegram.count || 0) > 0,
-        discord: (discord.count || 0) > 0,
+        telegram: hasRows(telegram),
+        discord: hasRows(discord),
         integrations: slackOn,
         singlefile: singleFileOn,
-        github: (github.count || 0) > 0,
-        gdrive: (gdrive.count || 0) > 0,
-        mcp: (mcp.count || 0) > 0,
+        github: hasRows(github),
+        gdrive: hasRows(gdrive),
+        mcp: hasRows(mcp),
         apikeys: apiKeysOn,
       });
       setLoading(false);
@@ -157,10 +177,10 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [userId]);
 
-  const connectedCount = Object.values(statuses).filter(Boolean).length;
-  const total = INTEGRATIONS.length;
+  const connectedCount = Object.values(statuses).filter((v) => v === true).length;
+  const notConnectedCount = Object.values(statuses).filter((v) => v === false).length;
 
   return (
     <Card>
@@ -169,7 +189,8 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
           <Plug className="h-5 w-5 text-primary" />
           Integrations
         </CardTitle>
-        <CardDescription className="flex items-center gap-2 pt-1">
+        {/* A div, not CardDescription's <p>: the badges are divs. */}
+        <div className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
           {loading ? (
             <span className="flex items-center gap-1.5 text-xs">
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -181,11 +202,11 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
                 Connected: {connectedCount}
               </Badge>
               <Badge variant="outline" className="text-xs">
-                Available: {total - connectedCount}
+                Available: {notConnectedCount}
               </Badge>
             </>
           )}
-        </CardDescription>
+        </div>
       </CardHeader>
       <CardContent>
         <ul className="divide-y divide-border rounded-md border border-border">
@@ -206,6 +227,11 @@ export function IntegrationsOverview({ onOpenTab }: IntegrationsOverviewProps) {
                         <span className="inline-flex items-center gap-1 text-[10px] text-success">
                           <CheckCircle2 className="h-3 w-3" />
                           Connected
+                        </span>
+                      ) : connected !== false ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <CircleHelp className="h-3 w-3" />
+                          Could not check
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">

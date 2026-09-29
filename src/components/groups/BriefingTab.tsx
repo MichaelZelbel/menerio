@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { showToast } from "@/lib/toast";
+import { functionErrorMessage } from "@/lib/function-error";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 
 type GroupBriefing = Database["public"]["Tables"]["group_briefings"]["Row"];
@@ -25,7 +26,7 @@ export function BriefingTab({ groupId }: { groupId: string }) {
   const generateBriefing = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke<{ briefing_markdown: string; generated_at: string }>("generate-group-briefing", { body: { group_id: groupId, period_days: 7 } });
-      if (error) throw error;
+      if (error) throw new Error(await functionErrorMessage(error, "Could not generate the briefing."));
       return data!;
     },
     onSuccess: () => {

@@ -49,6 +49,7 @@ import {
   valueAppearsInSource,
 } from "../_shared/profile-fact-gate.ts";
 
+import { pgOrValue } from "../_shared/postgrest-filters.ts";
 import { factWritesPaused, suppressionKey, writeFact } from "../_shared/fact-store.ts";
 import { normalizeAttribute } from "../_shared/claims.ts";
 import {
@@ -67,7 +68,12 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 
-const executionDatabase = createNoteAIExecutionDatabase(createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY));
+// writeFact reads a claim guard's refusal (23514) as "rejected", and the
+// repeat-call check fails open on its own; neither is a failed analysis job.
+const executionDatabase = createNoteAIExecutionDatabase(createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY), {
+  refusals: { claims: ["23514"] },
+  failOpenRpcs: ["llm_note_call_fingerprint"],
+});
 const supabase = executionDatabase.db;
 const noteJobs = createNoteAIJobs(supabase);
 
@@ -499,6 +505,17 @@ function scorePersonMention(
   return { score: 1.0, drop: false };
 }
 
+/**
+ * A PostgREST `in` list with every value quoted and escaped. supabase-js quotes
+ * a value holding `,` `(` `)` but not the `"` inside it, and every person card
+ * title has one (`Add "Dr. Weber (Hausarzt)" to your People`): the filter failed
+ * to parse (400), which the analysis database turns into a failed job, on every
+ * retry of that note.
+ */
+function quotedList(values: string[]): string {
+  return `(${[...new Set(values)].map(pgOrValue).join(",")})`;
+}
+
 async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSuggestion[]) {
   if (suggestions.length === 0) return suggestions;
   const keys = suggestions.map((s) => s.suppression_key).filter(Boolean) as string[];
@@ -507,7 +524,7 @@ async function filterSuppressedSuggestions(userId: string, suggestions: ReviewSu
     .from("ai_suggestion_suppressions")
     .select("suppression_key")
     .eq("user_id", userId)
-    .in("suppression_key", keys);
+    .filter("suppression_key", "in", quotedList(keys));
   const blocked = new Set((data || []).map((r: any) => r.suppression_key));
   return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
 }
@@ -595,6 +612,11 @@ async function prepareSuggestionForInsert(suggestion: ReviewSuggestion, preferen
       }
       // Already known, already history, or called wrong before: nothing to ask.
       if (result.facts.length > 0 && result.facts.every((f) => f.outcome === "already_recorded" || f.outcome === "history_not_revived" || f.outcome === "suppressed")) {
+        return { ...suggestion, status: "removed" };
+      }
+      // The claim quality guard ("None.", a value that repeats its label) refuses
+      // every origin, so a card could never be accepted either.
+      if (result.facts.length > 0 && result.facts.every((f) => f.outcome === "rejected" && f.reason === "claim_quality_guard")) {
         return { ...suggestion, status: "removed" };
       }
       return { ...suggestion, status: "pending_review" };
@@ -1123,7 +1145,8 @@ async function generateReviewItems(
 
         // 1b. Already a Lexicon concept (project/product/tool/etc.) — never suggest as a person.
         if (lexiconNames.has(person.toLowerCase())) {
-          console.log(`Skipping "${person}" — already a Lexicon entry (non-person)`);
+          // No name in the log: function logs are kept outside the account.
+          console.log("Skipping a person name that is already a Lexicon entry (non-person)");
           continue;
         }
 
@@ -1238,7 +1261,7 @@ async function generateReviewItems(
         // row of every type stopped at PostgREST's 1,000-row cap for an active
         // account, and past it the "already exists" set silently missed rows.
         .in("suggestion_type", [...new Set(suggestions.map((s) => s.suggestion_type))])
-        .in("title", [...new Set(suggestions.map((s) => s.title))])
+        .filter("title", "in", quotedList(suggestions.map((s) => s.title)))
         .in("status", ["pending", "pending_review", "auto_applied_unreviewed", "kept", "removed", "blocked", "accepted", "dismissed", "skipped"]);
 
       const existingSet = new Set(
@@ -1993,7 +2016,7 @@ async function generateProfileSuggestions(
             }
           }
           if (!contactA) {
-            console.log(`[relationships] Skipping: cannot match person_a="${rel.person_a}"`);
+            console.log("[relationships] Skipping: cannot match person_a");
             continue;
           }
         }
@@ -2010,7 +2033,7 @@ async function generateProfileSuggestions(
             }
           }
           if (!contactB) {
-            console.log(`[relationships] Skipping: cannot match person_b="${rel.person_b}"`);
+            console.log("[relationships] Skipping: cannot match person_b");
             continue;
           }
         }
@@ -2846,11 +2869,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // "uncertain" failure and close its slot for the tick; on 2026-09-23 an
     // exhausted allowance produced 385 such 500s in seven hours. Say what
     // happened, in the statuses drainNoteAiJobs already maps.
-    const status = err instanceof NoteAIJobError
-      ? ({ no_credit: 402, transient: 503, stale: 409, permanent: 422, uncertain: 500 } as const)[err.kind] ?? 500
+    // The router and the embedding helper refuse with plain errors before any
+    // provider is paid; processInBackground files them as no_credit/transient
+    // (classifyNoteAIError), so the answer says the same, not 500 ("uncertain").
+    const kind = err instanceof NoteAIJobError ? err.kind
+      : err instanceof Error && err.message === "INSUFFICIENT_CREDITS" ? "no_credit"
+      : err instanceof Error && ["BALANCE_UNAVAILABLE", "REPEAT_CALL_BLOCKED"].includes(err.message) ? "transient"
+      : null;
+    const status = kind
+      ? ({ no_credit: 402, transient: 503, stale: 409, permanent: 422, uncertain: 500 } as const)[kind] ?? 500
       : 500;
     if (status === 500) console.error("Function error:", err);
-    else console.warn(`[process-note] job ended: ${(err as NoteAIJobError).kind}: ${(err as Error).message}`);
+    else console.warn(`[process-note] job ended: ${kind}: ${(err as Error).message}`);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "Internal error" }), {
       status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

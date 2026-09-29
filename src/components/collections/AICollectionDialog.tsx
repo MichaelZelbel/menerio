@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Pencil, Send, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
+import { functionErrorMessage } from "@/lib/function-error";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
@@ -252,7 +253,7 @@ export function AICollectionDialog({ open, onOpenChange, onCreated }: { open: bo
       setStage("preview");
       setDirtyGenerated(true);
     } catch (error) {
-      toast.error("Could not generate collection", { description: error instanceof Error ? error.message : "Please try again." });
+      toast.error("Could not generate collection", { description: await functionErrorMessage(error, "Please try again.") });
     } finally {
       setIsGenerating(false);
       setIsRefining(false);

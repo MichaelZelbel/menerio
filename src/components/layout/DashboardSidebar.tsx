@@ -73,10 +73,12 @@ export function DashboardSidebar() {
   const profileDotColor =
     completeness < 30 ? "bg-destructive" : completeness < 70 ? "bg-yellow-500" : "bg-green-500";
 
+  // Whole path segments: a bare prefix lit "Weekly Review" (/dashboard/review)
+  // on the Review Queue (/dashboard/review-queue) as well.
   const isActive = (path: string) =>
     path === "/dashboard"
       ? location.pathname === "/dashboard"
-      : location.pathname.startsWith(path);
+      : location.pathname === path || location.pathname.startsWith(`${path}/`);
 
   // Nav groups are keyed so each brand can order them (BRAND.navGroupOrder)
   // without duplicating the item definitions.

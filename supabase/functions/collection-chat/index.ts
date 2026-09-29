@@ -11,6 +11,7 @@ import {
   openRouterWithCredits,
   insufficientCreditsResponse,
   balanceUnavailableResponse,
+  repeatBlockedResponse,
 } from "../_shared/llm-credits.ts";
 import { parseModelJson, resolveConfig, resolveSystemPrompt } from "../_shared/llm-router.ts";
 import { NOTE_CHAT_SUMMARIZE_PROMPT } from "../_shared/llm-defaults.ts";
@@ -53,6 +54,19 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+/**
+ * The standard answer for a refusal from the credit layer, or null for any
+ * other error. Only INSUFFICIENT_CREDITS was mapped: an unreadable balance or a
+ * blocked repeat call answered 500 with the bare code as its message.
+ */
+function creditErrorResponse(err: unknown): Response | null {
+  const message = (err as { message?: string } | null)?.message;
+  if (message === "INSUFFICIENT_CREDITS" || message === "NO_ACTIVE_PERIOD") return insufficientCreditsResponse(corsHeaders);
+  if (message === "BALANCE_UNAVAILABLE") return balanceUnavailableResponse(corsHeaders);
+  if (message === "REPEAT_CALL_BLOCKED") return repeatBlockedResponse(corsHeaders);
+  return null;
 }
 
 const WRITE_TOOLS = [
@@ -188,6 +202,9 @@ async function executeCollectionTool(
         .select("id, title, data, updated_at")
         .eq("user_id", userId)
         .eq("collection_id", collection.id)
+        // Items the user hid from AI stay out of the model's context, as in
+        // the MCP collection tools.
+        .eq("ai_visibility", "visible")
         .order("updated_at", { ascending: false })
         .limit(limit);
       if (query) q = q.ilike("title", `%${query}%`);
@@ -205,6 +222,7 @@ async function executeCollectionTool(
         .eq("id", id)
         .eq("user_id", userId)
         .eq("collection_id", collection.id)
+        .eq("ai_visibility", "visible")
         .maybeSingle();
       if (error) return JSON.stringify({ error: error.message });
       if (!data) return JSON.stringify({ error: "not found" });
@@ -408,7 +426,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const summary = sumResult.result.choices?.[0]?.message?.content?.trim() || "";
         return json({ summary });
       } catch (err) {
-        if ((err as Error).message === "INSUFFICIENT_CREDITS") return insufficientCreditsResponse(corsHeaders);
+        const refused = creditErrorResponse(err);
+        if (refused) return refused;
         return json({ error: (err as Error).message || "Summarize failed" }, 500);
       }
     }
@@ -426,6 +445,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .eq("id", item_id)
         .eq("user_id", user.id)
         .eq("collection_id", collection.id)
+        .eq("ai_visibility", "visible")
         .maybeSingle();
       if (data) {
         currentItem = { id: data.id, title: data.title, data: (data.data as Record<string, unknown>) ?? {} };
@@ -477,13 +497,36 @@ Guidelines:
 
     const loopTools = [...TOOLS, webSearchTool];
 
+    // Once text written by strangers is in the context (a web search, or a
+    // draft extracted from a fetched page), a delete or an edit of some other
+    // item could be the page's instruction rather than the user's. Same rule as
+    // note-chat's replace_in_note: creating stays allowed, and so does filling
+    // in the item the user has open; changing or deleting anything else waits
+    // for the user's next message.
+    let untrustedInContext = false;
+    const blockedAfterUntrusted = (what: string) => JSON.stringify({
+      error: "blocked_after_untrusted_content",
+      message: `${what} is not possible in a turn that read web content. Nothing was changed. Tell the user the exact change you would make and ask them to confirm it in a new message.`,
+    });
+
     const runTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
       if (name === "web_search") {
+        untrustedInContext = true;
         return runWebSearch(db, OPENROUTER_API_KEY, user.id, String(args.query ?? ""));
       }
       if (READ_TOOL_NAMES.includes(name)) {
         return executeReadTool(db, OPENROUTER_API_KEY, user.id, name, args);
       }
+      if (untrustedInContext && name === "delete_collection_item") {
+        return blockedAfterUntrusted("Deleting an item");
+      }
+      if (untrustedInContext && name === "update_collection_item") {
+        const target = String(args.id || currentItem?.id || "");
+        if (!currentItem || target !== currentItem.id) {
+          return blockedAfterUntrusted("Changing an item other than the one the user has open");
+        }
+      }
+      if (name === "extract_item_from_url") untrustedInContext = true;
       if (COLLECTION_TOOL_NAMES.includes(name)) {
         return executeCollectionTool(name, args, user.id, collection, currentItem?.id ?? null);
       }
@@ -510,7 +553,8 @@ Guidelines:
         credits: c ? { remaining_tokens: c.remaining_tokens, remaining_credits: c.remaining_credits } : null,
       });
     } catch (err) {
-      if ((err as Error)?.message === "INSUFFICIENT_CREDITS") return insufficientCreditsResponse(corsHeaders);
+      const refused = creditErrorResponse(err);
+      if (refused) return refused;
       throw err;
     }
   } catch (err) {

@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { dbErrorMessage } from "@/lib/function-error";
+import { parseDateOnly } from "@/lib/local-date";
+import { showToast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,10 +72,15 @@ export default function ActivityPage() {
   const [actionFilter, setActionFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Typing a year into a date field fires a request per keystroke, and they
+  // can answer out of order; only the newest request may write the list.
+  const requestId = useRef(0);
 
   const fetchEvents = useCallback(async (append = false) => {
     if (!user) return;
-    if (append) { setLoadingMore(true); } else { setLoading(true); }
+    const id = ++requestId.current;
+    if (append) { setLoadingMore(true); } else { setLoading(true); setLoadError(null); }
 
     let query = supabase
       .from("activity_events" as any)
@@ -85,19 +93,32 @@ export default function ActivityPage() {
     if (actionFilter !== "all") {
       query = query.eq("action", actionFilter);
     }
-    if (dateFrom) {
-      query = query.gte("created_at", new Date(dateFrom).toISOString());
+    // The date inputs name local calendar days; new Date("2026-09-01") is
+    // UTC midnight, which shifted both ends by the viewer's offset.
+    const from = parseDateOnly(dateFrom);
+    if (from) {
+      query = query.gte("created_at", from.toISOString());
     }
-    if (dateTo) {
-      const end = new Date(dateTo);
-      end.setDate(end.getDate() + 1);
-      query = query.lt("created_at", end.toISOString());
+    const to = parseDateOnly(dateTo);
+    if (to) {
+      to.setDate(to.getDate() + 1);
+      query = query.lt("created_at", to.toISOString());
     }
 
     const offset = append ? events.length : 0;
     query = query.range(offset, offset + PAGE_SIZE - 1);
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (id !== requestId.current) return;
+    setLoading(false);
+    setLoadingMore(false);
+    if (error) {
+      const message = dbErrorMessage(error, "Something went wrong on our side. Try again.");
+      // A failed "Load More" keeps what is shown; a failed first page is not "No activity yet".
+      if (append) showToast.error(message);
+      else setLoadError(message);
+      return;
+    }
     const newData = data || [];
     setHasMore(newData.length === PAGE_SIZE);
 
@@ -106,8 +127,6 @@ export default function ActivityPage() {
     } else {
       setEvents(newData);
     }
-    setLoading(false);
-    setLoadingMore(false);
   }, [user, isAdmin, actionFilter, dateFrom, dateTo, events.length]);
 
   useEffect(() => {
@@ -169,6 +188,12 @@ export default function ActivityPage() {
             </div>
           ))}
         </div>
+      ) : loadError ? (
+        <div role="alert" className="text-center py-16 text-muted-foreground space-y-4">
+          <p className="text-lg font-medium text-foreground">Your activity could not be loaded</p>
+          <p className="text-sm">{loadError}</p>
+          <Button variant="outline" size="sm" onClick={() => void fetchEvents(false)}>Try again</Button>
+        </div>
       ) : events.length === 0 ? (
         <div className="text-center py-16">
           <Activity className="h-10 w-10 mx-auto text-muted-foreground/40 mb-4" />
@@ -204,7 +229,7 @@ export default function ActivityPage() {
       )}
 
       {/* Load more */}
-      {hasMore && !loading && events.length > 0 && (
+      {hasMore && !loading && !loadError && events.length > 0 && (
         <div className="flex justify-center pt-2">
           <Button variant="outline" onClick={() => fetchEvents(true)} disabled={loadingMore}>
             {loadingMore ? "Loading…" : "Load More"}

@@ -57,12 +57,42 @@ Deno.serve(async (req: Request) => {
     let totalConnections = 0;
 
     for (const userId of uniqueUsers) {
-      // Load contacts once per user for alias resolution.
-      const { data: userContacts } = await supabase
-        .from("contacts")
-        .select("id, name, aliases")
-        .eq("user_id", userId);
-      const aliasMap = buildAliasMap((userContacts || []) as Contact[]);
+      // Load contacts once per user for alias resolution, and every other
+      // note's people and topics once per user rather than once per note.
+      //
+      // Both used to be single reads: contacts capped at 1,000 rows, and the
+      // other notes an unordered `.limit(1000)` per note whose error was read
+      // as "no notes". Past 1,000 notes that was an arbitrary sample, and the
+      // stale cleanup below deleted every shared_person and shared_topic edge
+      // to a note outside it; a failed read deleted all of them. A read error
+      // now skips this user, leaving their connections as they are.
+      type OtherNote = { id: string; title: string | null; people: unknown; topics: unknown };
+      let aliasMap: ReturnType<typeof buildAliasMap>;
+      let allOthers: OtherNote[];
+      try {
+        const userContacts = await selectAllRows<Contact>((from, to) =>
+          supabase
+            .from("contacts")
+            .select("id, name, aliases")
+            .eq("user_id", userId)
+            .order("id", { ascending: true })
+            .range(from, to)
+        );
+        aliasMap = buildAliasMap(userContacts);
+        allOthers = await selectAllRows<OtherNote>((from, to) =>
+          supabase
+            .from("notes")
+            .select("id, title, people:metadata->people, topics:metadata->topics")
+            .eq("user_id", userId)
+            .eq("is_trashed", false)
+            .eq("ai_visibility", "visible")
+            .order("id", { ascending: true })
+            .range(from, to)
+        );
+      } catch (readError) {
+        console.error("recompute-all-connections: skipping user, read failed:", (readError as Error)?.message ?? readError);
+        continue;
+      }
 
       // Get all notes for this user
       const { data: notes } = await supabase
@@ -136,22 +166,12 @@ Deno.serve(async (req: Request) => {
 
         // Fetch other notes once for both person + topic matching.
         const needOthers = people.length > 0 || topics.length > 0;
-        const otherNotes = needOthers
-          ? (await supabase
-              .from("notes")
-              .select("id, title, metadata")
-              .eq("user_id", userId)
-              .eq("is_trashed", false)
-              .eq("ai_visibility", "visible")
-              .neq("id", note.id)
-              .limit(1000)).data || []
-          : [];
+        const otherNotes = needOthers ? allOthers.filter((o) => o.id !== note.id) : [];
 
         // --- Shared person connections (alias-aware, incidental-aware) ---
         if (people.length > 0) {
           for (const other of otherNotes) {
-            const om = (other.metadata || {}) as Record<string, unknown>;
-            const op = Array.isArray(om.people) ? om.people as string[] : [];
+            const op = Array.isArray(other.people) ? other.people as string[] : [];
             if (op.length === 0) continue;
             const result = computeSharedPersons(people, myTitle, op, other.title || "", aliasMap);
             if (result) {
@@ -173,8 +193,7 @@ Deno.serve(async (req: Request) => {
         // --- Shared topic connections (stopword-aware) ---
         if (topics.length > 0) {
           for (const other of otherNotes) {
-            const om = (other.metadata || {}) as Record<string, unknown>;
-            const ot = Array.isArray(om.topics) ? om.topics as string[] : [];
+            const ot = Array.isArray(other.topics) ? other.topics as string[] : [];
             if (ot.length === 0) continue;
             const semanticAbove05 = connections.some(
               (c) => c.target_note_id === other.id && c.connection_type === "semantic" && c.strength > 0.5,

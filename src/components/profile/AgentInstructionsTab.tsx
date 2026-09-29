@@ -21,10 +21,10 @@ import type { AgentInstruction } from "@/hooks/useProfile";
 const EXAMPLE_INSTRUCTIONS = [
   "Always address me as Mike, never Michael",
   "I prefer bullet points over long paragraphs",
-  "Never suggest meditation — I find it unhelpful",
+  "Never suggest meditation, I find it unhelpful",
   "When helping with code, use TypeScript and functional patterns",
   "Speak to me in German unless I write in English",
-  "Don't sugarcoat feedback — I prefer direct honesty",
+  "Don't sugarcoat feedback, I prefer direct honesty",
   "When discussing health topics, remember I have Type 1 diabetes",
 ];
 

@@ -5,6 +5,7 @@ import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { GENERATE_PROFILE_SUGGESTIONS_PROMPT } from "../_shared/llm-defaults.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
 import { labelOf, readFacts } from "../_shared/agent-facts.ts";
+import { suggestionAlreadyKnown } from "../_shared/fact-store.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -253,13 +254,34 @@ Return a JSON object {"suggestions": [...]} (JSON mode cannot return a bare arra
         : (parsed.suggestions || parsed.entries || Object.values(parsed).find(Array.isArray) || []);
       suggestions = Array.isArray(list) ? list : [];
     } catch {
-      console.error("Failed to parse LLM response:", chatResult.content);
+      // The length only: the reply holds facts about the user, and logs are
+      // not where those go.
+      console.error(`Failed to parse LLM response (${String(chatResult.content ?? "").length} chars)`);
       suggestions = [];
     }
 
     // Filter out suggestions for categories the user doesn't have
     suggestions = suggestions.filter((s: any) =>
       s.category_slug && s.label && s.value && categorySlugs.includes(s.category_slug)
+    );
+
+    // What is already on file, in every section, and what the user called
+    // wrong. The model saw agent_facts only, so it suggested private facts
+    // again, into a public section: accepting one there handed it to every
+    // assistant. Read after the model call and never sent to it.
+    const [onFile, wrong] = await Promise.all([
+      selectAllRows<{ attribute: string; value: string; visibility_scope: string | null }>((from, to) =>
+        db.from("profile_facts").select("claim_id, attribute, value, visibility_scope")
+          .eq("user_id", userId).eq("subject_type", "self").eq("is_current", true)
+          .order("claim_id").range(from, to)),
+      selectAllRows<{ suppression_key: string }>((from, to) =>
+        db.from("ai_suggestion_suppressions").select("suppression_key")
+          .eq("user_id", userId).eq("suggestion_type", "claim").like("suppression_key", "self::%")
+          .order("suppression_key").range(from, to)),
+    ]);
+    const suppressed = new Set(wrong.map((r) => r.suppression_key));
+    suggestions = suggestions.filter((s: any) =>
+      !suggestionAlreadyKnown({ type: "self", id: null }, { label: String(s.label), value: String(s.value) }, onFile, suppressed)
     );
 
     return new Response(JSON.stringify({

@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
+import { summarizeChat } from "@/lib/chat-summary";
+import { functionErrorMessage, OUT_OF_CREDITS_MESSAGE } from "@/lib/function-error";
 import { Button } from "@/components/ui/button";
 import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,8 +12,7 @@ import {
   saveChatState,
   clearChatState,
   buildApiMessages,
-  CHAT_WINDOW_SIZE,
-  SUMMARY_THRESHOLD,
+  withSummary,
   COLLECTION_MODIFYING_TOOLS,
   type PersistedChatMessage,
   type PersistedChatState,
@@ -61,36 +62,48 @@ export function CollectionChatPanel({
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [state.messages, isLoading]);
 
-  const refreshSummaryIfNeeded = useCallback(
-    async (current: PersistedChatState): Promise<PersistedChatState> => {
-      const olderCount = current.messages.length - CHAT_WINDOW_SIZE;
-      if (olderCount < SUMMARY_THRESHOLD - CHAT_WINDOW_SIZE) return current;
-      if (current.summarizedUpTo >= current.messages.length - CHAT_WINDOW_SIZE) return current;
-      try {
-        const olderMessages = current.messages.slice(0, current.messages.length - CHAT_WINDOW_SIZE);
-        const transcript = olderMessages.map((m) => ({ role: m.role, content: m.content }));
-        const { data } = await supabase.functions.invoke("collection-chat", {
-          body: { mode: "summarize", messages: transcript },
-        });
-        if (data?.summary) {
-          return {
-            ...current,
-            summary: data.summary,
-            summarizedUpTo: current.messages.length - CHAT_WINDOW_SIZE,
-          };
-        }
-      } catch {
-        // ignore
-      }
-      return current;
-    },
-    [],
-  );
+  // The conversation a reply belongs to. The panel stays open while the user
+  // moves between items; applying a late reply to whichever item is open by
+  // then overwrote that item's saved chat and lost the reply for the one that
+  // asked. A reply for another item (or after the panel closed) goes into that
+  // item's saved history instead.
+  const chatKey = `${user?.id ?? "anon"}|${contextKey}`;
+  const chatKeyRef = useRef<string | null>(chatKey);
+  useEffect(() => {
+    chatKeyRef.current = chatKey;
+    return () => {
+      chatKeyRef.current = null;
+    };
+  }, [chatKey]);
+  const summarizingRef = useRef(false);
+
+  const deliver = useCallback((key: string, userId: string | undefined, ctx: string, next: PersistedChatState) => {
+    if (chatKeyRef.current === key) setState(next);
+    else saveChatState(userId, ctx, next);
+  }, []);
+
+  /** Fold older turns into the summary after the reply is shown, without holding it back. */
+  const summarizeLater = useCallback((key: string, userId: string | undefined, ctx: string, from: PersistedChatState) => {
+    if (summarizingRef.current) return;
+    summarizingRef.current = true;
+    void summarizeChat("collection-chat", from)
+      .then((res) => {
+        if (!res) return;
+        if (chatKeyRef.current === key) setState((prev) => withSummary(prev, res.summary, res.upTo, res.messageCount));
+        else saveChatState(userId, ctx, withSummary(loadChatState(userId, ctx), res.summary, res.upTo, res.messageCount));
+      })
+      .finally(() => {
+        summarizingRef.current = false;
+      });
+  }, []);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || isLoading || !session) return;
     setError(null);
+    const sentKey = chatKey;
+    const sentUserId = user?.id;
+    const sentContext = contextKey;
     const userMsg: PersistedChatMessage = { role: "user", content: text };
     const nextState: PersistedChatState = { ...state, messages: [...state.messages, userMsg] };
     setState(nextState);
@@ -108,17 +121,17 @@ export function CollectionChatPanel({
         },
       });
 
+      // A non-2xx answer (out of credits is a 402) arrives as fnErr with
+      // data null, so the reason is read from the answer itself.
       if (fnErr) {
-        const msg = fnErr.message || "Chat request failed";
-        throw new Error(msg);
+        throw new Error(await functionErrorMessage(fnErr, "The assistant could not answer. Please try again."));
       }
       if (data?.error) {
-        if (data.error === "Insufficient AI credits") {
-          setError("You're out of AI credits for this period.");
-        } else {
-          throw new Error(data.error);
-        }
-        return;
+        throw new Error(
+          data.error === "Insufficient AI credits" || data.code === "INSUFFICIENT_CREDITS"
+            ? OUT_OF_CREDITS_MESSAGE
+            : "The assistant could not answer. Please try again.",
+        );
       }
 
       const assistantMsg: PersistedChatMessage = {
@@ -126,7 +139,7 @@ export function CollectionChatPanel({
         content: data.reply || "",
         toolResults: data.tool_results,
       };
-      let updated: PersistedChatState = {
+      const updated: PersistedChatState = {
         ...nextState,
         messages: [...nextState.messages, assistantMsg],
       };
@@ -135,15 +148,15 @@ export function CollectionChatPanel({
         onCollectionChanged();
       }
 
-      updated = await refreshSummaryIfNeeded(updated);
-      setState(updated);
+      deliver(sentKey, sentUserId, sentContext, updated);
+      summarizeLater(sentKey, sentUserId, sentContext, updated);
       triggerCreditsRefresh();
     } catch (err) {
-      setError((err as Error).message || "Something went wrong");
+      if (chatKeyRef.current === sentKey) setError((err as Error).message || "Something went wrong");
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, collectionId, itemId, onCollectionChanged, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, collectionId, itemId, onCollectionChanged, chatKey, contextKey, user?.id, deliver, summarizeLater]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

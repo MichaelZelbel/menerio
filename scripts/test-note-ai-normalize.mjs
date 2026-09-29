@@ -24,7 +24,8 @@ const db = new Client(url ? { connectionString: url } : { host: '/var/run/postgr
 await db.connect();
 try {
   const migration = await readFile(new URL('../supabase/migrations/20260911003000_note_ai_cosmetic_edits_and_spacing.sql', import.meta.url), 'utf8');
-  const fn = migration.match(/create or replace function public\.note_ai_normalize_text[\s\S]*?\$\$;\n/);
+  // \r?: a Windows checkout (core.autocrlf) ends the line with CRLF.
+  const fn = migration.match(/create or replace function public\.note_ai_normalize_text[\s\S]*?\$\$;\r?\n/);
   assert.ok(fn, 'note_ai_normalize_text definition not found in the migration');
   await db.query(fn[0]);
 

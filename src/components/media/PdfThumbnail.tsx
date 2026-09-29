@@ -34,9 +34,25 @@ export function PdfThumbnail({ url, width = 320, className = "", contain = false
       return;
     }
 
+    // Without a shared worker port every getDocument() starts its own Web
+    // Worker, and only destroying the loading task ends it. Cancelling the
+    // render alone left one worker per thumbnail alive for the life of the
+    // tab. The canvas keeps its pixels after the document is destroyed, so it
+    // is destroyed as soon as the thumbnail is drawn (or fails), and again on
+    // unmount if that has not happened yet.
+    let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null;
+    let destroyed = false;
+    const destroy = () => {
+      if (destroyed || !loadingTask) return;
+      destroyed = true;
+      loadingTask.destroy().catch(() => {
+        /* already torn down */
+      });
+    };
+
     (async () => {
       try {
-        const loadingTask = pdfjsLib.getDocument({ url, disableAutoFetch: true, disableStream: true });
+        loadingTask = pdfjsLib.getDocument({ url, disableAutoFetch: true, disableStream: true });
         const pdf = await loadingTask.promise;
         if (cancelled) return;
         const page = await pdf.getPage(1);
@@ -69,6 +85,8 @@ export function PdfThumbnail({ url, width = 320, className = "", contain = false
           console.warn("PdfThumbnail failed:", (err as Error).message);
           setStatus("error");
         }
+      } finally {
+        if (!cancelled) destroy();
       }
     })();
 
@@ -79,6 +97,7 @@ export function PdfThumbnail({ url, width = 320, className = "", contain = false
       } catch {
         /* noop */
       }
+      destroy();
     };
   }, [url, width]);
 

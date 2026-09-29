@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { format, formatDistanceToNow, isValid, parseISO } from "date-fns";
 import {
   ArrowDown,
@@ -77,7 +77,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { fetchAllPages, ilikeContains } from "@/lib/postgrest";
+import { escapeLike, fetchAllPages, ilikeContains } from "@/lib/postgrest";
+import { dbErrorMessage } from "@/lib/function-error";
 import {
   Sheet,
   SheetContent,
@@ -113,6 +114,11 @@ import type {
   FolderLite,
   ItemLite,
 } from "@/components/collections/collectionItemsTreeBuild";
+import { LoadErrorState } from "@/components/collections/LoadErrorState";
+import {
+  duplicateItemData,
+  mergeItemData,
+} from "@/components/collections/collectionItemData";
 
 type Collection = Database["public"]["Tables"]["collections"]["Row"];
 type CollectionItem = Database["public"]["Tables"]["collection_items"]["Row"];
@@ -175,6 +181,10 @@ const PAGE_SIZE = 50;
 // memory — past that the UI says so instead of silently hiding the rest.
 const FETCH_CHUNK = 1000;
 const MAX_CLIENT_ROWS = 5000;
+// Every item column except search_vector, which nothing here reads and which
+// is the largest thing in each row.
+const ITEM_COLUMNS =
+  "id, collection_id, user_id, data, title, folder_id, is_favorite, last_viewed_at, created_at, updated_at, ai_visibility, contact_id, entity_id, indexable_date_1, indexable_date_2, indexable_number_1, indexable_number_2, indexable_text_1";
 const TITLE_KEY = "__title__";
 const UPDATED_KEY = "__updated__";
 
@@ -315,6 +325,31 @@ function defaultFilterFor(fieldType: string): ColumnFilter {
   if (["select", "multiselect"].includes(fieldType))
     return { type: "set", values: [] };
   return { type: "text", value: "" };
+}
+
+type StoredView = {
+  sort?: SortKey;
+  columnSort?: ColumnSort;
+  columnFilters?: ColumnFilters;
+  visibleKeys?: string[];
+};
+
+/** The table view (sort, filters, columns) last used for this collection. */
+function readStoredView(slug: string | undefined): StoredView {
+  if (!slug) return {};
+  try {
+    const raw = localStorage.getItem(`collection:${slug}:view`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as StoredView;
+    return {
+      sort: parsed.sort || undefined,
+      columnSort: parsed.columnSort !== undefined ? parsed.columnSort : undefined,
+      columnFilters: parsed.columnFilters || undefined,
+      visibleKeys: Array.isArray(parsed.visibleKeys) ? parsed.visibleKeys : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 
 
@@ -701,7 +736,6 @@ function itemDisplayTitle(item: CollectionItem, primaryField?: SchemaField) {
 
 function CollectionItemsTree({
   collection,
-  items,
   folders,
   treeItems,
   selectedItemId,
@@ -720,14 +754,13 @@ function CollectionItemsTree({
   onDeleteItem,
 }: {
   collection: Collection | null;
-  items: CollectionItem[];
   folders: FolderLite[];
   treeItems: ItemLite[];
   selectedItemId?: string | null;
   query: string;
   onQueryChange: (value: string) => void;
   onSelectItem: (item: { id: string }) => void;
-  onNewItem: () => void;
+  onNewItem: (folderId?: string | null) => void;
   isLoading: boolean;
   onToggleFavorite: (id: string, isFavorite: boolean) => void;
   onCreateFolder: (parentFolderId: string | null) => void;
@@ -746,11 +779,12 @@ function CollectionItemsTree({
           <div className="truncate text-sm font-semibold font-display">
             {collection?.name ?? "Collection"}
           </div>
+          {/* The whole collection, not the table's current page (at most 50). */}
           <div className="text-[10px] text-muted-foreground">
-            {items.length} item{items.length === 1 ? "" : "s"}
+            {treeItems.length} item{treeItems.length === 1 ? "" : "s"}
           </div>
         </div>
-        <Button aria-label="New item" variant="ghost" size="icon" className="h-8 w-8" onClick={onNewItem}>
+        <Button aria-label="New item" variant="ghost" size="icon" className="h-8 w-8" onClick={() => onNewItem()}>
           <Plus className="h-4 w-4" />
         </Button>
       </div>
@@ -784,10 +818,7 @@ function CollectionItemsTree({
           onDeleteFolder={onDeleteFolder}
           onReparentFolder={onReparentFolder}
           onMoveItemToFolder={onMoveItemToFolder}
-          onCreateItem={(folderId) => {
-            void folderId;
-            onNewItem();
-          }}
+          onCreateItem={(folderId) => onNewItem(folderId)}
           onDuplicateItem={onDuplicateItem}
           onDeleteItem={onDeleteItem}
         />
@@ -908,8 +939,9 @@ function LinkPicker({
     collections.find((collection) => collection.id === targetCollectionId) ??
     currentCollection;
 
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     let cancelled = false;
     const load = async () => {
       const term = search.trim();
@@ -917,7 +949,7 @@ function LinkPicker({
         const request = supabase
           .from("notes")
           .select("id, title")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .eq("is_trashed", false)
           .order("updated_at", { ascending: false })
           .limit(10);
@@ -937,12 +969,12 @@ function LinkPicker({
         const request = supabase
           .from("contacts")
           .select("id, name")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .is("merged_into", null)
           .order("name")
           .limit(10);
         const { data } = term
-          ? await request.ilike("name", `%${term}%`)
+          ? await request.ilike("name", `%${escapeLike(term)}%`)
           : await request;
         if (!cancelled)
           setResults(
@@ -958,13 +990,18 @@ function LinkPicker({
         const request = supabase
           .from("collection_items")
           .select("id, title, collection_id")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .eq("collection_id", targetCollection.id)
           .order("updated_at", { ascending: false })
           .limit(10);
+        // Quoted and escaped: a comma or a parenthesis in the search text
+        // used to break (or rewrite) the .or() filter.
         const { data } = term
           ? await request.or(
-              `title.ilike.%${term}%,indexable_text_1.ilike.%${term}%`,
+              [
+                ilikeContains("title", term),
+                ilikeContains("indexable_text_1", term),
+              ].join(","),
             )
           : await request;
         if (!cancelled)
@@ -981,14 +1018,7 @@ function LinkPicker({
     return () => {
       cancelled = true;
     };
-  }, [
-    currentCollection,
-    field.target_collection_slug,
-    field.type,
-    search,
-    targetCollection?.id,
-    user,
-  ]);
+  }, [field.type, search, targetCollection?.id, userId]);
 
   const createPerson = async () => {
     if (!user || !newPersonName.trim()) return;
@@ -1004,7 +1034,7 @@ function LinkPicker({
       .single();
     if (error || !data)
       return toast.error("Could not create person", {
-        description: error?.message ?? "Please try again.",
+        description: dbErrorMessage(error, "Please try again."),
       });
     onChange({ type: "person", id: data.id, label: data.name });
     setNewPersonName("");
@@ -1424,23 +1454,26 @@ function ItemNotesPanel({
   const [isSearching, setIsSearching] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
 
+  const userId = user?.id;
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setIsLoading(true);
     const { data, error } = await supabase
       .from("notes")
       .select("id, title, content, updated_at")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_trashed", false)
       .filter("metadata->>collection_item_id", "eq", itemId)
       .order("updated_at", { ascending: false });
     setIsLoading(false);
     if (error) {
-      toast.error("Could not load notes", { description: error.message });
+      toast.error("Could not load notes", {
+        description: dbErrorMessage(error, "Please try again."),
+      });
       return;
     }
     setNotes((data ?? []) as ItemNote[]);
-  }, [itemId, user]);
+  }, [itemId, userId]);
 
   useEffect(() => {
     load();
@@ -1448,7 +1481,7 @@ function ItemNotesPanel({
 
   // Search existing notes when popover open
   useEffect(() => {
-    if (!linkOpen || !user) return;
+    if (!linkOpen || !userId) return;
     let cancelled = false;
     const run = async () => {
       setIsSearching(true);
@@ -1456,12 +1489,12 @@ function ItemNotesPanel({
       let query = supabase
         .from("notes")
         .select("id, title, content, updated_at")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .eq("is_trashed", false)
         .order("updated_at", { ascending: false })
         .limit(20);
       if (linkQuery.trim()) {
-        query = query.ilike("title", `%${linkQuery.trim()}%`);
+        query = query.ilike("title", `%${escapeLike(linkQuery.trim())}%`);
       }
       if (linkedIds.length > 0) {
         query = query.not("id", "in", `(${linkedIds.join(",")})`);
@@ -1470,7 +1503,9 @@ function ItemNotesPanel({
       if (cancelled) return;
       setIsSearching(false);
       if (error) {
-        toast.error("Search failed", { description: error.message });
+        toast.error("Search failed", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         return;
       }
       setLinkResults((data ?? []) as ItemNote[]);
@@ -1480,7 +1515,7 @@ function ItemNotesPanel({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [linkOpen, linkQuery, notes, user]);
+  }, [linkOpen, linkQuery, notes, userId]);
 
   const createNote = async () => {
     if (!user) return;
@@ -1502,7 +1537,7 @@ function ItemNotesPanel({
     setIsCreating(false);
     if (error || !data) {
       toast.error("Could not create note", {
-        description: error?.message ?? "Please try again.",
+        description: dbErrorMessage(error, "Please try again."),
       });
       return;
     }
@@ -1520,7 +1555,9 @@ function ItemNotesPanel({
       .eq("user_id", user.id)
       .single();
     if (fetchErr) {
-      toast.error("Could not link note", { description: fetchErr.message });
+      toast.error("Could not link note", {
+        description: dbErrorMessage(fetchErr, "Please try again."),
+      });
       return;
     }
     const merged = {
@@ -1535,7 +1572,9 @@ function ItemNotesPanel({
       .eq("id", note.id)
       .eq("user_id", user.id);
     if (error) {
-      toast.error("Could not link note", { description: error.message });
+      toast.error("Could not link note", {
+        description: dbErrorMessage(error, "Please try again."),
+      });
       return;
     }
     setLinkOpen(false);
@@ -1547,13 +1586,20 @@ function ItemNotesPanel({
   const unlinkNote = async (note: ItemNote) => {
     if (!user) return;
     if (!(await confirm({ title: "Unlink this note from the item?", description: "The note itself stays in your Notes app.", confirmLabel: "Unlink" }))) return;
-    // Preserve other metadata, only strip our keys
-    const { data: existing } = await supabase
+    // Preserve other metadata, only strip our keys. A failed read must stop
+    // here: writing on without it would replace the note's metadata with {}.
+    const { data: existing, error: readError } = await supabase
       .from("notes")
       .select("metadata")
       .eq("id", note.id)
       .eq("user_id", user.id)
       .single();
+    if (readError || !existing) {
+      toast.error("Could not unlink note", {
+        description: dbErrorMessage(readError, "Please try again."),
+      });
+      return;
+    }
     const meta = { ...((existing?.metadata as Record<string, unknown>) ?? {}) };
     delete meta.collection_item_id;
     delete meta.collection_id;
@@ -1564,7 +1610,9 @@ function ItemNotesPanel({
       .eq("id", note.id)
       .eq("user_id", user.id);
     if (error) {
-      toast.error("Could not unlink note", { description: error.message });
+      toast.error("Could not unlink note", {
+        description: dbErrorMessage(error, "Please try again."),
+      });
       return;
     }
     setNotes((current) => current.filter((n) => n.id !== note.id));
@@ -1579,7 +1627,9 @@ function ItemNotesPanel({
       .eq("id", note.id)
       .eq("user_id", user.id);
     if (error) {
-      toast.error("Could not delete note", { description: error.message });
+      toast.error("Could not delete note", {
+        description: dbErrorMessage(error, "Please try again."),
+      });
       return;
     }
     setNotes((current) => current.filter((n) => n.id !== note.id));
@@ -1731,6 +1781,7 @@ function ItemSheet({
   onDuplicate,
   collections,
   inline = false,
+  folderId = null,
 }: {
   collection: Collection | null;
   fields: SchemaField[];
@@ -1743,23 +1794,62 @@ function ItemSheet({
   collections: Collection[];
   /** Render as a routed inline detail view (full-width) instead of a right-side Sheet. */
   inline?: boolean;
+  /** The folder a new item is created in ("New item here" on a folder). */
+  folderId?: string | null;
 }) {
   const { user } = useAuth();
+  const userId = user?.id;
   const [values, setValues] = useState<FormValues>({});
   const [initialValues, setInitialValues] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSaving, setIsSaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Set while a save is in flight, so Enter or Ctrl+Enter pressed twice
+  // cannot create the item twice.
+  const savingRef = useRef(false);
+  // The item, and the stored values of it, that the form was last filled from.
+  const filledFrom = useRef<{ key: string; signature: string } | null>(null);
   const isCreate = item?.id === "new";
   const isDirty = JSON.stringify(values) !== initialValues;
+  const itemKey = isCreate ? "new" : (item?.id ?? "");
+  // What the stored item would put in the form. The page replaces the item
+  // and schema objects on every reload, so this is compared by content.
+  const storedSignature = useMemo(
+    () => JSON.stringify(initialFormValues(fields, isCreate ? null : item)),
+    [fields, isCreate, item],
+  );
+
+  // Fill the form when another item opens. When the same item reloads (the
+  // AI chat changed the collection, a token refresh), take the stored values
+  // only while the person has no unsaved edits: refilling on every reload
+  // used to throw away what they were typing.
+  useEffect(() => {
+    if (!open) {
+      filledFrom.current = null;
+      return;
+    }
+    const last = filledFrom.current;
+    if (
+      last &&
+      last.key === itemKey &&
+      (last.signature === storedSignature || isDirty)
+    )
+      return;
+    filledFrom.current = { key: itemKey, signature: storedSignature };
+    setValues(JSON.parse(storedSignature) as FormValues);
+    setInitialValues(storedSignature);
+    setErrors({});
+  }, [isDirty, itemKey, open, storedSignature]);
 
   useEffect(() => {
-    if (!open) return;
-    const next = initialFormValues(fields, isCreate ? null : item);
-    setValues(next);
-    setInitialValues(JSON.stringify(next));
-    setErrors({});
-  }, [fields, isCreate, item, open]);
+    if (!open || !isDirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty, open]);
 
   const close = useCallback(() => {
     if (isDirty && !window.confirm("Discard unsaved item changes?")) return;
@@ -1767,47 +1857,81 @@ function ItemSheet({
   }, [isDirty, onOpenChange]);
 
   const save = useCallback(async () => {
-    if (!collection || !user) return;
+    if (!collection || !userId || savingRef.current) return;
     const validated = validateItemValues(fields, values);
     setErrors(validated.errors);
     if (Object.keys(validated.errors).length > 0) return;
+    savingRef.current = true;
     setIsSaving(true);
+    // Only the fields the person changed are written, and onto the stored
+    // data: keys the form does not show (renamed fields, duplicated_from,
+    // keys the AI or MCP tools wrote) survive, and so do changes the AI made
+    // to other fields while the form was open.
+    const initial = (initialValues ? JSON.parse(initialValues) : {}) as FormValues;
+    const changedKeys = isCreate
+      ? fields.map((field) => field.key)
+      : fields
+          .filter(
+            (field) =>
+              JSON.stringify(values[field.key] ?? null) !==
+              JSON.stringify(initial[field.key] ?? null),
+          )
+          .map((field) => field.key);
+    const data = mergeItemData(
+      isCreate ? {} : item?.data,
+      validated.data,
+      changedKeys,
+    ) as Json;
     const query = isCreate
       ? supabase
           .from("collection_items")
           .insert({
-            user_id: user.id,
+            user_id: userId,
             collection_id: collection.id,
-            data: validated.data,
+            data,
+            folder_id: folderId ?? null,
           })
-          .select("*")
+          .select(ITEM_COLUMNS)
           .single()
       : supabase
           .from("collection_items")
-          .update({ data: validated.data })
+          .update({ data })
           .eq("id", item?.id ?? "")
-          .eq("user_id", user.id)
-          .select("*")
+          .eq("user_id", userId)
+          .select(ITEM_COLUMNS)
           .single();
-    const { data, error } = await query;
+    const { data: saved, error } = await query;
+    savingRef.current = false;
     setIsSaving(false);
-    if (error || !data)
+    if (error || !saved)
       return toast.error(
         isCreate ? "Could not create item" : "Could not save item",
-        { description: error?.message ?? "Please try again." },
+        { description: dbErrorMessage(error, "Please try again.") },
       );
+    const savedItem = saved as unknown as CollectionItem;
+    if (!isCreate) {
+      // The form now holds what was stored, so it is clean, and the reload
+      // of this item that follows is not mistaken for someone else's edit.
+      const signature = JSON.stringify(initialFormValues(fields, savedItem));
+      filledFrom.current = { key: savedItem.id, signature };
+      setValues(JSON.parse(signature) as FormValues);
+      setInitialValues(signature);
+    }
     toast.success(isCreate ? "Item created" : "Item saved");
-    onSaved(data);
+    onSaved(savedItem);
     if (!inline) onOpenChange(false);
   }, [
     collection,
     fields,
+    folderId,
+    initialValues,
     inline,
     isCreate,
+    item?.data,
     item?.id,
     onOpenChange,
     onSaved,
-    user,
+    userId,
     values,
   ]);
 
@@ -1820,7 +1944,7 @@ function ItemSheet({
       .eq("user_id", item.user_id);
     if (error)
       return toast.error("Could not delete item", {
-        description: error.message,
+        description: dbErrorMessage(error, "Please try again."),
       });
     toast.success("Item deleted");
     onDeleted(item.id);
@@ -2346,20 +2470,48 @@ function SortableHeader({
 }
 
 export default function CollectionDetail() {
+  const { slug } = useParams<{ slug: string }>();
+  // The :slug and :slug/:itemId routes render this page as one instance that
+  // React keeps across collections. A fresh instance per collection keeps one
+  // collection's items, view settings and open item out of the next one.
+  return <CollectionDetailPage key={slug} />;
+}
+
+function CollectionDetailPage() {
   const { slug, itemId: routeItemId } = useParams<{ slug: string; itemId?: string }>();
   const { user } = useAuth();
+  // Loads depend on the id, not the user object: a token refresh must not
+  // reload the page under an open editor.
+  const userId = user?.id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [collection, setCollection] = useState<Collection | null>(null);
-  const [items, setItems] = useState<CollectionItem[]>([]);
-  // The full matching set after search/filter/sort; `items` is the current
-  // page sliced from it. Kept as state so the page can turn without refetching.
-  const [workingSet, setWorkingSet] = useState<CollectionItem[]>([]);
+  // Every loaded item of the collection, in the base sort order. Search,
+  // column filters, column sort and paging all work on this in memory, so
+  // typing in a search box does not download the collection again.
+  const [rows, setRows] = useState<CollectionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // A failed load is shown as a failure with Retry, never as an empty
+  // collection ("No items yet") that invites creating it all again.
+  const [collectionLoadFailure, setCollectionLoadFailure] = useState<
+    "error" | "missing" | null
+  >(null);
+  const [itemsLoadFailed, setItemsLoadFailed] = useState(false);
+  const itemsLoadedOnce = useRef(false);
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortKey>("updated");
-  const [visibleKeys, setVisibleKeys] = useState<string[]>([]);
-  const [columnSort, setColumnSort] = useState<ColumnSort>(null);
-  const [columnFilters, setColumnFilters] = useState<ColumnFilters>({});
+  // The saved view is read before the first load, so a saved sort does not
+  // load the whole collection twice (once in the default order).
+  const [storedView] = useState(() => readStoredView(slug));
+  const [sort, setSort] = useState<SortKey>(storedView.sort ?? "updated");
+  const [visibleKeys, setVisibleKeys] = useState<string[]>(
+    storedView.visibleKeys ?? [],
+  );
+  const [columnSort, setColumnSort] = useState<ColumnSort>(
+    storedView.columnSort ?? null,
+  );
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(
+    storedView.columnFilters ?? {},
+  );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [truncatedByLimit, setTruncatedByLimit] = useState(false);
   const [cursorStack, setCursorStack] = useState<Cursor[]>([]);
@@ -2374,14 +2526,9 @@ export default function CollectionDetail() {
     () => setTreeReloadTick((t) => t + 1),
     [],
   );
-  const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
-  // Selection is URL-driven so /collections/:slug/:itemId deep-links work, the
-  // browser back button behaves, and the AI FAB can prime item context from
-  // the current route. `selectedItem` mirrors the route param.
-  const [selectedItem, setSelectedItem] = useState<CollectionItem | null>(null);
   const openItem = useCallback(
-    (item: { id: string }) => {
-      navigate(`/collections/${slug}/${item.id}`);
+    (item: { id: string }, targetSlug: string = slug ?? "") => {
+      navigate(`/collections/${targetSlug}/${item.id}`);
       // Fire-and-forget last_viewed_at stamp so the tree's Recent section is
       // populated. Silent failures are fine — this is a UX signal, not data.
       if (item.id && item.id !== "new") {
@@ -2408,8 +2555,13 @@ export default function CollectionDetail() {
     () => navigate(`/collections/${slug}`),
     [navigate, slug],
   );
+  // `folderId` is set by "New item here" on a folder; the item is created
+  // in that folder instead of at the top level.
   const openNewItem = useCallback(
-    () => navigate(`/collections/${slug}/new`),
+    (folderId?: string | null) =>
+      navigate(
+        `/collections/${slug}/new${folderId ? `?folder=${encodeURIComponent(folderId)}` : ""}`,
+      ),
     [navigate, slug],
   );
   const [editOpen, setEditOpen] = useState(false);
@@ -2418,71 +2570,105 @@ export default function CollectionDetail() {
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  const collectionId = collection?.id;
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as { collectionId?: string } | undefined;
-      if (!detail?.collectionId || !collection || detail.collectionId === collection.id) {
+      if (!detail?.collectionId || !collectionId || detail.collectionId === collectionId) {
         setReloadTick((t) => t + 1);
       }
     };
     window.addEventListener("menerio:collection-updated", handler);
     return () => window.removeEventListener("menerio:collection-updated", handler);
-  }, [collection?.id]);
+  }, [collectionId]);
+  const retryLoad = useCallback(() => {
+    setCollectionLoadFailure(null);
+    setItemsLoadFailed(false);
+    setIsLoading(true);
+    setReloadTick((t) => t + 1);
+  }, []);
 
-  // Sync selectedItem with the URL param (/collections/:slug/:itemId).
-  //   - "new" → placeholder create item
-  //   - real id → existing row from `items`, or a targeted DB fetch when not
-  //     yet in the current page (deep-link / linked-item hop)
-  //   - absent → grid view
+  // The open item follows the URL (/collections/:slug/:itemId), so deep links
+  // and the back button work and the AI chat can read the item from the route.
+  //   - "new" → a placeholder for the create form
+  //   - an id → that row of this collection, or the row fetched by id when it
+  //     is not among the loaded rows (past the load cap)
+  //   - none → the table
+  // Derived rather than copied into state, so a reload of the rows hands the
+  // editor the fresh row, and the editor decides whether to take it.
+  const [fetchedItem, setFetchedItem] = useState<CollectionItem | null>(null);
+  const newItemPlaceholder = useMemo(
+    () =>
+      collectionId && userId
+        ? ({
+            id: "new",
+            collection_id: collectionId,
+            user_id: userId,
+            data: {},
+            title: null,
+            created_at: "",
+            updated_at: "",
+            folder_id: null,
+            is_favorite: false,
+            last_viewed_at: null,
+            indexable_date_1: null,
+            indexable_date_2: null,
+            indexable_number_1: null,
+            indexable_number_2: null,
+            indexable_text_1: null,
+            search_vector: null,
+          } as CollectionItem)
+        : null,
+    [collectionId, userId],
+  );
+  const loadedItem =
+    routeItemId && routeItemId !== "new"
+      ? (rows.find((row) => row.id === routeItemId) ?? null)
+      : null;
+  const hasFetchedItem = !!routeItemId && fetchedItem?.id === routeItemId;
+  const selectedItem: CollectionItem | null = !routeItemId
+    ? null
+    : routeItemId === "new"
+      ? newItemPlaceholder
+      : (loadedItem ?? (hasFetchedItem ? fetchedItem : null));
+  const needsItemFetch =
+    !!routeItemId && routeItemId !== "new" && !loadedItem && !hasFetchedItem;
   useEffect(() => {
-    if (!routeItemId) {
-      setSelectedItem(null);
+    if (!needsItemFetch || !routeItemId || !userId || !collectionId || isLoading)
       return;
-    }
-    if (!user || !collection) return;
-    if (routeItemId === "new") {
-      setSelectedItem({
-        id: "new",
-        collection_id: collection.id,
-        user_id: user.id,
-        data: {},
-        title: null,
-        created_at: "",
-        updated_at: "",
-        indexable_date_1: null,
-        indexable_date_2: null,
-        indexable_number_1: null,
-        indexable_number_2: null,
-        indexable_text_1: null,
-        search_vector: null,
-      } as CollectionItem);
-      return;
-    }
-    const existing = items.find((row) => row.id === routeItemId);
-    if (existing) {
-      setSelectedItem(existing);
-      return;
-    }
     let cancelled = false;
     supabase
       .from("collection_items")
-      .select("*")
+      .select(ITEM_COLUMNS)
       .eq("id", routeItemId)
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
+      // Only an item of this collection. An id from another collection used
+      // to open under this collection's fields, and saving it wrote this
+      // schema's keys into the other collection's item.
+      .eq("collection_id", collectionId)
       .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error || !data) {
-          toast.error("Item not found");
+          if (error)
+            toast.error("Could not open the item", {
+              description: dbErrorMessage(error, "Please try again."),
+            });
+          else toast.error("Item not found");
           navigate(`/collections/${slug}`, { replace: true });
           return;
         }
-        setSelectedItem(data as CollectionItem);
+        setFetchedItem(data as unknown as CollectionItem);
       });
     return () => {
       cancelled = true;
     };
-  }, [routeItemId, user, collection?.id, items, navigate, slug]);
+  }, [needsItemFetch, routeItemId, userId, collectionId, isLoading, navigate, slug]);
+  const folderParam = searchParams.get("folder");
+  const newItemFolderId =
+    folderParam && folders.some((folder) => folder.id === folderParam)
+      ? folderParam
+      : null;
 
 
   const [linkValidity, setLinkValidity] =
@@ -2509,22 +2695,6 @@ export default function CollectionDetail() {
     setVisibleKeys(nonPrimaryFields.slice(0, 5).map((field) => field.key));
   }, [nonPrimaryFields, visibleKeys.length]);
 
-  // Restore persisted view per collection
-  useEffect(() => {
-    if (!slug) return;
-    try {
-      const raw = localStorage.getItem(`collection:${slug}:view`);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed.sort) setSort(parsed.sort);
-      if (parsed.columnSort !== undefined) setColumnSort(parsed.columnSort);
-      if (parsed.columnFilters) setColumnFilters(parsed.columnFilters);
-      if (Array.isArray(parsed.visibleKeys)) setVisibleKeys(parsed.visibleKeys);
-    } catch {
-      // ignore
-    }
-  }, [slug]);
-
   useEffect(() => {
     if (!slug) return;
     try {
@@ -2539,7 +2709,6 @@ export default function CollectionDetail() {
 
   useEffect(() => {
     setCursorStack([]);
-    setNextCursor(null);
   }, [query, sort, slug, clientSideMode, columnSort, columnFilters]);
 
   const toggleColumnSort = (key: string) => {
@@ -2557,22 +2726,32 @@ export default function CollectionDetail() {
   const clearColumnFilters = () => setColumnFilters({});
 
 
+  // Loads the collection and all its items. Runs on open, on a new base
+  // sort, and on a reload (Retry, or the AI chat changing the collection);
+  // search and column filters work on the loaded rows and never refetch.
   useEffect(() => {
-    if (!user || !slug) return;
+    if (!userId || !slug) return;
     let cancelled = false;
     const load = async () => {
-      setIsLoading(true);
+      // Only a first load shows skeletons. A reload keeps the table and the
+      // tree (with its open folders) on screen until the new rows arrive.
+      if (!itemsLoadedOnce.current) setIsLoading(true);
       const { data: current, error } = await supabase
         .from("collections")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .eq("slug", slug)
         .maybeSingle();
       if (cancelled) return;
       if (error || !current) {
-        toast.error("Could not load collection", {
-          description: error?.message ?? "Collection not found.",
-        });
+        if (error && itemsLoadedOnce.current) {
+          toast.error("Could not refresh the collection", {
+            description: dbErrorMessage(error, "Please try again."),
+          });
+        } else {
+          setCollection(null);
+          setCollectionLoadFailure(error ? "error" : "missing");
+        }
         setIsLoading(false);
         return;
       }
@@ -2580,7 +2759,7 @@ export default function CollectionDetail() {
       const { data: collectionRows } = await supabase
         .from("collections")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .order("name");
       if (!cancelled) setAllCollections(collectionRows ?? [current]);
 
@@ -2588,14 +2767,14 @@ export default function CollectionDetail() {
       // up to the safety cap. Fetching everything is what lets the sort and
       // filters below be correct: the previous code sorted only the first page
       // (or the first 500 in filter mode) and silently dropped the rest.
-      const rows: CollectionItem[] = [];
+      const loaded: CollectionItem[] = [];
       let truncated = false;
-      let itemsError: { message: string } | null = null;
+      let itemsError: unknown = null;
       for (let from = 0; from < MAX_CLIENT_ROWS; from += FETCH_CHUNK) {
         let request = supabase
           .from("collection_items")
-          .select("*")
-          .eq("user_id", user.id)
+          .select(ITEM_COLUMNS)
+          .eq("user_id", userId)
           .eq("collection_id", current.id)
           .range(from, from + FETCH_CHUNK - 1);
         if (sort === "updated")
@@ -2616,125 +2795,133 @@ export default function CollectionDetail() {
           itemsError = error;
           break;
         }
-        rows.push(...((chunk ?? []) as CollectionItem[]));
+        loaded.push(...((chunk ?? []) as unknown as CollectionItem[]));
         if (!chunk || chunk.length < FETCH_CHUNK) break;
-        if (rows.length >= MAX_CLIENT_ROWS) {
+        if (loaded.length >= MAX_CLIENT_ROWS) {
           truncated = true;
           break;
         }
       }
-      if (itemsError)
-        toast.error("Could not load items", {
-          description: itemsError.message,
-        });
-
-      const schema = parseSchema(current.field_schema);
-      const searchableFields = schema.filter((field) =>
-        ["text", "longtext"].includes(field.type),
-      );
-      const needle = query.trim().toLowerCase();
-      let filtered: CollectionItem[] = needle
-        ? rows.filter((item) =>
-            [
-              item.title,
-              ...searchableFields.map((field) => asData(item.data)[field.key]),
-            ].some((value) =>
-              String(value ?? "")
-                .toLowerCase()
-                .includes(needle),
-            ),
-          )
-        : rows;
-
-      if (clientSideMode) {
-        // Apply column filters
-        filtered = filtered.filter((item) => {
-          return Object.entries(columnFilters).every(([key, filter]) => {
-            if (!isFilterActive(filter)) return true;
-            let fieldType: string;
-            let value: unknown;
-            if (key === TITLE_KEY) {
-              fieldType = "text";
-              value = item.title ?? "";
-            } else if (key === UPDATED_KEY) {
-              fieldType = "updated";
-              value = item.updated_at;
-            } else {
-              const f = schema.find((s) => s.key === key);
-              if (!f) return true;
-              fieldType = f.type;
-              value = asData(item.data)[key];
-            }
-            return matchesFilter(fieldType, value, filter);
+      if (itemsError) {
+        if (itemsLoadedOnce.current)
+          toast.error("Could not refresh the items", {
+            description: dbErrorMessage(itemsError, "Please try again."),
           });
-        });
-        // Apply column sort
-        if (columnSort) {
-          const { key, dir } = columnSort;
-          let fieldType: string;
-          if (key === TITLE_KEY) fieldType = "text";
-          else if (key === UPDATED_KEY) fieldType = "updated";
-          else
-            fieldType = schema.find((s) => s.key === key)?.type ?? "text";
-          const sign = dir === "asc" ? 1 : -1;
-          filtered = [...filtered].sort((a, b) => {
-            let av: unknown;
-            let bv: unknown;
-            if (key === TITLE_KEY) {
-              av = a.title ?? "";
-              bv = b.title ?? "";
-            } else if (key === UPDATED_KEY) {
-              av = a.updated_at;
-              bv = b.updated_at;
-            } else {
-              av = asData(a.data)[key];
-              bv = asData(b.data)[key];
-            }
-            return sign * compareValues(av, bv, fieldType);
-          });
-        }
+        else setItemsLoadFailed(true);
+      } else {
+        itemsLoadedOnce.current = true;
+        setItemsLoadFailed(false);
+        setRows(loaded);
+        setTruncatedByLimit(truncated);
       }
-
-      setWorkingSet(filtered);
-      setTruncatedByLimit(truncated);
       setIsLoading(false);
     };
     load();
     return () => {
       cancelled = true;
     };
-  }, [user, slug, query, sort, clientSideMode, columnSort, columnFilters, reloadTick]);
+  }, [userId, slug, sort, reloadTick]);
 
-  // Cheap client-side pagination over the working set. cursorStack length is
-  // the page index, so Previous/Next just push/pop and no refetch happens on a
-  // page turn. nextCursor is a presence sentinel: only its existence matters.
-  useEffect(() => {
-    const pageIndex = cursorStack.length;
-    const start = pageIndex * PAGE_SIZE;
-    setItems(workingSet.slice(start, start + PAGE_SIZE));
-    setNextCursor(
-      workingSet.length > start + PAGE_SIZE ? { updated_at: "", id: "" } : null,
+  // Search, column filters and column sort, applied to the loaded rows.
+  const workingSet = useMemo(() => {
+    const searchableFields = fields.filter((field) =>
+      ["text", "longtext"].includes(field.type),
     );
-  }, [workingSet, cursorStack]);
+    const needle = query.trim().toLowerCase();
+    let filtered: CollectionItem[] = needle
+      ? rows.filter((item) =>
+          [
+            item.title,
+            ...searchableFields.map((field) => asData(item.data)[field.key]),
+          ].some((value) =>
+            String(value ?? "")
+              .toLowerCase()
+              .includes(needle),
+          ),
+        )
+      : rows;
 
-
-  useEffect(() => {
-    if (!user || items.length === 0) {
-      setLinkValidity(emptyLinkValidity());
-      return;
+    if (clientSideMode) {
+      // Apply column filters
+      filtered = filtered.filter((item) => {
+        return Object.entries(columnFilters).every(([key, filter]) => {
+          if (!isFilterActive(filter)) return true;
+          let fieldType: string;
+          let value: unknown;
+          if (key === TITLE_KEY) {
+            fieldType = "text";
+            value = item.title ?? "";
+          } else if (key === UPDATED_KEY) {
+            fieldType = "updated";
+            value = item.updated_at;
+          } else {
+            const f = fields.find((s) => s.key === key);
+            if (!f) return true;
+            fieldType = f.type;
+            value = asData(item.data)[key];
+          }
+          return matchesFilter(fieldType, value, filter);
+        });
+      });
+      // Apply column sort
+      if (columnSort) {
+        const { key, dir } = columnSort;
+        let fieldType: string;
+        if (key === TITLE_KEY) fieldType = "text";
+        else if (key === UPDATED_KEY) fieldType = "updated";
+        else
+          fieldType = fields.find((s) => s.key === key)?.type ?? "text";
+        const sign = dir === "asc" ? 1 : -1;
+        filtered = [...filtered].sort((a, b) => {
+          let av: unknown;
+          let bv: unknown;
+          if (key === TITLE_KEY) {
+            av = a.title ?? "";
+            bv = b.title ?? "";
+          } else if (key === UPDATED_KEY) {
+            av = a.updated_at;
+            bv = b.updated_at;
+          } else {
+            av = asData(a.data)[key];
+            bv = asData(b.data)[key];
+          }
+          return sign * compareValues(av, bv, fieldType);
+        });
+      }
     }
+    return filtered;
+  }, [rows, fields, query, clientSideMode, columnFilters, columnSort]);
+
+  // Client-side pagination over the working set. cursorStack's length is the
+  // page index, so Previous/Next push and pop and a page turn never refetches.
+  const pageIndex = cursorStack.length;
+  const items = useMemo(
+    () => workingSet.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE),
+    [workingSet, pageIndex],
+  );
+  const hasNextPage = workingSet.length > (pageIndex + 1) * PAGE_SIZE;
+
+  // The linked ids on the current page, as a stable key, so the existence
+  // check reruns when the links change rather than on every render of a page.
+  const linkIdsKey = useMemo(() => {
     const links = items
       .flatMap((item) => Object.values(asData(item.data)))
       .filter(isLinkValue);
-    const noteIds = links
-      .filter((link) => link.type === "note")
-      .map((link) => link.id);
-    const personIds = links
-      .filter((link) => link.type === "person")
-      .map((link) => link.id);
-    const itemIds = links
-      .filter((link) => link.type === "collection_item")
-      .map((link) => link.id);
+    const idsOf = (type: LinkValue["type"]) =>
+      [...new Set(links.filter((link) => link.type === type).map((link) => link.id))].sort();
+    return JSON.stringify([idsOf("note"), idsOf("person"), idsOf("collection_item")]);
+  }, [items]);
+
+  useEffect(() => {
+    const [noteIds, personIds, itemIds] = JSON.parse(linkIdsKey) as [
+      string[],
+      string[],
+      string[],
+    ];
+    if (!userId || noteIds.length + personIds.length + itemIds.length === 0) {
+      setLinkValidity(emptyLinkValidity());
+      return;
+    }
     let cancelled = false;
     const load = async () => {
       const [notes, people, linkedItems] = await Promise.all([
@@ -2742,7 +2929,7 @@ export default function CollectionDetail() {
           ? supabase
               .from("notes")
               .select("id")
-              .eq("user_id", user.id)
+              .eq("user_id", userId)
               .in("id", noteIds)
               .eq("is_trashed", false)
           : Promise.resolve({ data: [] }),
@@ -2750,7 +2937,7 @@ export default function CollectionDetail() {
           ? supabase
               .from("contacts")
               .select("id")
-              .eq("user_id", user.id)
+              .eq("user_id", userId)
               .in("id", personIds)
               .is("merged_into", null)
           : Promise.resolve({ data: [] }),
@@ -2758,7 +2945,7 @@ export default function CollectionDetail() {
           ? supabase
               .from("collection_items")
               .select("id")
-              .eq("user_id", user.id)
+              .eq("user_id", userId)
               .in("id", itemIds)
           : Promise.resolve({ data: [] }),
       ]);
@@ -2773,10 +2960,10 @@ export default function CollectionDetail() {
     return () => {
       cancelled = true;
     };
-  }, [items, user]);
+  }, [linkIdsKey, userId]);
 
   const duplicateItem = async (item: CollectionItem) => {
-    if (!user || !collection) return;
+    if (!userId || !collection) return;
     // Same container (collection + folder), Obsidian-style " N" title suffix,
     // favorite/last-viewed reset, provenance recorded in the item data.
     const siblingTitles = new Set(
@@ -2788,72 +2975,88 @@ export default function CollectionDetail() {
     const nextTitle = item.title
       ? nextDuplicateTitle(item.title, siblingTitles)
       : null;
-    const sourceData =
-      item.data && typeof item.data === "object" && !Array.isArray(item.data)
-        ? (item.data as Record<string, unknown>)
-        : {};
     const { data: created, error } = await supabase
       .from("collection_items")
       .insert({
-        user_id: user.id,
+        user_id: userId,
         collection_id: collection.id,
-        data: { ...sourceData, duplicated_from: item.id } as Json,
-        title: nextTitle,
+        // The database derives the title from the primary field, so the
+        // " 2" suffix goes there; a title column value would be overwritten.
+        data: duplicateItemData(item.data, item.id, primaryField, nextTitle) as Json,
         folder_id: item.folder_id ?? null,
         is_favorite: false,
       })
-      .select("*")
+      .select(ITEM_COLUMNS)
       .single();
     if (error || !created)
       return toast.error("Could not make a copy", {
-        description: error?.message,
+        description: dbErrorMessage(error, "Please try again."),
       });
     toast.success("Made a copy");
-    setCursorStack((current) => [...current]);
+    const copy = created as unknown as CollectionItem;
+    setRows((current) => [copy, ...current.filter((row) => row.id !== copy.id)]);
     refreshTree();
-    openItem(created as CollectionItem);
+    openItem(copy);
   };
 
   const handleDuplicateItemFromTree = useCallback(
     async (itemId: string) => {
-      const target = items.find((row) => row.id === itemId);
+      const target = rows.find((row) => row.id === itemId);
       if (target) {
         await duplicateItem(target);
         return;
       }
       const { data, error } = await supabase
         .from("collection_items")
-        .select("*")
+        .select(ITEM_COLUMNS)
         .eq("id", itemId)
+        .eq("collection_id", collection?.id ?? "")
         .maybeSingle();
       if (error || !data) {
-        toast.error("Could not make a copy", { description: error?.message });
+        toast.error("Could not make a copy", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         return;
       }
-      await duplicateItem(data as CollectionItem);
+      await duplicateItem(data as unknown as CollectionItem);
     },
     // duplicateItem is re-created per render but only closes over stable state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, treeItems, user, collection],
+    [rows, treeItems, userId, collection],
   );
 
-  const deleteItem = async (item: CollectionItem): Promise<boolean> => {
-    const { error } = await supabase
-      .from("collection_items")
-      .delete()
-      .eq("id", item.id)
-      .eq("user_id", item.user_id);
-    if (error) {
-      toast.error("Could not delete item", {
-        description: error.message,
-      });
-      return false;
-    }
-    setWorkingSet((current) => current.filter((row) => row.id !== item.id));
-    setItems((current) => current.filter((row) => row.id !== item.id));
-    toast.success("Item deleted");
-    return true;
-  };
+  // Drops a deleted item from the table and the tree, wherever the delete
+  // started (table row, tree, open item), and even when the row is not on
+  // the table's current page.
+  const removeItemLocally = useCallback(
+    (itemId: string) => {
+      setRows((current) => current.filter((row) => row.id !== itemId));
+      setTreeItems((current) => current.filter((row) => row.id !== itemId));
+      refreshTree();
+    },
+    [refreshTree],
+  );
+
+  const deleteItemById = useCallback(
+    async (itemId: string): Promise<boolean> => {
+      if (!userId) return false;
+      const { error } = await supabase
+        .from("collection_items")
+        .delete()
+        .eq("id", itemId)
+        .eq("user_id", userId);
+      if (error) {
+        toast.error("Could not delete item", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
+        return false;
+      }
+      removeItemLocally(itemId);
+      toast.success("Item deleted");
+      return true;
+    },
+    [removeItemLocally, userId],
+  );
 
   const deleteCollection = async () => {
     if (!collection) return;
@@ -2864,7 +3067,7 @@ export default function CollectionDetail() {
       .eq("user_id", collection.user_id);
     if (itemsError)
       return toast.error("Could not delete collection items", {
-        description: itemsError.message,
+        description: dbErrorMessage(itemsError, "Please try again."),
       });
     const { error } = await supabase
       .from("collections")
@@ -2873,7 +3076,7 @@ export default function CollectionDetail() {
       .eq("user_id", collection.user_id);
     if (error)
       return toast.error("Could not delete collection", {
-        description: error.message,
+        description: dbErrorMessage(error, "Please try again."),
       });
     toast.success("Collection deleted");
     navigate("/collections");
@@ -2897,18 +3100,37 @@ export default function CollectionDetail() {
       );
       return;
     }
-    const existing = items.find((item) => item.id === link.id);
+    const existing = rows.find((item) => item.id === link.id);
     if (existing) {
       openItem(existing);
       return;
     }
     const { data, error } = await supabase
       .from("collection_items")
-      .select("*")
+      .select("id, collection_id")
       .eq("id", link.id)
       .maybeSingle();
     if (error || !data) return toast.error("Linked item not found");
-    openItem(data as CollectionItem);
+    if (data.collection_id === collection?.id) {
+      openItem(data);
+      return;
+    }
+    // An item of another collection opens under its own collection's URL and
+    // fields. Opening it here showed it with this collection's fields, and
+    // saving wrote this schema's keys into it.
+    let targetSlug = allCollections.find(
+      (candidate) => candidate.id === data.collection_id,
+    )?.slug;
+    if (!targetSlug) {
+      const { data: target } = await supabase
+        .from("collections")
+        .select("slug")
+        .eq("id", data.collection_id)
+        .maybeSingle();
+      targetSlug = target?.slug;
+    }
+    if (!targetSlug) return toast.error("Linked item not found");
+    openItem(data, targetSlug);
   };
 
 
@@ -2916,7 +3138,7 @@ export default function CollectionDetail() {
   // the sidebar tree. This runs in parallel with the paged/filtered `items`
   // load and refreshes whenever an item/folder is mutated via the tree.
   useEffect(() => {
-    if (!user || !collection?.id) {
+    if (!userId || !collectionId) {
       setTreeItems([]);
       setFolders([]);
       return;
@@ -2931,8 +3153,8 @@ export default function CollectionDetail() {
           supabase
             .from("collection_items")
             .select("id, title, folder_id, is_favorite, last_viewed_at, updated_at")
-            .eq("user_id", user.id)
-            .eq("collection_id", collection.id)
+            .eq("user_id", userId)
+            .eq("collection_id", collectionId)
             .order("id")
             .range(from, to),
         ),
@@ -2940,8 +3162,8 @@ export default function CollectionDetail() {
           supabase
             .from("collection_item_folders")
             .select("id, name, parent_folder_id")
-            .eq("user_id", user.id)
-            .eq("collection_id", collection.id)
+            .eq("user_id", userId)
+            .eq("collection_id", collectionId)
             .order("name")
             .order("id")
             .range(from, to),
@@ -2957,7 +3179,7 @@ export default function CollectionDetail() {
     return () => {
       cancelled = true;
     };
-  }, [user, collection?.id, treeReloadTick, reloadTick]);
+  }, [userId, collectionId, treeReloadTick, reloadTick]);
 
   const handleToggleFavorite = useCallback(
     async (id: string, isFavorite: boolean) => {
@@ -2970,7 +3192,9 @@ export default function CollectionDetail() {
         .update({ is_favorite: isFavorite })
         .eq("id", id);
       if (error) {
-        toast.error("Could not update favorite", { description: error.message });
+        toast.error("Could not update favorite", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         refreshTree();
       }
     },
@@ -2989,7 +3213,9 @@ export default function CollectionDetail() {
         name: name.trim(),
       });
       if (error) {
-        toast.error("Could not create folder", { description: error.message });
+        toast.error("Could not create folder", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         return;
       }
       toast.success("Folder created");
@@ -3009,7 +3235,9 @@ export default function CollectionDetail() {
         .update({ name: trimmed })
         .eq("id", folderId);
       if (error) {
-        toast.error("Could not rename folder", { description: error.message });
+        toast.error("Could not rename folder", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         return;
       }
       refreshTree();
@@ -3028,7 +3256,9 @@ export default function CollectionDetail() {
         .delete()
         .eq("id", folderId);
       if (error) {
-        toast.error("Could not delete folder", { description: error.message });
+        toast.error("Could not delete folder", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         return;
       }
       toast.success("Folder deleted");
@@ -3044,7 +3274,9 @@ export default function CollectionDetail() {
         .update({ parent_folder_id: parentFolderId })
         .eq("id", folderId);
       if (error) {
-        toast.error("Could not move folder", { description: error.message });
+        toast.error("Could not move folder", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         return;
       }
       refreshTree();
@@ -3062,7 +3294,9 @@ export default function CollectionDetail() {
         .update({ folder_id: folderId })
         .eq("id", itemId);
       if (error) {
-        toast.error("Could not move item", { description: error.message });
+        toast.error("Could not move item", {
+          description: dbErrorMessage(error, "Please try again."),
+        });
         refreshTree();
       }
     },
@@ -3072,26 +3306,11 @@ export default function CollectionDetail() {
   const handleDeleteItemFromTree = useCallback(
     async (itemId: string) => {
       if (!(await confirm({ title: "Delete this item?", description: "This permanently deletes the item. It cannot be undone.", confirmLabel: "Delete", destructive: true }))) return;
-      const target = items.find((row) => row.id === itemId);
-      if (target) {
-        // A failed delete keeps the item open instead of closing it as if gone.
-        if (!(await deleteItem(target))) return;
-      } else {
-        const { error } = await supabase
-          .from("collection_items")
-          .delete()
-          .eq("id", itemId);
-        if (error) {
-          toast.error("Could not delete item", { description: error.message });
-          return;
-        }
-        toast.success("Item deleted");
-      }
+      // A failed delete keeps the item open instead of closing it as if gone.
+      if (!(await deleteItemById(itemId))) return;
       if (routeItemId === itemId) closeItem();
-      refreshTree();
     },
-    // deleteItem is defined below in the same component; ESLint can't see it.
-    [items, routeItemId, closeItem, refreshTree, confirm],
+    [routeItemId, closeItem, confirm, deleteItemById],
   );
 
   if (isLoading && !collection)
@@ -3103,6 +3322,28 @@ export default function CollectionDetail() {
       </div>
     );
 
+  if (!collection)
+    return (
+      <div className="w-full max-w-6xl">
+        <SEOHead title="Collection - Menerio" noIndex />
+        <LoadErrorState
+          title={
+            collectionLoadFailure === "missing"
+              ? "This collection could not be found."
+              : "The collection could not be loaded."
+          }
+          description={
+            collectionLoadFailure === "missing"
+              ? "It may have been renamed or deleted."
+              : undefined
+          }
+          onRetry={collectionLoadFailure === "missing" ? undefined : retryLoad}
+          backTo="/collections"
+          backLabel="Back to Collections"
+        />
+      </div>
+    );
+
   return (
     <div className="flex h-[calc(100dvh-104px)] w-full flex-col overflow-hidden rounded-md border bg-background lg:flex-row">
       <SEOHead
@@ -3111,7 +3352,6 @@ export default function CollectionDetail() {
       />
       <CollectionItemsTree
         collection={collection}
-        items={items}
         folders={folders}
         treeItems={treeItems}
         selectedItemId={routeItemId ?? null}
@@ -3172,7 +3412,7 @@ export default function CollectionDetail() {
         </div>
         {!selectedItem && (
           <div className="flex items-center gap-2">
-            <Button onClick={openNewItem}>
+            <Button onClick={() => openNewItem()}>
               <Plus className="mr-2 h-4 w-4" />
               New Item
             </Button>
@@ -3232,36 +3472,42 @@ export default function CollectionDetail() {
             if (!open) closeItem();
           }}
           onSaved={(savedItem) => {
-            const upsert = (current: CollectionItem[]) => {
-              const exists = current.some((row) => row.id === savedItem.id);
-              return exists
+            setRows((current) =>
+              current.some((row) => row.id === savedItem.id)
                 ? current.map((row) =>
                     row.id === savedItem.id ? savedItem : row,
                   )
-                : [savedItem, ...current];
-            };
-            setWorkingSet(upsert);
-            setItems((current) => upsert(current).slice(0, PAGE_SIZE));
+                : [savedItem, ...current],
+            );
+            setFetchedItem((current) =>
+              current?.id === savedItem.id ? savedItem : current,
+            );
+            // The tree lists the new item and shows titles, which the
+            // primary field decides.
+            refreshTree();
             // If this was a create, route to the newly created item so the AI
             // FAB can prime item context and further edits happen in place.
             if (selectedItem?.id === "new") {
               navigate(`/collections/${slug}/${savedItem.id}`, { replace: true });
-            } else {
-              setSelectedItem(savedItem);
             }
           }}
           onDeleted={(id) => {
-            setWorkingSet((current) => current.filter((row) => row.id !== id));
-            setItems((current) => current.filter((row) => row.id !== id));
+            removeItemLocally(id);
             closeItem();
           }}
+          folderId={selectedItem.id === "new" ? newItemFolderId : null}
           collections={allCollections}
         />
       )}
       {!selectedItem && (
       <>
-      {items.length === 0 && !query.trim() && !isLoading ? (
-
+      {itemsLoadFailed ? (
+        <LoadErrorState
+          className="min-h-[50vh]"
+          title="The items could not be loaded."
+          onRetry={retryLoad}
+        />
+      ) : rows.length === 0 && !isLoading ? (
         <div className="flex min-h-[50vh] items-center justify-center px-4 text-center">
           <div className="max-w-lg">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -3269,11 +3515,11 @@ export default function CollectionDetail() {
             </div>
             <h2 className="text-2xl font-bold font-display">No items yet</h2>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              Add your first item, or describe one to your AI assistant — it
+              Add your first item, or describe one to your AI assistant. It
               will know how to capture it here.
             </p>
             <div className="mt-6 flex flex-col items-center justify-center gap-3">
-              <Button onClick={openNewItem}>
+              <Button onClick={() => openNewItem()}>
 
                 <Plus className="mr-2 h-4 w-4" />
                 New Item
@@ -3574,10 +3820,12 @@ export default function CollectionDetail() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!nextCursor}
+              disabled={!hasNextPage}
               onClick={() =>
-                nextCursor &&
-                setCursorStack((current) => [...current, nextCursor])
+                setCursorStack((current) => [
+                  ...current,
+                  { updated_at: "", id: "" },
+                ])
               }
             >
               Next
@@ -3636,7 +3884,7 @@ export default function CollectionDetail() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (tableDeleteTarget) deleteItem(tableDeleteTarget);
+                if (tableDeleteTarget) deleteItemById(tableDeleteTarget.id);
                 setTableDeleteTarget(null);
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"

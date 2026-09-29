@@ -5,6 +5,7 @@ import {
   scoreSharedTopics,
   type Contact,
 } from "../_shared/graph-matching.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -147,28 +148,35 @@ Deno.serve(async (req: Request) => {
     }
 
     // Fetch other notes once for both person + topic matching.
+    //
+    // Every one of them, paged, and only the two fields read. One unordered
+    // `.limit(1000)` was an arbitrary sample once an account outgrew it (the
+    // Mission Control mirror alone is thousands of notes with neither field),
+    // and the stale cleanup below then deleted every shared edge to a note
+    // outside that sample, a different set on every run.
     const needOthers = people.length > 0 || topics.length > 0;
-    let otherNotes: Array<{ id: string; title: string | null; metadata: unknown }> = [];
+    let otherNotes: Array<{ id: string; title: string | null; people: unknown; topics: unknown }> = [];
     if (needOthers) {
-      const { data, error: othersError } = await supabase
+      otherNotes = await selectAllRows<{ id: string; title: string | null; people: unknown; topics: unknown }>((from, to) => supabase
         .from("notes")
-        .select("id, title, metadata")
+        .select("id, title, people:metadata->people, topics:metadata->topics")
         .eq("user_id", userId)
         .eq("is_trashed", false)
         .eq("ai_visibility", "visible")
         .neq("id", note_id)
-        .limit(1000);
-      // Same reason: an empty list would delete every shared_person and
-      // shared_topic edge of the note in the stale cleanup below.
-      if (othersError) throw new Error(`notes read failed: ${othersError.message}`);
-      otherNotes = data || [];
+        .order("id", { ascending: true })
+        .range(from, to))
+        // Same reason: an empty list would delete every shared_person and
+        // shared_topic edge of the note in the stale cleanup below.
+        .catch((othersError) => {
+          throw new Error(`notes read failed: ${(othersError as { message?: string })?.message ?? othersError}`);
+        });
     }
 
     // --- Shared person connections (alias-aware, incidental-aware) ---
     if (people.length > 0) {
       for (const other of otherNotes) {
-        const otherMeta = (other.metadata || {}) as Record<string, unknown>;
-        const otherPeople = Array.isArray(otherMeta.people) ? otherMeta.people as string[] : [];
+        const otherPeople = Array.isArray(other.people) ? other.people as string[] : [];
         if (otherPeople.length === 0) continue;
         const result = computeSharedPersons(people, myTitle, otherPeople, other.title || "", aliasMap);
         if (result) {
@@ -190,8 +198,7 @@ Deno.serve(async (req: Request) => {
     // --- Shared topic connections (stopword-aware) ---
     if (topics.length > 0) {
       for (const other of otherNotes) {
-        const otherMeta = (other.metadata || {}) as Record<string, unknown>;
-        const otherTopics = Array.isArray(otherMeta.topics) ? otherMeta.topics as string[] : [];
+        const otherTopics = Array.isArray(other.topics) ? other.topics as string[] : [];
         if (otherTopics.length === 0) continue;
         const semanticAbove05 = connections.some(
           (c) => c.target_note_id === other.id && c.connection_type === "semantic" && c.strength > 0.5,

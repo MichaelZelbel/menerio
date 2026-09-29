@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/accordion";
 import { Loader2, CheckCircle2, ExternalLink, Copy, Send, Unplug } from "lucide-react";
 import { BRAND } from "@/lib/brand";
+import { dbErrorMessage } from "@/lib/function-error";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 function generatePairingCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -57,13 +59,16 @@ export function TelegramIntegration() {
 
   const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID || "tjeapelvjlmbxafsmjef";
 
+  // Keyed on the id, not the user object: a new object for the same account
+  // (a token refresh on returning to the tab) must not reload the card.
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     (async () => {
       const { data, error } = await supabase
         .from("telegram_connections" as any)
         .select("id, user_id, telegram_chat_id, pairing_code, is_active, is_paired, created_at")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .maybeSingle();
       if (error) {
         showToast.error("Failed to load Telegram settings");
@@ -73,7 +78,7 @@ export function TelegramIntegration() {
       }
       setLoading(false);
     })();
-  }, [user]);
+  }, [userId]);
 
 
 
@@ -143,8 +148,8 @@ export function TelegramIntegration() {
       } else {
         showToast.success("Connection saved. Webhook may need manual setup.");
       }
-    } catch (err: any) {
-      showToast.error(err.message || "Failed to connect");
+    } catch (err) {
+      showToast.error(dbErrorMessage(err, "Could not save the Telegram connection. Try again."));
     } finally {
       setSaving(false);
     }
@@ -320,9 +325,9 @@ export function TelegramIntegration() {
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={() => {
-                  navigator.clipboard.writeText(connection.pairing_code!);
-                  showToast.copied();
+                onClick={async () => {
+                  if (await copyToClipboard(connection.pairing_code!)) showToast.copied();
+                  else showToast.error(COPY_FAILED_MESSAGE);
                 }}
               >
                 <Copy className="h-4 w-4" />

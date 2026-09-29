@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { escapeLike, pgOrValue, ilikeContains } from "@/lib/postgrest";
 import { extractSearchTerms, normalizeForMatch, rankNotesByTerms } from "@/lib/search-terms";
+import { dbErrorMessage } from "@/lib/function-error";
 import { Badge } from "@/components/ui/badge";
 import { Plus } from "lucide-react";
 
@@ -48,6 +49,9 @@ export function WikilinkAutocomplete({
   excludeNoteId,
 }: WikilinkAutocompleteProps) {
   const { user } = useAuth();
+  // Keyed on the id: a token refresh hands out a new user object, which
+  // re-ran the search and briefly un-settled the list.
+  const userId = user?.id;
   const [query, setQuery] = useState("");
   const [notes, setNotes] = useState<NoteResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -58,61 +62,115 @@ export function WikilinkAutocomplete({
 
   const [loading, setLoading] = useState(false);
   const [exactExists, setExactExists] = useState(false);
+  // The trimmed query the rows in `notes` answer. The search is debounced, so
+  // for 150 ms (plus the round trip) after each keystroke the list still shows
+  // the previous query's rows; Enter or Tab in that window used to link
+  // whatever note topped the stale list.
+  const [resultsFor, setResultsFor] = useState<string | null>(null);
+  // A failed search is not "no notes": offering Create there invited a
+  // duplicate of a note that exists.
+  const [searchError, setSearchError] = useState<string | null>(null);
   const reqId = useRef(0);
+  // Enter/Tab pressed before the rows caught up: confirm once they land.
+  const pendingConfirm = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
       setQuery("");
       setSelectedIndex(0);
+      setResultsFor(null);
+      setSearchError(null);
+      pendingConfirm.current = false;
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !user) return;
+    if (!isOpen || !userId) return;
     const trimmed = query.trim();
     const myReq = ++reqId.current;
     setLoading(true);
 
     const timer = setTimeout(async () => {
-      let q = supabase
-        .from("notes")
-        .select("id, title, metadata, updated_at, source_app")
-        .eq("user_id", user.id)
-        .eq("is_trashed", false)
-        .order("updated_at", { ascending: false })
-        .limit(trimmed ? 50 : 15);
+      let rows: NoteResult[] = [];
+      let failure: unknown = null;
+      try {
+        let q = supabase
+          .from("notes")
+          .select("id, title, metadata, updated_at, source_app")
+          .eq("user_id", userId)
+          .eq("is_trashed", false)
+          .order("updated_at", { ascending: false })
+          .limit(trimmed ? 50 : 15);
 
-      if (trimmed) {
-        // Include an exact-title branch so the exactly-titled note can never be
-        // truncated away by the recency-ordered contains branch.
-        q = q.or(
-          [
-            `title.ilike.${pgOrValue(escapeLike(trimmed))}`,
-            ilikeContains("title", trimmed),
-          ].join(",")
-        );
+        if (trimmed) {
+          // Include an exact-title branch so the exactly-titled note can never be
+          // truncated away by the recency-ordered contains branch.
+          q = q.or(
+            [
+              `title.ilike.${pgOrValue(escapeLike(trimmed))}`,
+              ilikeContains("title", trimmed),
+            ].join(",")
+          );
+        }
+
+        const { data, error } = await q;
+        if (error) failure = error;
+        else rows = (data || []).filter((n: any) => n.id !== excludeNoteId) as NoteResult[];
+      } catch (e) {
+        failure = e;
       }
-
-      const { data } = await q;
       if (myReq !== reqId.current) return; // stale response
 
-      const rows = (data || []).filter((n: any) => n.id !== excludeNoteId) as NoteResult[];
-      const ranked = trimmed ? rankNotes(rows, trimmed) : rows;
-      setNotes(ranked.slice(0, 15));
-      setExactExists(rows.some((n) => norm(n.title) === norm(trimmed)));
+      if (failure) {
+        setNotes([]);
+        setExactExists(false);
+        setSearchError(dbErrorMessage(failure, "Could not search your notes. Type again to retry."));
+      } else {
+        const ranked = trimmed ? rankNotes(rows, trimmed) : rows;
+        setNotes(ranked.slice(0, 15));
+        setExactExists(rows.some((n) => norm(n.title) === norm(trimmed)));
+        setSearchError(null);
+      }
+      setResultsFor(trimmed);
       setSelectedIndex(0);
       setLoading(false);
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [isOpen, query, user, excludeNoteId]);
+  }, [isOpen, query, userId, excludeNoteId]);
+
+  // True once the visible rows answer what is typed now.
+  const settled = !loading && resultsFor === query.trim();
 
   const hasCreateOption = useMemo(
-    () => !!query.trim() && !loading && !exactExists,
-    [query, loading, exactExists]
+    () => !!query.trim() && settled && !searchError && !exactExists,
+    [query, settled, searchError, exactExists]
   );
   const totalItems = notes.length + (hasCreateOption ? 1 : 0);
+
+  /** Link the row at `index` (or create the note when it is the Create row). */
+  const confirm = useCallback(
+    (index: number) => {
+      if (totalItems === 0) return;
+      if (index < notes.length) {
+        onSelect(notes[index].title, notes[index].id);
+      } else if (hasCreateOption && onCreate) {
+        onCreate(query.trim());
+      }
+      onClose();
+    },
+    [notes, query, onSelect, onCreate, onClose, totalItems, hasCreateOption]
+  );
+
+  // Enter/Tab pressed while the search was still catching up: confirm the top
+  // row of the fresh results, the one the person would have seen.
+  useEffect(() => {
+    if (!pendingConfirm.current || !settled) return;
+    pendingConfirm.current = false;
+    if (searchError) return;
+    confirm(0);
+  }, [settled, searchError, confirm]);
 
 
   // Clamp selectedIndex when results shrink
@@ -146,31 +204,25 @@ export function WikilinkAutocomplete({
       } else if (e.key === "End") {
         e.preventDefault();
         if (totalItems > 0) setSelectedIndex(totalItems - 1);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (totalItems === 0) return;
-        if (selectedIndex < notes.length) {
-          onSelect(notes[selectedIndex].title, notes[selectedIndex].id);
-        } else if (hasCreateOption && onCreate) {
-          onCreate(query.trim());
+      } else if (e.key === "Enter" || e.key === "Tab") {
+        // Tab confirms as well (common in autocomplete UIs).
+        if (!settled) {
+          // The rows on screen belong to an earlier query: wait for the
+          // search to catch up instead of linking one of them.
+          e.preventDefault();
+          pendingConfirm.current = true;
+          return;
         }
-        onClose();
+        // With nothing to pick, Tab keeps moving focus as usual.
+        if (totalItems === 0 && e.key === "Tab") return;
+        e.preventDefault();
+        confirm(selectedIndex);
       } else if (e.key === "Escape") {
         e.preventDefault();
         onClose();
-      } else if (e.key === "Tab") {
-        // Confirm with Tab as well (common in autocomplete UIs)
-        if (totalItems === 0) return;
-        e.preventDefault();
-        if (selectedIndex < notes.length) {
-          onSelect(notes[selectedIndex].title, notes[selectedIndex].id);
-        } else if (hasCreateOption && onCreate) {
-          onCreate(query.trim());
-        }
-        onClose();
       }
     },
-    [notes, selectedIndex, query, onSelect, onCreate, onClose, totalItems, hasCreateOption]
+    [selectedIndex, onClose, totalItems, settled, confirm]
   );
 
   // Close on outside click
@@ -199,15 +251,28 @@ export function WikilinkAutocomplete({
         <input aria-label="Search notes"
           ref={inputRef}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            // A pending Enter belonged to what was typed before this change.
+            pendingConfirm.current = false;
+            setQuery(e.target.value);
+          }}
           onKeyDown={handleKeyDown}
           placeholder="Search notes…"
           className="w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground/60"
         />
       </div>
       <div ref={listRef} className="max-h-52 overflow-y-auto py-1" role="listbox">
-        {notes.length === 0 && !hasCreateOption && (
-          <div className="py-3 text-xs text-center text-muted-foreground">No notes found</div>
+        {searchError ? (
+          <div role="alert" className="px-3 py-3 text-xs text-center text-destructive">
+            {searchError}
+          </div>
+        ) : (
+          notes.length === 0 &&
+          !hasCreateOption && (
+            <div className="py-3 text-xs text-center text-muted-foreground">
+              {settled ? "No notes found" : "Searching…"}
+            </div>
+          )
         )}
         {notes.map((note, i) => {
           const noteType = (note.metadata as any)?.type;

@@ -29,6 +29,8 @@ import {
 } from "./claim-search.ts";
 import { todayISO } from "./claims.ts";
 import { assistantVisibleContactIds, groupFactsBySection, labelOf, readFacts } from "./agent-facts.ts";
+import { selectAllRows } from "./paged-select.ts";
+import { matchedContactIds } from "./mc-visibility.ts";
 
 const SEMANTIC_EMBED_MODEL = "openai/text-embedding-3-small";
 
@@ -177,6 +179,10 @@ export const READ_TOOL_SCHEMAS = [
         type: "object",
         properties: {
           name: { type: "string", description: "The person's name (or nickname/alias) to look up" },
+          contact_id: {
+            type: "string",
+            description: "Optional. The id of one candidate from an earlier ambiguous answer, when several people share the name.",
+          },
         },
         required: ["name"],
         additionalProperties: false,
@@ -251,6 +257,45 @@ export async function loadPersonProfile(db: any, userId: string, contactId: stri
   };
 }
 
+export type PersonMatch =
+  | { person: { id: string; name: string } }
+  | { candidates: Array<{ id: string; name: string }>; more: boolean }
+  | { none: true };
+
+/**
+ * One person by name for get_person_profile, among the people an assistant
+ * may see: not merged away, visible, not sensitive (the rule agent_facts
+ * applies). An exact name or alias (case-insensitive) wins; otherwise one
+ * partial match on a name or alias; several are listed.
+ *
+ * It used to search every person: an ambiguous name listed hidden and
+ * sensitive people with their ids, and a single hidden match answered "hidden
+ * from AI by the user", which a missing name does not. "Tom" was ambiguous
+ * beside "Tom Becker" on every call, `%` and `_` in a name were wildcards,
+ * and aliases were read from the first 500 people only.
+ */
+export async function findPersonForAssistant(db: any, userId: string, rawName: string): Promise<PersonMatch> {
+  const needle = rawName.trim().toLowerCase();
+  if (!needle) return { none: true };
+  const people = await selectAllRows<{ id: string; name: string | null; aliases: string[] | null }>((from, to) =>
+    db.from("contacts")
+      .select("id, name, aliases")
+      .eq("user_id", userId)
+      .is("merged_into", null)
+      .eq("ai_visibility", "visible")
+      .or("is_sensitive.is.null,is_sensitive.eq.false")
+      .order("id", { ascending: true })
+      .range(from, to));
+  const namesOf = (c: { name: string | null; aliases: string[] | null }) =>
+    [c.name, ...(Array.isArray(c.aliases) ? c.aliases : [])].map((v) => String(v ?? "").trim().toLowerCase()).filter(Boolean);
+  const exact = people.filter((c) => namesOf(c).includes(needle));
+  const pool = exact.length ? exact : people.filter((c) => namesOf(c).some((v) => v.includes(needle)));
+  if (pool.length === 0) return { none: true };
+  if (pool.length === 1) return { person: { id: pool[0].id, name: String(pool[0].name ?? "") } };
+  const sorted = [...pool].sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
+  return { candidates: sorted.slice(0, 5).map((c) => ({ id: c.id, name: String(c.name ?? "") })), more: sorted.length > 5 };
+}
+
 /**
  * Embed a query with the model claims and note chunks BOTH use.
  *
@@ -307,12 +352,13 @@ export async function searchClaims(
     const contactIds = [...new Set(rows.filter((r) => r.subject_type === "contact" && r.subject_id).map((r) => r.subject_id))];
     const entityIds = [...new Set(rows.filter((r) => r.subject_type === "entity" && r.subject_id).map((r) => r.subject_id))];
     const names = new Map<string, string>();
+    // This user's rows only: the service role reads every account.
     if (contactIds.length) {
-      const { data: cs } = await db.from("contacts").select("id, name").in("id", contactIds);
+      const { data: cs } = await db.from("contacts").select("id, name").eq("user_id", userId).in("id", contactIds);
       for (const c of cs || []) names.set(c.id, c.name);
     }
     if (entityIds.length) {
-      const { data: es } = await db.from("entities").select("id, name").in("id", entityIds);
+      const { data: es } = await db.from("entities").select("id, name").eq("user_id", userId).in("id", entityIds);
       for (const e of es || []) names.set(e.id, e.name);
     }
 
@@ -326,6 +372,44 @@ export async function searchClaims(
   } catch {
     return [];
   }
+}
+
+/**
+ * People hidden from AI: marked sensitive or hidden, not merged away. Marking a
+ * person sensitive promises that their linked notes are hidden from every AI
+ * feature too (the MCP server and the REST API honour it); the chat tools
+ * returned those notes to the model anyway. Throws on a read error, so the
+ * search fails closed instead of reading as "nobody is hidden".
+ */
+async function hiddenPeopleIds(db: any, userId: string): Promise<Set<string>> {
+  // Paged: past the server's 1,000-row cap the rest read as "not hidden".
+  let rows: Array<{ id: string }>;
+  try {
+    rows = await selectAllRows<{ id: string }>((from, to) =>
+      db
+        .from("contacts")
+        .select("id")
+        .eq("user_id", userId)
+        .is("merged_into", null)
+        .or("is_sensitive.eq.true,ai_visibility.eq.hidden")
+        .order("id", { ascending: true })
+        .range(from, to));
+  } catch (error) {
+    throw new Error(`Could not load who is hidden from AI: ${(error as { message?: string })?.message ?? "error"}`);
+  }
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
+ * A note whose matched people include someone hidden from AI. Each
+ * `matched_people` entry is an object (`{ name, contact_id, canonical_name }`);
+ * compared as a plain id, `String(entry)` was "[object Object]" and no real
+ * note ever matched. matchedContactIds reads both shapes.
+ */
+export function linksHiddenPerson(metadata: unknown, hidden: Set<string>): boolean {
+  if (hidden.size === 0) return false;
+  const matched = (metadata as { matched_people?: unknown } | null)?.matched_people;
+  return matchedContactIds(matched).some((id) => hidden.has(id));
 }
 
 /**
@@ -400,12 +484,17 @@ export async function executeReadTool(
         }
         const candidateIds = Array.from(byNote.keys());
         if (candidateIds.length > 0) {
-          const { data: visible } = await db
+          const hidden = await hiddenPeopleIds(db, userId);
+          const { data: visible, error: visibleErr } = await db
             .from("notes")
-            .select("id")
+            .select("id, metadata")
+            .eq("user_id", userId)
             .in("id", candidateIds)
             .eq("ai_visibility", "visible");
-          const visibleSet = new Set((visible || []).map((n: any) => n.id));
+          if (visibleErr) throw visibleErr;
+          const visibleSet = new Set(
+            (visible || []).filter((n: any) => !linksHiddenPerson(n.metadata, hidden)).map((n: any) => n.id),
+          );
           for (const id of candidateIds) {
             if (!visibleSet.has(id)) byNote.delete(id);
           }
@@ -439,7 +528,13 @@ export async function executeReadTool(
         .order("updated_at", { ascending: false })
         .limit(10);
       if (error) return JSON.stringify({ error: error.message });
-      const results = (data || []).map((n: any) => ({
+      let hidden: Set<string>;
+      try {
+        hidden = await hiddenPeopleIds(db, userId);
+      } catch (e) {
+        return JSON.stringify({ error: (e as Error).message });
+      }
+      const results = (data || []).filter((n: any) => !linksHiddenPerson(n.metadata, hidden)).map((n: any) => ({
         id: n.id,
         title: n.title,
         content: n.content?.substring(0, 500),
@@ -466,13 +561,21 @@ export async function executeReadTool(
         // hidden from AI, or in the bin, must not reach the model through here.
         const { data: notes, error: notesErr } = await db
           .from("notes")
-          .select("id, title")
+          .select("id, title, metadata")
           .in("id", noteIds)
           .eq("user_id", userId)
           .eq("is_trashed", false)
           .eq("ai_visibility", "visible");
         if (notesErr) return JSON.stringify({ error: notesErr.message });
-        noteTitles = Object.fromEntries((notes || []).map((n: any) => [n.id, n.title]));
+        let hidden: Set<string>;
+        try {
+          hidden = await hiddenPeopleIds(db, userId);
+        } catch (e) {
+          return JSON.stringify({ error: (e as Error).message });
+        }
+        noteTitles = Object.fromEntries(
+          (notes || []).filter((n: any) => !linksHiddenPerson(n.metadata, hidden)).map((n: any) => [n.id, n.title]),
+        );
       }
       const results = (data || []).filter((m: any) => m.note_id in noteTitles).map((m: any) => ({
         id: m.id,
@@ -491,40 +594,27 @@ export async function executeReadTool(
     case "get_person_profile": {
       const rawName = String(args.name || "").trim();
       if (!rawName) return JSON.stringify({ error: "name required" });
-      const q = rawName.toLowerCase();
-      let matches: any[] = [];
-      const { data: byName } = await db
-        .from("contacts")
-        .select("id, name, aliases")
-        .eq("user_id", userId)
-        .is("merged_into", null)
-        .ilike("name", `%${q}%`)
-        .limit(5);
-      matches = byName || [];
-      if (matches.length === 0) {
-        const { data: all } = await db
-          .from("contacts")
-          .select("id, name, aliases")
-          .eq("user_id", userId)
-          .is("merged_into", null)
-          .limit(500);
-        matches = ((all || []) as any[])
-          .filter((c) => (c.aliases || []).some((a: string) => String(a).toLowerCase().includes(q)))
-          .slice(0, 5);
+      const byId = typeof args.contact_id === "string" && args.contact_id.trim() ? args.contact_id.trim() : null;
+      let found: PersonMatch;
+      try {
+        found = byId ? { person: { id: byId, name: rawName } } : await findPersonForAssistant(db, userId, rawName);
+      } catch {
+        return JSON.stringify({ error: "Could not look this person up right now." });
       }
-      if (matches.length === 0) {
-        return JSON.stringify({ found: false, message: `No person named "${rawName}" in the user's People list.` });
+      if ("none" in found) {
+        return JSON.stringify({ found: false, message: `No person named "${rawName}" among the people the user shares with assistants.` });
       }
-      if (matches.length > 1) {
+      if ("candidates" in found) {
         return JSON.stringify({
           ambiguous: true,
-          candidates: matches.map((m) => ({ id: m.id, name: m.name })),
-          hint: "Multiple people matched — call again with a more specific name.",
+          candidates: found.candidates,
+          ...(found.more ? { more_candidates: true } : {}),
+          hint: "Multiple people matched. Call again with the full name as written in a candidate.",
         });
       }
       let profile;
       try {
-        profile = await loadPersonProfile(db, userId, matches[0].id);
+        profile = await loadPersonProfile(db, userId, found.person.id);
       } catch {
         return JSON.stringify({ error: "Could not read this person's profile right now." });
       }

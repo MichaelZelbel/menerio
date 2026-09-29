@@ -14,6 +14,8 @@
  * No Deno APIs, so the Node test runner can import this directly.
  */
 
+import { isGodspeedMirror } from "./mc-source.ts";
+
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
@@ -49,15 +51,52 @@ function activeSensitive(v: McVisibility): Set<string> {
   return v.hideSensitive ? v.sensitiveIds : new Set();
 }
 
-/** A note row the key may see: not hidden, and not about a sensitive person. */
+/**
+ * The contact ids a note's `metadata.matched_people` names.
+ *
+ * process-note, enrich-people and the contact merge store each entry as an
+ * object, `{ name, contact_id, canonical_name }` (or `{ name, is_self }` for
+ * the owner). The check below used to compare `String(entry)` with the
+ * sensitive ids, and `String({...})` is "[object Object]": no real note ever
+ * matched, so a note about a person marked sensitive came back through every
+ * endpoint here. A bare id string is still read as an id.
+ */
+export function matchedContactIds(matched: unknown): string[] {
+  if (!Array.isArray(matched)) return [];
+  const ids: string[] = [];
+  for (const entry of matched) {
+    if (typeof entry === "string") {
+      if (entry) ids.push(entry);
+    } else if (entry && typeof entry === "object") {
+      const id = (entry as { contact_id?: unknown }).contact_id;
+      if (typeof id === "string" && id) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * A note row the key may see: not hidden, and not about a sensitive person.
+ *
+ * A mirrored mission control file is the exception to the second rule. It is a
+ * copy of a file Mission Control wrote and still holds, so leaving it out hides
+ * nothing, while its sync reads, updates and re-creates these notes through this
+ * API: 597 of 1,223 mirror notes name someone (2026-09-30), and marking one of
+ * those people sensitive would have made each of them vanish from the list and
+ * answer 404 to every update. "Hidden from AI" set on the note itself still holds.
+ */
 export function noteIsVisible(
-  row: { ai_visibility?: string | null; metadata?: { matched_people?: unknown } | null } | null | undefined,
+  row: {
+    ai_visibility?: string | null;
+    source_app?: string | null;
+    metadata?: { matched_people?: unknown } | null;
+  } | null | undefined,
   v: McVisibility,
 ): boolean {
   if (!row || row.ai_visibility === "hidden") return false;
+  if (isGodspeedMirror(row.source_app)) return true;
   const ids = activeSensitive(v);
-  const matched = row.metadata?.matched_people;
-  if (ids.size > 0 && Array.isArray(matched) && matched.some((id) => ids.has(String(id)))) return false;
+  if (ids.size > 0 && matchedContactIds(row.metadata?.matched_people).some((id) => ids.has(id))) return false;
   return true;
 }
 

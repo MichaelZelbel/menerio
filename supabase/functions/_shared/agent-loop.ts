@@ -159,8 +159,15 @@ export async function runAgentLoop(
     const synthReply = (synth as any).result?.choices?.[0]?.message?.content?.trim();
     if (synthReply) return { reply: synthReply, toolResults, credits: lastCredits };
   } catch (err: any) {
-    if (err?.message === "INSUFFICIENT_CREDITS") throw err;
+    // Same rule as a failed call inside the loop: once a tool has run, a note
+    // may already be edited or created, and throwing here dropped that from
+    // the response (the 402 carried no note_edit, so the client never learned
+    // of the write and a resend repeated it).
+    if (err?.message === "INSUFFICIENT_CREDITS" && toolResults.length === 0) throw err;
     console.error(`[agent-loop] ${p.creditFeature} synthesis error:`, err?.message);
+    if (err?.message === "INSUFFICIENT_CREDITS") {
+      return { reply: INTERRUPTED_REPLY, toolResults, credits: lastCredits };
+    }
   }
 
   return { reply: BUDGET_FALLBACK_REPLY, toolResults, credits: lastCredits };

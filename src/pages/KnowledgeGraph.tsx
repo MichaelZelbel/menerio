@@ -6,6 +6,7 @@ import { OrphanNotesDetector } from "@/components/graph/OrphanNotesDetector";
 import { BridgeNotesHighlighter, TopicClustersView, useBridgeNoteIds } from "@/components/graph/GraphAnalytics";
 import { GraphExportButton } from "@/components/graph/GraphExport";
 import { RebuildGraphButton } from "@/components/graph/RebuildGraphButton";
+import { dbErrorMessage } from "@/lib/function-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -142,27 +143,48 @@ export default function KnowledgeGraph() {
     labelMode: "auto",
   });
 
-  // Fetch graph data from edge function
-  const { data: graphData, isLoading } = useGraphData({
+  // Fetch graph data from edge function. Minimum strength is deliberately not
+  // part of the request: edges are filtered by it below, and sending it made
+  // every 0.1 step of the slider a new get-graph-data call that reset the
+  // canvas to "Building graph…".
+  const { data: graphData, isLoading, isError, error: graphError, refetch: refetchGraph } = useGraphData({
     limit: 200,
-    min_strength: filters.minStrength,
     include_hidden: filters.showHiddenFromAi,
   });
 
-  // Measure container
+  // Measure the canvas container. It is the flex-1 column between the side
+  // panels, so its width already excludes them; it is observed directly
+  // because opening a panel changes it without any window resize.
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
     const measure = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        setDimensions({
-          width: rect.width || 800,
-          height: fullscreen ? window.innerHeight - 10 : Math.max(rect.height, 550),
-        });
-      }
+      const rect = el.getBoundingClientRect();
+      const next = {
+        width: Math.floor(rect.width) || 800,
+        height: fullscreen ? window.innerHeight - 10 : Math.max(rect.height, 550),
+      };
+      setDimensions((prev) => (prev.width === next.width && prev.height === next.height ? prev : next));
     };
     measure();
     window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    // Only a width change re-measures: the canvas itself sets the container's
+    // height, so reacting to height would feed the canvas back into itself.
+    let lastWidth = -1;
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver((entries) => {
+            const width = Math.floor(entries[0]?.contentRect.width ?? 0);
+            if (width === lastWidth) return;
+            lastWidth = width;
+            measure();
+          });
+    observer?.observe(el);
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
   }, [fullscreen]);
 
   // Build filtered graph for ForceGraph2D
@@ -729,7 +751,7 @@ export default function KnowledgeGraph() {
               </TabsContent>
 
               <TabsContent value="analytics" className="flex-1 overflow-y-auto p-3 space-y-4 mt-0">
-                <OrphanNotesDetector />
+                <OrphanNotesDetector compact />
                 <BridgeNotesHighlighter compact />
                 <TopicClustersView />
               </TabsContent>
@@ -744,6 +766,12 @@ export default function KnowledgeGraph() {
               <Loader2 className="h-6 w-6 animate-spin mr-2" />
               Building graph…
             </div>
+          ) : isError && !graphData ? (
+            <div role="alert" className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 text-center px-4">
+              <p className="text-sm font-medium text-foreground">Your note graph could not be loaded</p>
+              <p className="text-xs">{dbErrorMessage(graphError, "Something went wrong while building it. Try again.")}</p>
+              <Button variant="outline" size="sm" onClick={() => void refetchGraph()}>Try again</Button>
+            </div>
           ) : processedGraph.nodes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <FileText className="h-8 w-8" />
@@ -755,7 +783,7 @@ export default function KnowledgeGraph() {
               <ForceGraph2D
                 ref={graphRef}
                 graphData={processedGraph}
-                width={dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0)}
+                width={dimensions.width}
                 height={dimensions.height}
                 nodeCanvasObject={nodeCanvasObject}
                 nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
@@ -797,7 +825,7 @@ export default function KnowledgeGraph() {
                     cx: center?.x ?? 0,
                     cy: center?.y ?? 0,
                     zoom: zoom || 1,
-                    w: dimensions.width - (showFilters ? 224 : 0) - (selectedNode ? 288 : 0),
+                    w: dimensions.width,
                     h: dimensions.height,
                   };
                 }}

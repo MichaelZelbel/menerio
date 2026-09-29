@@ -234,6 +234,7 @@ async function fetchImageSafely(startUrl: string): Promise<Response | null> {
     });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
+      await res.body?.cancel().catch(() => {});
       if (!loc) return null;
       // A malformed Location header is the remote page's problem, not a 500 of ours.
       try {
@@ -280,16 +281,57 @@ async function resolveHeroImage(
 
   try {
     const res = await fetchImageSafely(resolved);
-    if (!res || !res.ok) return null;
+    if (!res) return null;
     const mime = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     const ext = HERO_MIME_TO_EXT[mime];
-    if (!ext) return null;
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength === 0 || buf.byteLength > MAX_HERO_BYTES) return null;
-    return { bytes: new Uint8Array(buf), mime, ext };
+    if (!res.ok || !ext) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const bytes = await readBodyCapped(res, MAX_HERO_BYTES);
+    if (!bytes || bytes.byteLength === 0) return null;
+    return { bytes, mime, ext };
   } catch {
     return null;
   }
+}
+
+/**
+ * The body as bytes, or null once it passes `maxBytes`.
+ *
+ * The hero URL comes from the clipped page's og:image, so the page's author
+ * chooses what is downloaded. `res.arrayBuffer()` read all of it before the
+ * 5 MB check ran, so an image URL streaming hundreds of megabytes inside the
+ * 5 s timeout could exhaust the isolate's memory after the snapshot was
+ * already stored: the clip failed and left an orphaned upload behind.
+ */
+async function readBodyCapped(res: Response, maxBytes: number): Promise<Uint8Array | null> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => {});
+    return null;
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
 }
 
 Deno.serve(async (req) => {

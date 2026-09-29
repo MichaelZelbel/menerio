@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isAllowedReturnUrl } from "./return-url.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -83,6 +84,11 @@ Deno.serve(async (req) => {
     if (action === "start_auth") {
       const returnUrl = String(body.return_url || "");
       if (!/^https?:\/\//.test(returnUrl)) return jsonResponse({ error: "return_url required" }, 400);
+      // Google's authorization code travels to return_url. Any address was
+      // accepted, so someone could start an authorization from their own
+      // account with a page of their own as return_url, send the consent
+      // link to someone else and collect the code for that person's Drive.
+      if (!isAllowedReturnUrl(returnUrl)) return jsonResponse({ error: "return_url not allowed" }, 400);
 
       const res = await fetch(`${GATEWAY}/api/v1/app-users/oauth2/authorize`, {
         method: "POST",

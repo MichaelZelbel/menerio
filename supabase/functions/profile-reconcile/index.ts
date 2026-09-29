@@ -74,7 +74,7 @@ type Rel = {
   created_at: string;
 };
 
-type Contact = { id: string; name: string; merged_into: string | null };
+type Contact = { id: string; name: string; merged_into: string | null; ai_visibility?: string | null; is_sensitive?: boolean | null };
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -105,7 +105,7 @@ async function reconcileUser(db: any, userId: string) {
   // relationships look like dangling endpoints that step 1 deletes.
   const [contactRows, { data: profileRow }, aliasRows] = await Promise.all([
     selectAllRows<Contact>((from, to) =>
-      db.from("contacts").select("id, name, merged_into").eq("user_id", userId).order("id").range(from, to)
+      db.from("contacts").select("id, name, merged_into, ai_visibility, is_sensitive").eq("user_id", userId).order("id").range(from, to)
     ),
     db.from("profiles").select("display_name").eq("id", userId).maybeSingle(),
     selectAllRows<{ alias: string }>((from, to) =>
@@ -136,6 +136,11 @@ async function reconcileUser(db: any, userId: string) {
   }
   const selfDuplicateIds = new Set<string>();
   for (const contact of contacts.values()) {
+    // Left alone: a merged-away record (the merge already moved what it held;
+    // it is not a person any more), and a person the owner hid from AI or
+    // marked sensitive. Self is always shown to assistants, so folding one of
+    // those moved their facts where every assistant reads them, unasked.
+    if (contact.merged_into || contact.ai_visibility !== "visible" || contact.is_sensitive === true) continue;
     const key = normalizeName(contact.name || "");
     if (key && selfNames.has(key)) selfDuplicateIds.add(contact.id);
   }
@@ -471,12 +476,14 @@ serve(async (req) => {
 
     if (scope === "all") {
       if (!isServiceCall) return jsonResponse({ error: "forbidden" }, 403);
-      const { data: users } = await service.from("profiles").select("id").limit(500);
+      // Every account, not the first 500: past that the sweep never reached the rest.
+      const users = await selectAllRows<{ id: string }>((from, to) =>
+        service.from("profiles").select("id").order("id").range(from, to));
       const run = async () => {
-        for (const user of (users || []) as Array<{ id: string }>) await runTracked(user.id);
+        for (const user of users) await runTracked(user.id);
       };
       background(run());
-      return jsonResponse({ started: true, users: users?.length || 0 });
+      return jsonResponse({ started: true, users: users.length });
     }
 
     let userId: string | null = null;

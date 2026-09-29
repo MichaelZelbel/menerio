@@ -36,8 +36,7 @@ export interface NoteConnection {
   updated_at: string;
 }
 
-/** Fetch the full knowledge graph for the current user */
-export function useGraphData(options?: {
+export interface GraphDataOptions {
   limit?: number;
   min_strength?: number;
   connection_types?: string[];
@@ -45,13 +44,16 @@ export function useGraphData(options?: {
   topic?: string;
   person?: string;
   include_hidden?: boolean;
-}) {
-  const { user } = useAuth();
+}
 
-  return useQuery<GraphData>({
-    queryKey: ["graph-data", user?.id, options],
-    enabled: !!user,
-    queryFn: async () => {
+/**
+ * The query for the full graph, shared by the hook and by callers that need
+ * the graph once on demand (queryClient.fetchQuery), such as the export.
+ */
+export function graphDataQuery(userId: string | undefined, options?: GraphDataOptions) {
+  return {
+    queryKey: ["graph-data", userId, options] as const,
+    queryFn: async (): Promise<GraphData> => {
       const res = await supabase.functions.invoke("get-graph-data", {
         body: options || {},
       });
@@ -59,6 +61,16 @@ export function useGraphData(options?: {
       return res.data as GraphData;
     },
     staleTime: 60_000,
+  };
+}
+
+/** Fetch the full knowledge graph for the current user */
+export function useGraphData(options?: GraphDataOptions) {
+  const { user } = useAuth();
+
+  return useQuery<GraphData>({
+    ...graphDataQuery(user?.id, options),
+    enabled: !!user,
   });
 }
 

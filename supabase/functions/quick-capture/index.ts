@@ -5,7 +5,7 @@ import {
   getEmbeddingWithCredits,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
-import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat, sourceIsDataRule, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { QUICK_CAPTURE_METADATA_PROMPT, metadataFieldContract } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -28,6 +28,15 @@ function json(body: unknown, status = 200) {
 
 // (system prompt lives in `_shared/llm-defaults.ts` so the Admin Dashboard can override it)
 
+/**
+ * The most note text the metadata call reads, the same budget process-note's
+ * metadata call uses. The whole body used to go to the model: one long import
+ * item could cost far more than the 1,000-token reserve the balance check asks
+ * for, and what the allowance could not cover was absorbed as overdraft. The
+ * note itself is stored whole; the analysis job reads it again later.
+ */
+const MAX_AI_INPUT_CHARS = 24_000;
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -46,9 +55,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .from("connected_apps")
         .select("user_id, app_name, is_active")
         .eq("key_hash", await sha256Hex(apiKey))
-        .single();
+        .maybeSingle();
 
-      if (appErr || !app || !app.is_active) {
+      // A failed read is not a verdict on the key. `.single()` folded a
+      // statement timeout into "unauthorized", and a client told its key is
+      // bad stops sending.
+      if (appErr) {
+        console.error("quick-capture: key lookup failed:", appErr);
+        return json({ error: "Could not check this API key right now. Try again in a moment." }, 503);
+      }
+      if (!app || !app.is_active) {
         return json({ error: "unauthorized" }, 401);
       }
       userId = app.user_id;
@@ -73,8 +89,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // the note once there is allowance again.
     const balance = await checkBalance(supabase, userId);
 
-    const body = await req.json();
-    const content = (body.content || "").trim();
+    // A malformed body is the caller's mistake: 400, not a 500 that a client
+    // retries.
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "Body must be JSON" }, 400);
+    }
+    if (body?.content != null && typeof body.content !== "string") {
+      return json({ error: "content must be a string" }, 400);
+    }
+    const content = (body?.content || "").trim();
     if (!content) return json({ error: "content is required" }, 400);
 
     const source = body.source || sourceName;
@@ -107,23 +133,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
           db: supabase,
           userId,
           callSite: "quick-capture.metadata",
-          messages: [{ role: "user", content }],
+          messages: [{ role: "user", content: content.slice(0, MAX_AI_INPUT_CHARS) }],
           defaults: {
             provider: "openrouter",
             model: "deepseek/deepseek-v4-flash",
             systemPrompt: QUICK_CAPTURE_METADATA_PROMPT,
           },
-          systemSuffix: [metadataFieldContract(), sourceLanguageRule()].join("\n\n"),
+          systemSuffix: [metadataFieldContract(), sourceLanguageRule(), sourceIsDataRule()].join("\n\n"),
           callOptions: { response_format: { type: "json_object" } },
         }),
       ]);
 
-      let extracted: Record<string, unknown> = {};
-      try {
-        extracted = JSON.parse(chatResult.content);
-      } catch {
-        extracted = { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
-      }
+      // parseModelJson also reads a reply wrapped in a ```json fence, which
+      // this model sometimes sends; anything but an object gets the default.
+      const parsed = parseModelJson<Record<string, unknown>>(chatResult.content);
+      const extracted: Record<string, unknown> =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? parsed
+          : { topics: ["uncategorized"], type: "observation", sentiment: "neutral" };
 
       metadata = { ...extracted, is_quick_capture: true, source };
       credits = chatResult.credits;

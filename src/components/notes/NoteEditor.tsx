@@ -114,6 +114,8 @@ import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml }
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { resolveAttachmentImagesInHtml } from "@/lib/upload-attachment";
 import { buildTitleMap, resolveWikilinksInHtml } from "@/lib/wikilink-resolver";
+import { escapeLike, fetchAllPages, pgOrValue } from "@/lib/postgrest";
+import { dbErrorMessage } from "@/lib/function-error";
 import {
   FLUSH_REQUEST_EVENT,
   FLUSH_DONE_EVENT,
@@ -311,12 +313,16 @@ async function syncManualLinks(
   try {
     let allTargetIds = [...linkedNoteIds];
     if (rawTitles.length > 0) {
-      const { data: matches } = await supabase
+      // Case-insensitive, as the editor resolves [[title]]; and a failed
+      // lookup stops here. It used to read as "no such notes", and the links
+      // those titles stood for were then deleted below.
+      const { data: matches, error: matchError } = await supabase
         .from("notes")
         .select("id, title")
         .eq("user_id", userId)
         .eq("is_trashed", false)
-        .in("title", rawTitles);
+        .or(rawTitles.map((t) => `title.ilike.${pgOrValue(escapeLike(t))}`).join(","));
+      if (matchError) throw matchError;
       const titleMap = new Map<string, string>();
       (matches || []).forEach((r: any) => {
         if (r.title) titleMap.set(String(r.title).toLowerCase(), r.id);
@@ -328,12 +334,13 @@ async function syncManualLinks(
     }
     allTargetIds = [...new Set(allTargetIds)].filter((id) => id !== noteId);
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from("note_connections" as any)
       .select("id, target_note_id")
       .eq("source_note_id", noteId)
       .eq("connection_type", "manual_link")
       .eq("user_id", userId);
+    if (existingError) throw existingError;
 
     const existingMap = new Map((existing || []).map((e: any) => [e.target_note_id, e.id]));
     const newTargets = new Set(allTargetIds);
@@ -358,7 +365,15 @@ async function syncManualLinks(
       }));
 
     if (toUpsert.length > 0) {
-      await supabase.from("note_connections" as any).insert(toUpsert);
+      // Two autosaves close together both read "not linked yet" and both
+      // insert; a plain insert then failed on the unique key for the whole
+      // batch, so a link added in the second save stayed missing until the
+      // next edit (five 409s on one account on 2026-09-29). An existing link
+      // is simply kept.
+      const { error } = await supabase
+        .from("note_connections" as any)
+        .upsert(toUpsert, { onConflict: "source_note_id,target_note_id,connection_type", ignoreDuplicates: true });
+      if (error) throw error;
     }
   } catch (err) {
     console.error("Failed to sync manual links:", err);
@@ -418,14 +433,18 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     queryKey: ["wikilink-title-map", user?.id],
     enabled: !!user,
     staleTime: 60_000,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("notes")
-        .select("id, title")
-        .eq("user_id", user!.id)
-        .eq("is_trashed", false);
-      return (data || []) as Array<{ id: string; title: string | null }>;
-    },
+    // Paged: an unpaged select stops at PostgREST's 1,000-row cap, and in a
+    // larger vault every [[Title]] past it rendered as "No note found".
+    queryFn: () =>
+      fetchAllPages<{ id: string; title: string | null }>((from, to) =>
+        supabase
+          .from("notes")
+          .select("id, title")
+          .eq("user_id", user!.id)
+          .eq("is_trashed", false)
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
     select: buildTitleMap,
   });
   const titleMapRef = useRef(titleMap);
@@ -614,9 +633,12 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   const editor = useEditor({
     extensions: [
+      // Code blocks on: with them off, a fenced block loaded as lines of
+      // inline code (the fence and language were lost on save) and the
+      // toolbar's "Code block" button threw. The converter writes them back
+      // as fences.
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
-        codeBlock: false,
         link: false,
         underline: false,
       }),
@@ -728,8 +750,13 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           const doc = e.getJSON();
           const linkedIds = extractWikilinkIds(doc);
           const rawTitles = extractRawWikilinkTitles(e);
-          syncManualLinks(note.id, user.id, linkedIds, rawTitles);
-          queryClient.invalidateQueries({ queryKey: ["backlinks"] });
+          // Refresh the link panels and the local graph once the links are
+          // written; invalidating before that refetched the old links.
+          void syncManualLinks(note.id, user.id, linkedIds, rawTitles).then(() => {
+            for (const key of ["backlinks", "outgoing-links", "note-connections", "note-neighborhood"]) {
+              queryClient.invalidateQueries({ queryKey: [key] });
+            }
+          });
         }
       }, 800);
 
@@ -776,13 +803,34 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const flushSaves = () => {
       const noteId = activeNoteIdRef.current;
       const pendingContent = queuedContentRef.current ?? pendingSaveContentRef.current;
+      // The callbacks settle the header's status after a flush on tab switch,
+      // which cancels the debounce timer: without them it said "Saving..."
+      // until the next keystroke although the text was saved. (After unmount
+      // they do not run; the hook's own error toast still does.)
+      const settled = {
+        onSuccess: () => {
+          setSaveStatus("saved");
+          setLastSavedAt(Date.now());
+        },
+        onError: () => setSaveStatus("error"),
+      };
       if (pendingContent !== null && pendingContent !== lastSavedContentRef.current) {
-        updateNote.mutate({ id: noteId, content: pendingContent });
+        updateNote.mutate({ id: noteId, content: pendingContent }, {
+          ...settled,
+          onSuccess: () => {
+            if (activeNoteIdRef.current === noteId) lastSavedContentRef.current = pendingContent;
+            settled.onSuccess();
+          },
+        });
         pendingSaveContentRef.current = null;
+      } else if (pendingContent !== null) {
+        // Already saved; only the debounce timer was left.
+        pendingSaveContentRef.current = null;
+        settled.onSuccess();
       }
       const pendingTitle = pendingSaveTitleRef.current;
       if (pendingTitle !== null) {
-        updateNote.mutate({ id: noteId, title: pendingTitle });
+        updateNote.mutate({ id: noteId, title: pendingTitle }, settled);
         pendingSaveTitleRef.current = null;
       }
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
@@ -1260,15 +1308,48 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     onNoteDeleted?.();
   };
 
+  // Tag edits build on the newest tags, not on `note.tags`: that only changes
+  // when a save comes back, so two quick edits (removing two tags) both
+  // started from the same list and the second one brought the first back.
+  // Server values are taken over again once no tag write is in flight.
+  const tagsRef = useRef<string[]>(note.tags || []);
+  const serverTagsRef = useRef<string[]>(note.tags || []);
+  const tagWritesInFlight = useRef(0);
+  useEffect(() => {
+    serverTagsRef.current = note.tags || [];
+    if (tagWritesInFlight.current === 0) tagsRef.current = note.tags || [];
+  }, [note.tags]);
+  const writeTags = (next: string[]) => {
+    tagsRef.current = next;
+    tagWritesInFlight.current += 1;
+    updateNote
+      .mutateAsync({ id: note.id, tags: next })
+      .then((saved) => {
+        if (tagWritesInFlight.current === 1 && saved?.tags) tagsRef.current = saved.tags;
+      })
+      .catch(() => {
+        // useUpdateNote reports the failure; build the next edit on what is saved.
+        if (tagWritesInFlight.current === 1) tagsRef.current = serverTagsRef.current;
+      })
+      .finally(() => {
+        tagWritesInFlight.current -= 1;
+      });
+  };
+  const hasTag = (tag: string) => tagsRef.current.some((t) => t.toLowerCase() === tag.toLowerCase());
+
   const addTag = () => {
     const tag = tagInput.trim().toLowerCase();
-    if (!tag || note.tags?.includes(tag)) { setTagInput(""); return; }
-    updateNote.mutate({ id: note.id, tags: [...(note.tags || []), tag] });
+    if (!tag || hasTag(tag)) { setTagInput(""); return; }
+    writeTags([...tagsRef.current, tag]);
     setTagInput("");
   };
 
+  // Case-insensitive: tags keep their case from imports, bulk actions and
+  // capture tools, while the topic chips pass them lowercased, so "Work"
+  // could never be removed.
   const removeTag = (tag: string) => {
-    updateNote.mutate({ id: note.id, tags: (note.tags || []).filter((t) => t !== tag) });
+    const target = tag.toLowerCase();
+    writeTags(tagsRef.current.filter((t) => t.toLowerCase() !== target));
   };
 
   const logGroupInteraction = async () => {
@@ -1283,7 +1364,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       interaction_date: note.created_at,
     });
     if (error) {
-      showToast.error(error.message);
+      showToast.error(dbErrorMessage(error, "Could not log the interaction. Please try again."));
       return;
     }
     queryClient.invalidateQueries({ queryKey: ["contact-interactions"] });
@@ -1775,9 +1856,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
           }}
           tags={note.tags || []}
           onAddTag={(tag) => {
-            if (!note.tags?.includes(tag)) {
-              updateNote.mutate({ id: note.id, tags: [...(note.tags || []), tag] });
-            }
+            if (!hasTag(tag)) writeTags([...tagsRef.current, tag]);
           }}
           onRemoveTag={removeTag}
           showTagInput={showTagInput}
@@ -1816,6 +1895,18 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 <span title={syncLog?.error_message || "Sync error"}>
                   <AlertCircle className="h-2.5 w-2.5 text-destructive" />
                 </span>
+              )}
+              {/* An open conflict holds this note's GitHub saves back until it is resolved. */}
+              {!isSyncing && syncStatus === "conflict" && (
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-warning hover:underline"
+                  title="This note changed on GitHub and here. Saves to GitHub wait until you choose a version."
+                  onClick={() => navigate("/dashboard/settings?tab=github")}
+                >
+                  <AlertCircle className="h-2.5 w-2.5" />
+                  Sync conflict
+                </button>
               )}
               {!isSyncing && !syncStatus && <span className="text-muted-foreground/50">Not synced</span>}
             </span>

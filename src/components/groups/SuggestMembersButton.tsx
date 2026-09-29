@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAICredits } from "@/hooks/useAICredits";
 import { showToast } from "@/lib/toast";
+import { functionErrorMessage } from "@/lib/function-error";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 
 type SuggestMembersResult = {
@@ -18,7 +19,7 @@ export function SuggestMembersButton({ groupId }: { groupId: string }) {
   const suggestMembers = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke<SuggestMembersResult>("suggest-group-members", { body: { group_id: groupId } });
-      if (error) throw error;
+      if (error) throw new Error(await functionErrorMessage(error, "Could not suggest members."));
       return data || { suggestions_added: 0, auto_applied: 0 };
     },
     onSuccess: (result) => {

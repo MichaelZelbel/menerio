@@ -837,7 +837,7 @@ export const CALL_SITE_DEFAULTS: CallSiteDefault[] = [
     call_site: "analyze-media.vision",
     description: "Describes an image (vision model).",
     provider: "mistral",
-    model: "pixtral-12b-2409",
+    model: "ministral-14b-2512",
     system_prompt: ANALYZE_MEDIA_VISION_PROMPT,
     temperature: null, max_tokens: 800, extra_options: JSON_OBJECT, enabled: true, placeholders: [],
   },

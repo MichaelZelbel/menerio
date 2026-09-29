@@ -371,6 +371,29 @@ async function filterSuppressed(supabase: SupabaseClient, userId: string, sugges
   return suggestions.filter((s) => !s.suppression_key || !blocked.has(s.suppression_key));
 }
 
+export type ParticipantRow = { id: string; name: string; ai_visibility?: string | null; is_sensitive?: boolean | null };
+
+/**
+ * Who of a moment's people the extraction model may hear about. The moment's
+ * words go to a model, so it follows the rule ai_can_see applies to a moment:
+ * a moment with a person marked sensitive stays away from AI while
+ * hide_sensitive_from_ai is on (the default), and a person hidden from AI is in
+ * no AI pipeline, so they are not named to the model as a participant and no
+ * fact is written about them from it. Both used to be sent, and facts about
+ * them written back. Pure.
+ */
+export function participantsForModel(
+  contacts: ParticipantRow[],
+  hideSensitive: boolean,
+): { people: Array<{ contact_id: string; canonical_name: string }> } | { skip: "sensitive_participant" } {
+  if (hideSensitive && contacts.some((c) => c.is_sensitive === true)) return { skip: "sensitive_participant" };
+  return {
+    people: contacts
+      .filter((c) => c.ai_visibility === "visible")
+      .map((c) => ({ contact_id: c.id, canonical_name: c.name })),
+  };
+}
+
 export type MomentExtractionResult = {
   scanned: number;
   suggestions_created: number;
@@ -428,16 +451,26 @@ export async function extractProfileFromMoment(
     return { ...empty, skipped_reason: "no_participants" };
   }
 
-  const { data: contacts } = await supabase
+  const { data: contacts, error: contactsErr } = await supabase
     .from("contacts")
-    .select("id, name")
+    .select("id, name, ai_visibility, is_sensitive")
     .eq("user_id", userId)
     .in("id", participantIds)
     .is("merged_into", null);
-  const matchedPeople = (contacts || []).map((c: any) => ({
-    contact_id: c.id as string,
-    canonical_name: c.name as string,
-  }));
+  if (contactsErr) return { ...empty, skipped_reason: "contacts_unreadable" };
+  let hideSensitive = true;
+  if ((contacts || []).some((c: any) => c.is_sensitive === true)) {
+    const { data: pref, error: prefErr } = await supabase
+      .from("mcp_preferences")
+      .select("hide_sensitive_from_ai")
+      .eq("user_id", userId)
+      .maybeSingle();
+    // Fail closed: an unread setting counts as "hide".
+    hideSensitive = prefErr ? true : (pref as any)?.hide_sensitive_from_ai !== false;
+  }
+  const participants = participantsForModel((contacts || []) as ParticipantRow[], hideSensitive);
+  if ("skip" in participants) return { ...empty, skipped_reason: participants.skip };
+  const matchedPeople = participants.people;
   if (matchedPeople.length === 0) return { ...empty, skipped_reason: "no_matched_contacts" };
 
   // 2. Provenance — affects confidence cap.

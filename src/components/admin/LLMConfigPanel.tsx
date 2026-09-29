@@ -75,9 +75,11 @@ const MODEL_PRESETS: Record<Provider, { value: string; label: string }[]> = {
     { value: "gpt-4.1", label: "gpt-4.1" },
   ],
   anthropic: [
-    { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
-    { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
-    { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
+    // The Claude 3 models listed here earlier are retired. The router drops
+    // temperature for models that reject it (_shared/llm-router.ts).
+    { value: "claude-sonnet-5", label: "Claude Sonnet 5" },
+    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+    { value: "claude-opus-5-5", label: "Claude Opus 5.5" },
   ],
   gemini: [
     { value: "gemini-2.0-flash", label: "gemini-2.0-flash" },
@@ -86,7 +88,7 @@ const MODEL_PRESETS: Record<Provider, { value: string; label: string }[]> = {
   ],
   mistral: [
     { value: "mistral-ocr-latest", label: "Mistral OCR (PDF/Image)" },
-    { value: "pixtral-12b-2409", label: "Pixtral 12B (Vision)" },
+    { value: "ministral-14b-2512", label: "Ministral 14B (Vision)" },
     { value: "pixtral-large-latest", label: "Pixtral Large (Vision)" },
     { value: "mistral-small-latest", label: "Mistral Small" },
     { value: "mistral-medium-latest", label: "Mistral Medium" },

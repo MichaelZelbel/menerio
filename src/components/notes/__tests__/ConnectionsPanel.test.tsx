@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { ConnectionsPanel } from "../ConnectionsPanel";
 
 // Regression for the spend audit of 2026-09-11: opening a note bought one
@@ -110,5 +110,31 @@ describe("ConnectionsPanel daily cache", () => {
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await screen.findByText("Recovered insight");
     expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ConnectionsPanel related people", () => {
+  function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location">{location.pathname}</div>;
+  }
+
+  it("opens the person's own page, not the People list", async () => {
+    invokeMock.mockResolvedValue({
+      data: {
+        ...payload("With people"),
+        related_contacts: [{ id: "c-42", name: "Anna Example", relationship: "friend" }],
+      },
+      error: null,
+    });
+    render(
+      <MemoryRouter>
+        <ConnectionsPanel noteId="n1" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /anna example/i }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/dashboard/people/c-42");
   });
 });

@@ -57,17 +57,24 @@ const fact = (over: Partial<ProfileFact> = {}): ProfileFact => ({
   ...over,
 });
 
-function renderSection(facts: ProfileFact[] = []) {
+function renderSection(
+  facts: ProfileFact[] = [],
+  categoryOver: Partial<ProfileCategory> = {},
+  today?: () => string,
+) {
   const actions: { [K in keyof FactActions]: ReturnType<typeof vi.fn> } = {
     add: vi.fn(),
     changed: vi.fn(),
     fix: vi.fn(),
+    redate: vi.fn(),
+    reopen: vi.fn(),
     end: vi.fn(),
     retract: vi.fn(),
     updateSlot: vi.fn(),
     keepOnly: vi.fn(),
+    ...(today ? { today: vi.fn(today) } : {}),
   };
-  const section = groupFacts(facts, [category()]).find((s) => s.key === "custom-stuff")!;
+  const section = groupFacts(facts, [category(categoryOver)]).find((s) => s.key === "custom-stuff")!;
   render(
     <MemoryRouter>
       <TooltipProvider>
@@ -93,14 +100,14 @@ function openMenu(name: string, index = 0) {
 describe("CompactCategorySection — empty custom category affordance (regression: custom-category dead end)", () => {
   it("shows a 'no facts yet' hint with an Add button when the rendered section has no facts", () => {
     renderSection();
-    expect(screen.getByText("No facts yet — add one")).toBeInTheDocument();
+    expect(screen.getByText("No facts yet. Add one.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Add$/ })).toBeInTheDocument();
   });
 
   it("clicking the hint's Add button opens the add form, which adds through actions.add", () => {
     const actions = renderSection();
     fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
-    expect(screen.queryByText("No facts yet — add one")).not.toBeInTheDocument();
+    expect(screen.queryByText("No facts yet. Add one.")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("e.g., Favorite book"), { target: { value: "Favorite book" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "Dune" } });
@@ -115,7 +122,7 @@ describe("CompactCategorySection — empty custom category affordance (regressio
 
   it("does not show the empty-state hint once the section has a fact", () => {
     renderSection([fact()]);
-    expect(screen.queryByText("No facts yet — add one")).not.toBeInTheDocument();
+    expect(screen.queryByText("No facts yet. Add one.")).not.toBeInTheDocument();
     expect(screen.getByText("Favorite color:")).toBeInTheDocument();
     expect(screen.getByText("Blue")).toBeInTheDocument();
   });
@@ -221,5 +228,75 @@ describe("CompactCategorySection — two answers", () => {
     const actions = renderSection(conflict());
     fireEvent.click(screen.getByRole("button", { name: "Both are true" }));
     expect(actions.updateSlot).toHaveBeenCalledWith(expect.objectContaining({ slotId: "s1" }), { cardinality: "many" });
+  });
+});
+
+describe("CompactCategorySection — history rows can be corrected (plan 8, eleventh review: not fixed)", () => {
+  const openHistory = () => fireEvent.click(screen.getByRole("button", { name: /History \(1\)/ }));
+
+  it("a value dated in the future says when it starts and offers Fix the date", () => {
+    const actions = renderSection([
+      fact({ claim_id: "old", value: "Berlin", valid_to: "2062-09-01" }),
+      fact({ claim_id: "new", value: "London", is_current: false, valid_from: "2062-09-01", valid_to: null }),
+    ]);
+    openHistory();
+    expect(screen.getByText(/starts/)).toBeInTheDocument();
+    openMenu("History entry options: London");
+    expect(screen.queryByRole("menuitem", { name: "Still true" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fix the date" }));
+    const since = screen.getByLabelText("Since");
+    expect(since).toHaveValue("2062-09-01");
+    fireEvent.change(since, { target: { value: "2026-09-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(actions.redate).toHaveBeenCalledWith(expect.objectContaining({ claim_id: "new" }), "2026-09-01");
+  });
+
+  it("an ended value can be made current again, fixed, or removed as wrong", () => {
+    const actions = renderSection([
+      fact({ claim_id: "a", value: "Blue" }),
+      fact({ claim_id: "b", value: "Rde", is_current: false, valid_to: "2026-03-01" }),
+    ]);
+    openHistory();
+    openMenu("History entry options: Rde");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Still true" }));
+    expect(actions.reopen).toHaveBeenCalledWith(expect.objectContaining({ claim_id: "b" }));
+
+    openMenu("History entry options: Rde");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fix a mistake" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "Red" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(actions.fix).toHaveBeenCalledWith(expect.objectContaining({ claim_id: "b" }), "Red");
+
+    openMenu("History entry options: Rde");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Was wrong" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(actions.retract).toHaveBeenCalledWith(expect.objectContaining({ claim_id: "b" }));
+  });
+
+  it("Fix the date is offered on a current value that has a start date", () => {
+    const actions = renderSection([fact({ valid_from: "2016-09-01" })]);
+    openMenu("Edit entry");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fix the date" }));
+    fireEvent.change(screen.getByLabelText("Since"), { target: { value: "2026-09-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(actions.redate).toHaveBeenCalledWith(expect.objectContaining({ claim_id: "c1" }), "2026-09-01");
+  });
+
+  it("It changed starts on the profile's day, not the browser's", () => {
+    renderSection([fact()], {}, () => "2026-09-28");
+    openMenu("Edit entry");
+    fireEvent.click(screen.getByRole("menuitem", { name: "It changed" }));
+    expect(screen.getByLabelText("Since")).toHaveValue("2026-09-28");
+  });
+});
+
+describe("CompactCategorySection — a private section that still holds facts", () => {
+  it("is not offered for deletion (the database would refuse it with a raw error)", () => {
+    renderSection([fact()], { visibility_scope: "private" });
+    openMenu("Category actions");
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete category/ }));
+    expect(screen.getByText(/would be shown to assistants/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
   });
 });

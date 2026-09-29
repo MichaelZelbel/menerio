@@ -92,7 +92,7 @@ export function useShareNote() {
         if (result.url) await navigator.clipboard.writeText(result.url);
         showToast.success("Public link copied to clipboard");
       } catch {
-        showToast.success("Public link created — copy it from the share menu");
+        showToast.success("Public link created. Copy it from the share menu.");
       }
     },
     onError: () => showToast.error("Failed to share note"),

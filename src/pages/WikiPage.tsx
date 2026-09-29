@@ -16,14 +16,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
+import { useConfirmDialog } from "@/components/common/ConfirmDialog";
 import { diffChangedSectionSlugs } from "@/lib/wiki-sections";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 import { softStructure } from "@/lib/wiki-structure";
 
 type WikiPageRow = Database["public"]["Tables"]["wiki_pages"]["Row"];
 type WikiRevisionRow = Database["public"]["Tables"]["wiki_revisions"]["Row"];
 type WikiSource = { id: string; note_id: string; created_at: string; notes: { id: string; title: string; content: string; created_at: string } | null };
 type Backlink = { id: string; source_page_id: string; source: Pick<WikiPageRow, "id" | "slug" | "title" | "summary"> | null };
-type RevisionWithSource = WikiRevisionRow & { notes?: { title: string } | null };
+// The list carries no page text; a revision's before and after text is read
+// only when that revision is opened.
+type RevisionWithSource = Pick<WikiRevisionRow, "id" | "change_type" | "change_summary" | "created_at" | "source_note_id" | "status"> & { notes?: { title: string } | null };
+type RevisionDiff = Pick<WikiRevisionRow, "previous_content" | "new_content">;
+
+// "Reformat" runs in the background; the page polls itself until the new
+// version lands, within a bound, instead of asking the reader to refresh.
+const REFORMAT_POLL_MS = 4_000;
+const REFORMAT_MAX_MS = 3 * 60_000;
 
 const revisionBadgeVariant: Record<string, "success" | "info" | "secondary" | "destructive"> = {
   created: "success",
@@ -76,19 +86,37 @@ export default function WikiPage() {
   const { user } = useAuth();
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const latestMarkdownRef = useRef("");
-  const [editMode, setEditMode] = useState(false);
+  // Edit mode belongs to the page it was entered on. As a plain boolean it
+  // carried over to the next page when a link changed the slug.
+  const [editingSlug, setEditingSlug] = useState<string | null>(null);
+  const editMode = editingSlug === slug;
+  const setEditMode = useCallback((on: boolean) => setEditingSlug(on ? slug : null), [slug]);
   const [titleDraft, setTitleDraft] = useState("");
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [selectedRevision, setSelectedRevision] = useState<RevisionWithSource | null>(null);
   const [activeHeading, setActiveHeading] = useState("");
+  const [reformatWatch, setReformatWatch] = useState<{ slug: string; updatedAt: string; content: string; startedAt: number } | null>(null);
+  const [confirm, confirmDialog] = useConfirmDialog();
 
-  const { data: page, isLoading: pageLoading } = useQuery<WikiPageRow | null>({
+  useEffect(() => {
+    setEditingSlug((current) => (current === slug ? current : null));
+    setReformatWatch((current) => (current && current.slug !== slug ? null : current));
+  }, [slug]);
+
+  const {
+    data: page,
+    isLoading: pageLoading,
+    isError: pageFailed,
+    error: pageError,
+    refetch: refetchPage,
+  } = useQuery<WikiPageRow | null>({
     queryKey: ["wiki-page", slug],
     queryFn: async () => {
       const { data, error } = await supabase.from("wiki_pages").select("*").eq("slug", slug).maybeSingle();
       if (error) throw error;
       return data;
     },
+    refetchInterval: () => (reformatWatch?.slug === slug ? REFORMAT_POLL_MS : false),
   });
 
   useEffect(() => {
@@ -97,17 +125,33 @@ export default function WikiPage() {
     latestMarkdownRef.current = page.content;
   }, [page]);
 
-  const { data: revisions = [], isLoading: revisionsLoading } = useQuery<RevisionWithSource[]>({
+  const { data: revisions = [], isLoading: revisionsLoading, isError: revisionsFailed, refetch: refetchRevisions } = useQuery<RevisionWithSource[]>({
     queryKey: ["wiki-revisions", slug, page?.id],
-    enabled: !!page,
+    // Read when the panel opens, not on every visit.
+    enabled: !!page && revisionsOpen,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("wiki_revisions" as any)
-        .select("*, notes:source_note_id(title)")
+        .select("id, change_type, change_summary, created_at, source_note_id, status, notes:source_note_id(title)")
         .eq("wiki_page_id", page!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return ((data || []) as unknown) as RevisionWithSource[];
+    },
+  });
+
+  const { data: revisionDiff, isLoading: diffLoading, isError: diffFailed } = useQuery<RevisionDiff | null>({
+    queryKey: ["wiki-revisions", "diff", selectedRevision?.id],
+    enabled: !!selectedRevision,
+    staleTime: Infinity,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("wiki_revisions")
+        .select("previous_content, new_content")
+        .eq("id", selectedRevision!.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
     },
   });
 
@@ -218,24 +262,118 @@ export default function WikiPage() {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["wiki-page", slug] }),
+        // The index and the sidebar list titles; a renamed page kept its old
+        // name there until a reload.
+        queryClient.invalidateQueries({ queryKey: ["wiki-pages"] }),
         queryClient.invalidateQueries({ queryKey: ["wiki-revisions"] }),
         queryClient.invalidateQueries({ queryKey: ["wiki-backlinks"] }),
       ]);
       toast.success("Saved");
       setEditMode(false);
     },
-    onError: () => toast.error("Could not save Lexicon page"),
+    onError: (err) => toast.error(dbErrorMessage(err, "Could not save Lexicon page")),
   });
 
   const restructureMutation = useMutation({
     mutationFn: async () => {
       if (!page) throw new Error("No page");
-      const { error } = await supabase.functions.invoke("wiki-restructure", { body: { slugs: [page.slug] } });
+      const { data, error } = await supabase.functions.invoke("wiki-restructure", { body: { slugs: [page.slug] } });
       if (error) throw error;
+      return { page, total: (data as { total?: number } | null)?.total ?? 1 };
     },
-    onSuccess: () => toast.success("Reformatting this page in the background. Refresh in a moment."),
-    onError: () => toast.error("Could not reformat this page"),
+    onSuccess: ({ page: before, total }) => {
+      if (total === 0) {
+        // The function skips a page whose recent attempts failed on this
+        // same content; nothing was started, so there is nothing to wait for.
+        toast.info("This page cannot be reformatted right now. Try again later.");
+        return;
+      }
+      setReformatWatch({ slug: before.slug, updatedAt: before.updated_at, content: before.content, startedAt: Date.now() });
+      toast.success("Reformatting this page. The new version appears here when it is ready.");
+    },
+    onError: async (err) => toast.error(await functionErrorMessage(err, "Could not reformat this page")),
   });
+
+  const reformatting = restructureMutation.isPending || (!!reformatWatch && reformatWatch.slug === slug);
+
+  // The background job writes the page; the poll above brings it in, and this
+  // notices it and stops polling.
+  useEffect(() => {
+    if (!reformatWatch || !page || reformatWatch.slug !== page.slug) return;
+    if (page.updated_at === reformatWatch.updatedAt && page.content === reformatWatch.content) return;
+    setReformatWatch(null);
+    void queryClient.invalidateQueries({ queryKey: ["wiki-revisions"] });
+    void queryClient.invalidateQueries({ queryKey: ["wiki-pages"] });
+    toast.success("Reformatted. This is the new version.");
+  }, [page, reformatWatch, queryClient]);
+
+  useEffect(() => {
+    if (!reformatWatch) return;
+    const timer = window.setTimeout(() => {
+      setReformatWatch(null);
+      toast.info("Reformatting is taking longer than usual. The new version will show the next time this page loads.");
+    }, Math.max(0, reformatWatch.startedAt + REFORMAT_MAX_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [reformatWatch]);
+
+  // Unsaved edits: the browser asks before a reload or tab close, and an
+  // in-app link or navigation asks through the app's own dialog. Clicking a
+  // link while editing used to drop the edits without a word.
+  const isDirtyRef = useRef<() => boolean>(() => false);
+  useEffect(() => {
+    isDirtyRef.current = () =>
+      !!page &&
+      editMode &&
+      (latestMarkdownRef.current.trimEnd() !== (page.content || "").trimEnd() || (titleDraft.trim() || page.title) !== page.title);
+  });
+
+  const guardedNavigate = useCallback(
+    async (path: string) => {
+      if (isDirtyRef.current()) {
+        const discard = await confirm({
+          title: "Discard your unsaved changes?",
+          description: "You are editing this page. Leaving now loses the changes you have not saved.",
+          confirmLabel: "Discard changes",
+          cancelLabel: "Keep editing",
+          destructive: true,
+        });
+        if (!discard) return;
+      }
+      setEditingSlug(null);
+      navigate(path);
+    },
+    [confirm, navigate],
+  );
+
+  useEffect(() => {
+    if (!editMode) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirtyRef.current()) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    // Capture phase on document runs before React's own handlers, so a
+    // <Link> anywhere in the app (sidebar, breadcrumbs, backlinks, the main
+    // navigation) is held until the reader chooses. Lexicon links inside the
+    // editor are left to its onWikiLinkClick, which is guarded below.
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || link.classList.contains("wiki-link")) return;
+      if ((link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+      if (link.origin !== window.location.origin || link.pathname === window.location.pathname) return;
+      if (!isDirtyRef.current()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void guardedNavigate(link.pathname + link.search + link.hash);
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [editMode, guardedNavigate]);
 
   const pageMeta = useMemo(() => page ? `Updated ${relativeTime(page.updated_at)} · ${page.source_count} sources` : "", [page]);
   const displayContent = useMemo(() => page ? normalizeWikiContent(page.content) : "", [page]);
@@ -275,6 +413,25 @@ export default function WikiPage() {
 
   if (pageLoading) return <WikiPageSkeleton />;
 
+  // Offline or a failed read is not "this page doesn't exist".
+  if (!page && pageFailed) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <SEOHead title="Lexicon — Menerio" noIndex />
+        <Card className="max-w-lg text-center">
+          <CardContent role="alert" className="py-12">
+            <CardTitle className="mb-2">This page could not be loaded</CardTitle>
+            <CardDescription>{dbErrorMessage(pageError, "Something went wrong on our side. Try again.")}</CardDescription>
+            <div className="mt-6 flex justify-center gap-2">
+              <Button variant="outline" onClick={() => void refetchPage()}>Try again</Button>
+              <Button variant="ghost" onClick={() => navigate("/lexicon")}><ArrowLeft className="h-4 w-4" /> Back to Lexicon</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (!page) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -282,7 +439,7 @@ export default function WikiPage() {
         <Card className="max-w-lg border-dashed text-center">
           <CardContent className="py-12">
             <CardTitle className="mb-2">This page doesn't exist yet.</CardTitle>
-            <CardDescription>The Lexicon creates pages automatically as you write notes — keep writing, and pages will appear here.</CardDescription>
+            <CardDescription>The Lexicon creates pages automatically as you write notes. Keep writing, and pages will appear here.</CardDescription>
             <Button className="mt-6" onClick={() => navigate("/lexicon")}><ArrowLeft className="h-4 w-4" /> Back to Lexicon</Button>
           </CardContent>
         </Card>
@@ -313,10 +470,11 @@ export default function WikiPage() {
           ) : (
             <>
               {groupSlug && <Button asChild variant="outline"><Link to={`/dashboard/groups/${groupSlug}`}><Users className="h-4 w-4" /> View as Group</Link></Button>}
-              <Button variant="outline" onClick={() => restructureMutation.mutate()} disabled={restructureMutation.isPending}>
-                <Wand2 className="h-4 w-4" /> {restructureMutation.isPending ? "Reformatting…" : "Reformat"}
+              <Button variant="outline" onClick={() => restructureMutation.mutate()} disabled={reformatting}>
+                <Wand2 className="h-4 w-4" /> {reformatting ? "Reformatting…" : "Reformat"}
               </Button>
-              <Button variant="outline" onClick={() => setEditMode(true)}>Edit</Button>
+              {/* The background reformat rewrites the page; an edit saved meanwhile would be overwritten. */}
+              <Button variant="outline" onClick={() => setEditMode(true)} disabled={reformatting}>Edit</Button>
               <Button variant="secondary" onClick={() => setRevisionsOpen(true)}><History className="h-4 w-4" /> View revisions</Button>
             </>
           )}
@@ -359,8 +517,8 @@ export default function WikiPage() {
               showToolbar={editMode}
               className={editMode ? undefined : "wiki-article-editor border-0 bg-transparent"}
               onChange={(markdown) => { latestMarkdownRef.current = markdown; void refreshWikiLinkStubs(); }}
-              onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) navigate(`/lexicon/${encodeURIComponent(targetSlug)}`); }}
-              onInternalNavigate={(path) => navigate(path)}
+              onWikiLinkClick={(targetSlug, element) => { if (!element.classList.contains("wiki-link-stub")) void guardedNavigate(`/lexicon/${encodeURIComponent(targetSlug)}`); }}
+              onInternalNavigate={(path) => void guardedNavigate(path)}
             />
           </div>
 
@@ -385,7 +543,7 @@ export default function WikiPage() {
                     <div key={source.id} className="rounded-md border border-border p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0"><p className="truncate text-sm font-medium">{source.notes.title || "Untitled"}</p><p className="mt-1 text-xs text-muted-foreground">{format(new Date(source.notes.created_at), "MMM d, yyyy")}</p></div>
-                        <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/notes/${source.notes!.id}`)}><ExternalLink className="h-3.5 w-3.5" /> Open note</Button>
+                        <Button variant="outline" size="sm" onClick={() => void guardedNavigate(`/dashboard/notes/${source.notes!.id}`)}><ExternalLink className="h-3.5 w-3.5" /> Open note</Button>
                       </div>
                       <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{truncate(source.notes.content || "")}</p>
                     </div>
@@ -422,7 +580,12 @@ export default function WikiPage() {
         <SheetContent className="overflow-y-auto sm:max-w-xl">
           <SheetHeader><SheetTitle>Revisions</SheetTitle><SheetDescription>{page.title}</SheetDescription></SheetHeader>
           <div className="mt-6 space-y-3">
-            {revisionsLoading ? <Skeleton className="h-24" /> : revisions.map((revision) => (
+            {revisionsLoading ? <Skeleton className="h-24" /> : revisionsFailed ? (
+              <div role="alert" className="space-y-2 text-sm text-muted-foreground">
+                <p>The revisions could not be loaded.</p>
+                <Button variant="outline" size="sm" onClick={() => void refetchRevisions()}>Try again</Button>
+              </div>
+            ) : revisions.length === 0 ? <p className="text-sm text-muted-foreground">No revisions yet.</p> : revisions.map((revision) => (
               <button key={revision.id} onClick={() => setSelectedRevision(revision)} className="w-full rounded-md border border-border p-3 text-left hover:bg-accent">
                 <div className="mb-2 flex items-center justify-between gap-2"><Badge variant={revisionBadgeVariant[revision.change_type] || "secondary"}>{labelize(revision.change_type)}</Badge><span className="text-xs text-muted-foreground">{relativeTime(revision.created_at)}</span></div>
                 <p className="text-sm font-medium">{revision.change_summary || "No summary"}</p>
@@ -436,9 +599,12 @@ export default function WikiPage() {
       <Dialog open={!!selectedRevision} onOpenChange={(open) => !open && setSelectedRevision(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader><DialogTitle>Revision diff</DialogTitle></DialogHeader>
-          {selectedRevision && <div className="grid gap-4 md:grid-cols-2"><div><p className="mb-2 text-sm font-medium">Previous</p><pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{selectedRevision.previous_content || ""}</pre></div><div><p className="mb-2 text-sm font-medium">New</p><pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{selectedRevision.new_content}</pre></div></div>}
+          {selectedRevision && (diffLoading ? <Skeleton className="h-40" /> : diffFailed || !revisionDiff ? (
+            <p role="alert" className="text-sm text-muted-foreground">This revision could not be loaded. Close it and try again.</p>
+          ) : <div className="grid gap-4 md:grid-cols-2"><div><p className="mb-2 text-sm font-medium">Previous</p><pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{revisionDiff.previous_content || ""}</pre></div><div><p className="mb-2 text-sm font-medium">New</p><pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{revisionDiff.new_content}</pre></div></div>)}
         </DialogContent>
       </Dialog>
+      {confirmDialog}
     </div>
   );
 }

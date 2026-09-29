@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useReanalyzeMedia } from "@/hooks/useMediaAnalysis";
 import { PdfThumbnail } from "@/components/media/PdfThumbnail";
 import { toast } from "sonner";
+import { functionErrorMessage } from "@/lib/function-error";
 
 export interface MediaDetailItem {
   id: string;
@@ -34,24 +35,33 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
   const reanalyze = useReanalyzeMedia();
   const [signedUrl, setSignedUrl] = useState<string>("");
   const [previewFailed, setPreviewFailed] = useState(false);
+  // Signing failed: without this the preview spun forever.
+  const [signFailed, setSignFailed] = useState(false);
 
   const isPdf = item?.media_type === "pdf" || item?.media_type === "pdf_page";
+  const storagePath = item?.storage_path;
 
+  // Keyed on the file, not the item object: the Media Library rebuilds that
+  // object on every render (and polls while anything is analyzing), which
+  // re-signed and re-downloaded the preview each time.
   useEffect(() => {
     setPreviewFailed(false);
+    setSignFailed(false);
     setSignedUrl("");
-    if (!item) return;
+    if (!storagePath) return;
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.storage
+      const { data, error } = await supabase.storage
         .from("note-attachments")
-        .createSignedUrl(item.storage_path, 60 * 60);
-      if (!cancelled && data?.signedUrl) setSignedUrl(data.signedUrl);
+        .createSignedUrl(storagePath, 60 * 60);
+      if (cancelled) return;
+      if (error || !data?.signedUrl) setSignFailed(true);
+      else setSignedUrl(data.signedUrl);
     })();
     return () => {
       cancelled = true;
     };
-  }, [item]);
+  }, [storagePath]);
 
   if (!item) return null;
 
@@ -69,7 +79,8 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
       },
       {
         onSuccess: () => toast.success("Reanalyzing…"),
-        onError: (err: Error) => toast.error(err.message),
+        onError: async (err: Error) =>
+          toast.error(await functionErrorMessage(err, "The analysis could not be restarted. Try again.")),
       },
     );
   };
@@ -84,7 +95,12 @@ export function MediaDetailDialog({ item, noteTitle, onClose }: Props) {
 
         {/* Preview */}
         <div className="flex-1 min-h-[40vh] md:min-h-0 bg-muted/40 flex items-center justify-center overflow-hidden">
-          {isPdf ? (
+          {signFailed ? (
+            <div role="alert" className="flex flex-col items-center gap-2 text-muted-foreground px-4 text-center">
+              <FileText className="h-12 w-12" />
+              <span className="text-xs">The preview could not be loaded. Close this and open it again to retry.</span>
+            </div>
+          ) : isPdf ? (
             <div className="flex flex-col items-center gap-3 w-full h-full p-4">
               <div className="flex-1 w-full flex items-center justify-center overflow-hidden">
                 {signedUrl ? (

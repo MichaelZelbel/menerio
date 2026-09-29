@@ -129,7 +129,10 @@ export default function Auth() {
                 <SignInForm onSuccess={() => navigate(redirectTo, { replace: true })} />
               </TabsContent>
               <TabsContent value="signup" className="mt-0">
-                <SignUpForm onSwitchToSignIn={() => setActiveTab("signin")} />
+                <SignUpForm
+                  onSwitchToSignIn={() => setActiveTab("signin")}
+                  returnPath={searchParams.get("redirect") ? redirectTo : undefined}
+                />
               </TabsContent>
             </CardContent>
           </Tabs>
@@ -219,7 +222,7 @@ function SignInForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
+function SignUpForm({ onSwitchToSignIn, returnPath }: { onSwitchToSignIn: () => void; returnPath?: string }) {
   const { signUp, resetPassword } = useAuth();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -238,7 +241,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
     if (!accepted) return;
     setLoading(true);
     try {
-      const result = await signUp(email, password, displayName);
+      const result = await signUp(email, password, displayName, returnPath);
       if (result.alreadyExists) {
         setSubmitted("exists");
       } else {
@@ -304,7 +307,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
             className="w-full"
           >
             {resetLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {resetSent ? "Reset link sent — check your email" : "Send password reset link"}
+            {resetSent ? "Reset link sent. Check your email" : "Send password reset link"}
           </Button>
           <Button variant="ghost" onClick={() => { setSubmitted(false); setResetSent(false); }} className="w-full">
             Try another email

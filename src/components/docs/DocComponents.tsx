@@ -2,6 +2,8 @@ import { Info, AlertTriangle, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { showToast } from "@/lib/toast";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 interface CalloutProps {
   type?: "info" | "warning" | "tip";
@@ -40,8 +42,12 @@ interface CodeBlockProps {
 export function CodeBlock({ code, language = "bash", title }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+  // The check mark used to appear whether or not the browser allowed the copy.
+  const handleCopy = async () => {
+    if (!(await copyToClipboard(code))) {
+      showToast.error(COPY_FAILED_MESSAGE);
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

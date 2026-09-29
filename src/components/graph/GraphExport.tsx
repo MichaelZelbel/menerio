@@ -1,6 +1,9 @@
-import { useState, useMemo } from "react";
-import { useGraphData } from "@/hooks/useGraphData";
-import { useNotes } from "@/hooks/useNotes";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { graphDataQuery, type GraphData } from "@/hooks/useGraphData";
+import { useAuth } from "@/contexts/AuthContext";
+import { BRAND } from "@/lib/brand";
+import { functionErrorMessage } from "@/lib/function-error";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,42 +15,59 @@ import { Download, FileJson, Table, Loader2 } from "lucide-react";
 import { showToast } from "@/lib/toast";
 
 export function GraphExportButton() {
-  const { data: graphData } = useGraphData({ limit: 1000 });
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [exporting, setExporting] = useState(false);
 
-  const exportJSON = () => {
-    if (!graphData) return;
-    const blob = new Blob([JSON.stringify(graphData, null, 2)], { type: "application/json" });
-    downloadBlob(blob, "menerio-graph.json");
-    showToast.success("Graph exported as JSON");
+  // The 1,000-node graph is fetched when an export is chosen, not when the
+  // page opens: the Note Graph page used to download it on every visit just
+  // to enable this button.
+  const withGraph = async (write: (graphData: GraphData) => void) => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const graphData = await queryClient.fetchQuery(graphDataQuery(user?.id, { limit: 1000 }));
+      write(graphData);
+    } catch (err) {
+      showToast.error(await functionErrorMessage(err, "The graph could not be exported. Try again."));
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const exportCSV = () => {
-    if (!graphData) return;
-    // Nodes CSV
-    const nodeHeaders = "id,title,type,topics,tags,created_at\n";
-    const nodeRows = graphData.nodes.map((n) =>
-      [n.id, csvEscape(n.title), n.type, csvEscape((n.topics || []).join(";")), csvEscape((n.tags || []).join(";")), n.created_at].join(",")
-    ).join("\n");
-    const nodesBlob = new Blob([nodeHeaders + nodeRows], { type: "text/csv" });
-    downloadBlob(nodesBlob, "menerio-nodes.csv");
+  const exportJSON = () =>
+    withGraph((graphData) => {
+      const blob = new Blob([JSON.stringify(graphData, null, 2)], { type: "application/json" });
+      downloadBlob(blob, `${BRAND.id}-graph.json`);
+      showToast.success("Graph exported as JSON");
+    });
 
-    // Edges CSV
-    const edgeHeaders = "id,source,target,type,strength\n";
-    const edgeRows = graphData.edges.map((e) =>
-      [e.id, e.source, e.target, e.type, e.strength].join(",")
-    ).join("\n");
-    const edgesBlob = new Blob([edgeHeaders + edgeRows], { type: "text/csv" });
-    downloadBlob(edgesBlob, "menerio-edges.csv");
+  const exportCSV = () =>
+    withGraph((graphData) => {
+      // Nodes CSV
+      const nodeHeaders = "id,title,type,topics,tags,created_at\n";
+      const nodeRows = graphData.nodes.map((n) =>
+        [n.id, csvEscape(n.title), n.type, csvEscape((n.topics || []).join(";")), csvEscape((n.tags || []).join(";")), n.created_at].join(",")
+      ).join("\n");
+      const nodesBlob = new Blob([nodeHeaders + nodeRows], { type: "text/csv" });
+      downloadBlob(nodesBlob, `${BRAND.id}-nodes.csv`);
 
-    showToast.success("Graph exported as CSV (2 files)");
-  };
+      // Edges CSV
+      const edgeHeaders = "id,source,target,type,strength\n";
+      const edgeRows = graphData.edges.map((e) =>
+        [e.id, e.source, e.target, e.type, e.strength].join(",")
+      ).join("\n");
+      const edgesBlob = new Blob([edgeHeaders + edgeRows], { type: "text/csv" });
+      downloadBlob(edgesBlob, `${BRAND.id}-edges.csv`);
+
+      showToast.success("Graph exported as CSV (2 files)");
+    });
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={!graphData}>
-          <Download className="h-3.5 w-3.5" />
+        <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={!user || exporting}>
+          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           Export
         </Button>
       </DropdownMenuTrigger>

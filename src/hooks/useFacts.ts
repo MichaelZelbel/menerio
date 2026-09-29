@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { usePeopleSync } from "@/hooks/usePeopleSync";
-import { todayISO } from "@/lib/claims";
+import { reviewByFor, todayISO } from "@/lib/claims";
 import { taxonomyBySlug, taxonomyOrder } from "@/lib/profile-taxonomy";
 import type { ProfileCategory } from "@/hooks/useProfile";
 import { BRAND } from "@/lib/brand";
@@ -115,6 +116,10 @@ export interface FactActions {
   changed: (fact: ProfileFact, value: string, validFrom: string) => void;
   /** "Fix a mistake": the value is corrected in place. */
   fix: (fact: ProfileFact, value: string) => void;
+  /** "Fix the date": the value starts on another day; the value it replaced ends that day. */
+  redate: (fact: ProfileFact, validFrom: string) => void;
+  /** "Still true" on a history row: the value is current again. */
+  reopen: (fact: ProfileFact) => void;
   /** "No longer true": the value ends and stays as history. */
   end: (fact: ProfileFact, date?: string) => void;
   /** "Was wrong": the value is deleted and never suggested again. */
@@ -123,6 +128,12 @@ export interface FactActions {
   updateSlot: (slot: FactSlot, patch: SlotPatch) => void;
   /** "Keep this one" on a two-answers badge: the other current values end today. */
   keepOnly: (slot: FactSlot, keep: ProfileFact) => void;
+  /**
+   * The profile's own today (YYYY-MM-DD), the day the views use to decide
+   * what is current. Forms default to it, so a change dated "today" is
+   * current at once instead of waiting for the profile's midnight.
+   */
+  today?: () => string;
 }
 
 const FACT_COLUMNS =
@@ -280,9 +291,91 @@ export function describeFactRefusal(reason: string | null | undefined): string {
       return "A source quote is needed for this fact.";
     case "blocked_label":
       return "That field is not stored on profiles (relationships and purchases live elsewhere).";
+    // The database's own guards on claims (writeFact passes the part before the colon).
+    case "claim_quality_guard":
+      return PLACEHOLDER_MESSAGE;
+    case "claim_evidence_required":
+      return "A source quote is needed for this fact.";
+    case "claim_origin_required":
+      return "The fact was not saved. Reload the page and try again.";
     default:
       return reason ? `The fact was not saved (${reason}).` : "The fact was not saved.";
   }
+}
+
+const PLACEHOLDER_MESSAGE =
+  'Not saved: the value is empty, a placeholder such as "none" or "unknown", or repeats the field\'s name.';
+
+/**
+ * "Fix a mistake" to a value the fact already holds as another live value.
+ * The database allows one live copy of a value per attribute, so nothing is
+ * written; the page offers to remove the mistaken entry instead.
+ */
+export class DuplicateFactValueError extends Error {
+  constructor(
+    readonly fact: ProfileFact,
+    value: string,
+  ) {
+    super(`"${value}" is already recorded under ${fact.label || attributeLabel(fact.attribute)}, so this entry was not changed.`);
+    this.name = "DuplicateFactValueError";
+  }
+}
+
+/**
+ * A direct `claims` write refused by the database, in words. The raw text
+ * names an index or a guard ("claims_one_live_value", "claim_quality_guard:
+ * ..."), which means nothing to the person who typed the value.
+ */
+export function describeClaimWriteError(error: unknown): Error {
+  const e = error as { code?: string; message?: string } | null;
+  const message = String(e?.message ?? "");
+  // The guards share one error code, so the message's prefix decides.
+  if (message.startsWith("claim_origin_required") || message.startsWith("claim_evidence_required")) {
+    return new Error(describeFactRefusal(message.split(":")[0]));
+  }
+  if (e?.code === "23514" || message.startsWith("claim_quality_guard")) return new Error(PLACEHOLDER_MESSAGE);
+  return error instanceof Error ? error : new Error(message || "Could not save the change");
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Today (YYYY-MM-DD) in an IANA time zone: what `user_today` computes with
+ * `(now() AT TIME ZONE tz)::date`, and so what `profile_facts.is_current` and
+ * `fact_today` use. An empty or unknown zone counts as UTC, as there.
+ */
+export function todayInTimeZone(timeZone: string | null | undefined, now: Date = new Date()): string {
+  const day = (zone: string) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  };
+  const zone = String(timeZone ?? "").trim() || "UTC";
+  try {
+    const result = day(zone);
+    if (ISO_DAY.test(result)) return result;
+  } catch {
+    /* an unknown zone: UTC, as user_today does */
+  }
+  return day("UTC");
+}
+
+/** The signed-in person's profile time zone (profiles.timezone); null when there is no row. */
+function profileTimeZoneQuery(userId: string | undefined) {
+  return {
+    queryKey: ["profile-timezone", userId],
+    staleTime: 60 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("timezone").eq("id", userId!).maybeSingle();
+      if (error) throw error;
+      return ((data as { timezone?: string | null } | null)?.timezone ?? null) as string | null;
+    },
+  };
 }
 
 export interface WriteFactOutcome {
@@ -431,6 +524,29 @@ export function useFacts(subject: FactSubject | null) {
   /** Sections from the taxonomy alone; pages that have the subject's section rows call groupFacts with them. */
   const sections = useMemo(() => groupFacts(facts), [facts]);
 
+  // "Today" is the profile's day, the one profile_facts decides "current" with.
+  // The browser's day disagreed around midnight: a change dated with it stayed
+  // in the future, and "No longer true" or "Keep this one" left the value (and
+  // the two-answers badge) current until the profile's midnight.
+  const timeZone = useQuery({ ...profileTimeZoneQuery(userId), enabled: !!userId });
+  const today = useCallback(
+    () => (timeZone.data === undefined ? todayISO() : todayInTimeZone(timeZone.data)),
+    [timeZone.data],
+  );
+  const resolveToday = async () => {
+    try {
+      return todayInTimeZone(await qc.fetchQuery(profileTimeZoneQuery(userId)));
+    } catch {
+      return todayISO();
+    }
+  };
+
+  /** Another live copy of this value under the same attribute (the database allows one). */
+  const liveTwin = (fact: ProfileFact, value: string) =>
+    facts.find(
+      (f) => f.claim_id !== fact.claim_id && f.attribute === fact.attribute && f.valid_to === null && norm(f.value) === norm(value),
+    );
+
   const afterWrite = () => {
     invalidateFactViews(qc);
     if (subject?.type === "contact") triggerPeopleSync({ people: [subject.id] });
@@ -472,6 +588,7 @@ export function useFacts(subject: FactSubject | null) {
   const changeFact = useMutation({
     mutationFn: async ({ fact, value, validFrom }: { fact: ProfileFact; value: string; validFrom: string }) => {
       if (!subject) throw new Error("Nothing to change");
+      if (!ISO_DAY.test(validFrom)) throw new Error(describeFactRefusal("bad_date"));
       const result = await invokeWriteFact({
         ...subjectBody(),
         label: fact.label || attributeLabel(fact.attribute),
@@ -482,14 +599,16 @@ export function useFacts(subject: FactSubject | null) {
       });
       // A single-valued attribute is closed by writeFact. For a list ("one of
       // my languages changed") the old value is ended here, so it becomes
-      // history in both cases.
+      // history in both cases. A value already set to end later (an earlier
+      // change dated in the future) ends on the new day too; left alone, it
+      // stayed current beside its replacement as two answers.
       const inserted = result.facts.some((f) => f.outcome === "inserted");
       if (inserted && norm(value) !== norm(fact.value) && (!fact.valid_from || fact.valid_from <= validFrom)) {
         const { error } = await supabase
           .from("claims")
           .update({ valid_to: validFrom })
           .eq("id", fact.claim_id)
-          .is("valid_to", null);
+          .or(`valid_to.is.null,valid_to.gt.${validFrom}`);
         if (error) throw error;
       }
       return result;
@@ -503,21 +622,127 @@ export function useFacts(subject: FactSubject | null) {
     onError,
   });
 
+  const retract = useMutation({
+    mutationFn: async (fact: ProfileFact) => {
+      await retractFact(fact);
+      // A value "It changed" dated in the future ended the value it replaces on
+      // that day. It never happened, so that value no longer ends then.
+      const futureDated = !fact.is_current && fact.valid_to === null && !!fact.valid_from;
+      const replaced = futureDated
+        ? facts.filter((f) => f.claim_id !== fact.claim_id && f.attribute === fact.attribute && f.valid_to === fact.valid_from)
+        : [];
+      if (replaced.length === 0) return { stillEnds: null as string | null };
+      const { error } = await supabase
+        .from("claims")
+        .update({ valid_to: null })
+        .in(
+          "id",
+          replaced.map((f) => f.claim_id),
+        );
+      return { stillEnds: error ? fact.valid_from : null };
+    },
+    onSuccess: ({ stillEnds }) => {
+      afterWrite();
+      if (stillEnds) showToast.warning(`Removed. The value it was to replace still ends on ${stillEnds}.`);
+      else showToast.success("Removed. It will not be suggested again.");
+    },
+    onError,
+  });
+
   const fixFact = useMutation({
     mutationFn: async ({ fact, value }: { fact: ProfileFact; value: string }) => {
       const next = value.trim();
       if (!next) throw new Error("A value is required");
-      if (next === fact.value) return;
+      if (next === fact.value) return false;
+      // One live copy of a value per attribute (claims_one_live_value): fixing
+      // "Englsh" into an "English" that is already there is refused by the
+      // database, whose message named the index.
+      if (fact.valid_to === null && liveTwin(fact, next)) throw new DuplicateFactValueError(fact, next);
       const { error } = await supabase.from("claims").update({ value: next }).eq("id", fact.claim_id);
-      if (error) throw error;
+      if (error) {
+        if ((error as { code?: string }).code === "23505") throw new DuplicateFactValueError(fact, next);
+        throw describeClaimWriteError(error);
+      }
       // A machine's value that needed fixing was never true: do not suggest it again.
       if (fact.origin !== "user_manual" && norm(next) !== norm(fact.value)) {
         await suppressFactValue(fact, fact.value);
       }
+      return true;
+    },
+    onSuccess: (changed) => {
+      if (!changed) return;
+      afterWrite();
+      showToast.success("Fact corrected");
+    },
+    onError: (error: Error) => {
+      if (error instanceof DuplicateFactValueError) {
+        const mistaken = error.fact;
+        toast.info(error.message, {
+          action: { label: "Remove this entry", onClick: () => retract.mutate(mistaken) },
+        });
+        return;
+      }
+      onError(error);
+    },
+  });
+
+  const redateFact = useMutation({
+    mutationFn: async ({ fact, validFrom }: { fact: ProfileFact; validFrom: string }) => {
+      if (!ISO_DAY.test(validFrom)) throw new Error(describeFactRefusal("bad_date"));
+      if (fact.valid_from === validFrom) return { changed: false, moved: 0 };
+      if (fact.valid_to && validFrom >= fact.valid_to) {
+        throw new Error(`The start has to be before the day it ended (${fact.valid_to}).`);
+      }
+      const { error } = await supabase
+        .from("claims")
+        .update({ valid_from: validFrom, review_by: reviewByFor(fact.attribute, validFrom) })
+        .eq("id", fact.claim_id);
+      if (error) throw describeClaimWriteError(error);
+      // "It changed" ended the value this one replaced on the day it started.
+      // It moves along, so the two stay back to back: a mistyped future date
+      // no longer keeps the old value current until then.
+      const replaced = fact.valid_from
+        ? facts.filter(
+            (f) =>
+              f.claim_id !== fact.claim_id &&
+              f.attribute === fact.attribute &&
+              f.valid_to === fact.valid_from &&
+              (!f.valid_from || f.valid_from < validFrom),
+          )
+        : [];
+      if (replaced.length > 0) {
+        const { error: moveError } = await supabase
+          .from("claims")
+          .update({ valid_to: validFrom })
+          .in(
+            "id",
+            replaced.map((f) => f.claim_id),
+          );
+        if (moveError) throw describeClaimWriteError(moveError);
+      }
+      return { changed: true, moved: replaced.length };
+    },
+    onSuccess: ({ changed, moved }) => {
+      if (!changed) return;
+      afterWrite();
+      showToast.success(moved > 0 ? "Date fixed. The value it replaced now ends that day." : "Date fixed");
+    },
+    onError,
+  });
+
+  const reopenFact = useMutation({
+    mutationFn: async (fact: ProfileFact) => {
+      const already = `"${fact.value}" is already a current value, so this one stays in history.`;
+      if (liveTwin(fact, fact.value)) throw new Error(already);
+      const { error } = await supabase.from("claims").update({ valid_to: null }).eq("id", fact.claim_id);
+      if (error) {
+        if ((error as { code?: string }).code === "23505") throw new Error(already);
+        throw describeClaimWriteError(error);
+      }
     },
     onSuccess: () => {
       afterWrite();
-      showToast.success("Fact corrected");
+      showToast.success("It is current again");
     },
     onError,
   });
@@ -526,22 +751,13 @@ export function useFacts(subject: FactSubject | null) {
     mutationFn: async ({ fact, date }: { fact: ProfileFact; date?: string }) => {
       const { error } = await supabase
         .from("claims")
-        .update({ valid_to: date || todayISO() })
+        .update({ valid_to: date || (await resolveToday()) })
         .eq("id", fact.claim_id);
       if (error) throw error;
     },
     onSuccess: () => {
       afterWrite();
       showToast.success("Moved to history");
-    },
-    onError,
-  });
-
-  const retract = useMutation({
-    mutationFn: async (fact: ProfileFact) => retractFact(fact),
-    onSuccess: () => {
-      afterWrite();
-      showToast.success("Removed. It will not be suggested again.");
     },
     onError,
   });
@@ -587,7 +803,7 @@ export function useFacts(subject: FactSubject | null) {
     mutationFn: async ({ slot, keep }: { slot: FactSlot; keep: ProfileFact }) => {
       const others = slot.current.filter((f) => f.claim_id !== keep.claim_id).map((f) => f.claim_id);
       if (others.length === 0) return;
-      const { error } = await supabase.from("claims").update({ valid_to: todayISO() }).in("id", others);
+      const { error } = await supabase.from("claims").update({ valid_to: await resolveToday() }).in("id", others);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -601,10 +817,13 @@ export function useFacts(subject: FactSubject | null) {
     add: (input) => addFact.mutate(input),
     changed: (fact, value, validFrom) => changeFact.mutate({ fact, value, validFrom }),
     fix: (fact, value) => fixFact.mutate({ fact, value }),
+    redate: (fact, validFrom) => redateFact.mutate({ fact, validFrom }),
+    reopen: (fact) => reopenFact.mutate(fact),
     end: (fact, date) => endFact.mutate({ fact, date }),
     retract: (fact) => retract.mutate(fact),
     updateSlot: (slot, patch) => updateSlot.mutate({ slot, patch }),
     keepOnly: (slot, keep) => keepOnly.mutate({ slot, keep }),
+    today,
   };
 
   return {
@@ -620,6 +839,8 @@ export function useFacts(subject: FactSubject | null) {
     addFact,
     changeFact,
     fixFact,
+    redateFact,
+    reopenFact,
     endFact,
     retract,
     updateSlot,

@@ -1,10 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { isPastDay, parseDateOnly } from "@/lib/local-date";
+import { dbErrorMessage } from "@/lib/function-error";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,7 +80,7 @@ export default function Actions() {
   // Form
   const [form, setForm] = useState({ content: "", priority: "normal", due_date: "" });
 
-  const { data: items = [], isLoading } = useQuery<ActionItem[]>({
+  const { data: itemsData, isLoading, isError: itemsFailed, error: itemsError, refetch: refetchItems } = useQuery<ActionItem[]>({
     queryKey: ["action_items", user?.id],
     enabled: !!user,
     queryFn: async () => {
@@ -93,6 +94,7 @@ export default function Actions() {
       return ((data || []) as unknown) as ActionItem[];
     },
   });
+  const items = itemsData ?? [];
 
   // Contacts for display
   const { data: contacts = [] } = useQuery({
@@ -182,6 +184,7 @@ export default function Actions() {
       qc.invalidateQueries({ queryKey: ["action_items"] });
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
     },
+    onError: (e) => showToast.error(dbErrorMessage(e, "The action item could not be updated. Try again.")),
   });
 
   const createItem = useMutation({
@@ -201,7 +204,7 @@ export default function Actions() {
       setForm({ content: "", priority: "normal", due_date: "" });
       showToast.success("Action item created");
     },
-    onError: (e: any) => showToast.error(e.message),
+    onError: (e) => showToast.error(dbErrorMessage(e, "The action item could not be created. Try again.")),
   });
 
   const dismissItem = useMutation({
@@ -213,7 +216,35 @@ export default function Actions() {
       qc.invalidateQueries({ queryKey: ["action_items"] });
       showToast.success("Dismissed");
     },
+    onError: (e) => showToast.error(dbErrorMessage(e, "The action item could not be dismissed. Try again.")),
   });
+
+  // One change per item at a time. A second "Done" while the first was still
+  // saving read the item as not done yet and counted it twice toward a
+  // group's action_item_count goal. The ref blocks the second click even
+  // before the re-render that disables the button.
+  const busyRef = useRef(new Set<string>());
+  const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
+  const runExclusive = (id: string, work: Promise<unknown>) => {
+    busyRef.current.add(id);
+    setBusyIds(new Set(busyRef.current));
+    work
+      .catch(() => {
+        /* reported by the mutation's onError */
+      })
+      .finally(() => {
+        busyRef.current.delete(id);
+        setBusyIds(new Set(busyRef.current));
+      });
+  };
+  const changeStatus = (id: string, status: string) => {
+    if (busyRef.current.has(id)) return;
+    runExclusive(id, updateStatus.mutateAsync({ id, status }));
+  };
+  const dismiss = (id: string) => {
+    if (busyRef.current.has(id)) return;
+    runExclusive(id, dismissItem.mutateAsync(id));
+  };
 
   // Filter items
   const filtered = items.filter((i) => {
@@ -234,7 +265,7 @@ export default function Actions() {
   const handleDragEnd = () => setDragItem(null);
   const handleDrop = (status: string) => {
     if (dragItem) {
-      updateStatus.mutate({ id: dragItem, status });
+      changeStatus(dragItem, status);
       setDragItem(null);
     }
   };
@@ -344,10 +375,10 @@ export default function Actions() {
                   <span className="truncate flex-1">{item.content}</span>
                   <div className="flex items-center gap-2 shrink-0 ml-2">
                     <span className="text-xs text-destructive">{daysSince(item.created_at)}d old</span>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => updateStatus.mutate({ id: item.id, status: "in_progress" })}>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={busyIds.has(item.id)} onClick={() => changeStatus(item.id, "in_progress")}>
                       Start
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => dismissItem.mutate(item.id)}>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" disabled={busyIds.has(item.id)} onClick={() => dismiss(item.id)}>
                       Dismiss
                     </Button>
                   </div>
@@ -362,6 +393,12 @@ export default function Actions() {
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : itemsFailed && !itemsData ? (
+        <div role="alert" className="text-center py-16 text-muted-foreground space-y-4">
+          <p className="text-lg font-medium text-foreground">Your action items could not be loaded</p>
+          <p className="text-sm">{dbErrorMessage(itemsError, "Something went wrong on our side. Try again.")}</p>
+          <Button variant="outline" size="sm" onClick={() => void refetchItems()}>Try again</Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -450,7 +487,8 @@ export default function Actions() {
                               variant="ghost"
                               size="sm"
                               className="h-6 text-[10px] text-green-600 hover:text-green-700"
-                              onClick={() => updateStatus.mutate({ id: item.id, status: "done" })}
+                              disabled={busyIds.has(item.id)}
+                              onClick={() => changeStatus(item.id, "done")}
                             >
                               <CheckCircle2 className="h-3 w-3 mr-0.5" /> Done
                             </Button>
@@ -460,7 +498,8 @@ export default function Actions() {
                               variant="ghost"
                               size="sm"
                               className="h-6 text-[10px]"
-                              onClick={() => updateStatus.mutate({ id: item.id, status: "in_progress" })}
+                              disabled={busyIds.has(item.id)}
+                              onClick={() => changeStatus(item.id, "in_progress")}
                             >
                               <ArrowUpCircle className="h-3 w-3 mr-0.5" /> Start
                             </Button>
@@ -470,7 +509,8 @@ export default function Actions() {
                               variant="ghost"
                               size="sm"
                               className="h-6 text-[10px]"
-                              onClick={() => updateStatus.mutate({ id: item.id, status: "open" })}
+                              disabled={busyIds.has(item.id)}
+                              onClick={() => changeStatus(item.id, "open")}
                             >
                               <Circle className="h-3 w-3 mr-0.5" /> Reopen
                             </Button>

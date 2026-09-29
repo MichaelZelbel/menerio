@@ -1,4 +1,5 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { AlertTriangle, Check, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BRAND } from "@/lib/brand";
@@ -6,6 +7,8 @@ import { BRAND } from "@/lib/brand";
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  /** When this changes (e.g. the route), a shown error is cleared and the children render again. */
+  resetKey?: string;
 }
 
 interface State {
@@ -19,7 +22,10 @@ const RELOADED_KEY = "menerio:error-auto-reloaded";
 
 // A failed lazy-chunk load usually means a new build was deployed while this
 // tab was open (the old hashed chunk no longer exists). One hard reload picks
-// up the current version; the sessionStorage guard prevents a reload loop.
+// up the current version. The guard holds the failed chunk, not "1": with "1"
+// for the whole tab session, the second deploy in a long-lived tab showed the
+// error screen instead of reloading. The same chunk failing again right after
+// the reload still stops, so it cannot loop.
 function isStaleChunkError(error: Error): boolean {
   return /dynamically imported module|Importing a module script failed|ChunkLoadError|Loading chunk/i.test(
     error.message,
@@ -39,9 +45,22 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary]", error, info.componentStack);
     this.setState({ componentStack: info.componentStack ?? null });
-    if (isStaleChunkError(error) && sessionStorage.getItem(RELOADED_KEY) !== "1") {
-      sessionStorage.setItem(RELOADED_KEY, "1");
-      window.location.reload();
+    if (!isStaleChunkError(error)) return;
+    try {
+      const guard = error.message.slice(0, 500);
+      if (sessionStorage.getItem(RELOADED_KEY) === guard) return;
+      sessionStorage.setItem(RELOADED_KEY, guard);
+    } catch {
+      return; // Without storage there is no loop guard, so no automatic reload.
+    }
+    window.location.reload();
+  }
+
+  // One crashing page used to replace the app until a full reload: moving to
+  // another page changed the URL but not the screen.
+  componentDidUpdate(prevProps: Props) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null, componentStack: null, copied: false });
     }
   }
 
@@ -88,8 +107,8 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           <h2 className="text-xl font-bold font-display text-foreground">Something went wrong</h2>
           <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-            An unexpected error occurred. Reloading usually fixes it — or copy the report and send
-            it to us.
+            An unexpected error occurred. Reloading usually fixes it. You can also copy the report
+            and send it to us.
           </p>
           {this.state.error && (
             <pre className="mt-4 max-h-64 max-w-lg overflow-auto rounded-lg bg-muted p-3 text-left text-xs text-muted-foreground">
@@ -109,7 +128,7 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           {this.state.copied && (
             <p className="mt-3 max-w-sm text-xs text-muted-foreground">
-              The report is in your clipboard — please paste it into an email to {BRAND.supportEmail}.
+              The report is in your clipboard. Please paste it into an email to {BRAND.supportEmail}.
             </p>
           )}
         </div>
@@ -118,4 +137,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return this.props.children;
   }
+}
+
+/** An ErrorBoundary that clears itself when the route changes. */
+export function RouteErrorBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
 }

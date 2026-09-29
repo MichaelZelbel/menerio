@@ -5,12 +5,13 @@ import type { ReactNode } from "react";
 import { createFakeSupabase, filterValue } from "@/test/fake-supabase";
 
 const fake = vi.hoisted(() => ({ current: null as ReturnType<typeof createFakeSupabase> | null }));
-const rows = vi.hoisted(() => ({ facts: [] as any[] }));
+const rows = vi.hoisted(() => ({ facts: [] as any[], timezone: null as string | null }));
 
 vi.mock("@/integrations/supabase/client", async () => {
   const { createFakeSupabase } = await import("@/test/fake-supabase");
   fake.current = createFakeSupabase((q) => {
     if (q.table === "profile_facts" && q.op === "select") return { data: rows.facts };
+    if (q.table === "profiles" && q.op === "select") return { data: rows.timezone === null ? null : { timezone: rows.timezone } };
     if (q.table === "claims" && q.op === "delete") return { data: [{ id: "c1" }] };
     return undefined;
   });
@@ -19,18 +20,23 @@ vi.mock("@/integrations/supabase/client", async () => {
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ user: { id: "user-1" } }) }));
 vi.mock("@/lib/toast", () => ({ showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 vi.mock("@/hooks/usePeopleSync", () => ({ usePeopleSync: () => ({ triggerPeopleSync: vi.fn() }) }));
+vi.mock("sonner", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 import {
+  describeClaimWriteError,
   describeFactRefusal,
+  DuplicateFactValueError,
   groupFacts,
   groupSlots,
   invokeWriteFact,
   OTHER_SECTION,
   PAUSED_MESSAGE,
+  todayInTimeZone,
   useFacts,
   type ProfileFact,
 } from "../useFacts";
 import { showToast } from "@/lib/toast";
+import { toast } from "sonner";
 
 const fact = (over: Partial<ProfileFact> = {}): ProfileFact => ({
   claim_id: "c1",
@@ -75,6 +81,7 @@ function newClient() {
 beforeEach(() => {
   fake.current!.reset();
   rows.facts = [];
+  rows.timezone = null;
   fake.current!.setInvokeResult(async () => ({
     data: { ok: true, facts: [{ attribute: "languages", outcome: "inserted", claimId: "new", closed: 0 }] },
     error: null,
@@ -187,7 +194,9 @@ describe("useFacts", () => {
     const [read] = fake.current!.on("profile_facts", "select");
     expect(filterValue(read, "eq", "subject_type")).toBe("contact");
     expect(filterValue(read, "eq", "subject_id")).toBe("p1");
-    expect(fake.current!.queries.map((q) => q.table)).toEqual(["profile_facts"]);
+    // Reads only: the facts, and the profile's time zone ("today" for dates).
+    expect(new Set(fake.current!.queries.map((q) => q.table))).toEqual(new Set(["profile_facts", "profiles"]));
+    expect(fake.current!.queries.every((q) => q.op === "select")).toBe(true);
     expect(fake.current!.invocations).toEqual([]); // no adoption or backfill on open
   });
 
@@ -233,7 +242,8 @@ describe("useFacts", () => {
     const [end] = fake.current!.on("claims", "update");
     expect(end.payload).toEqual({ valid_to: "2026-09-01" });
     expect(filterValue(end, "eq", "id")).toBe("old");
-    expect(end.filters).toContainEqual(["is", "valid_to", null]);
+    // Still open, or set to end later than the new day (a change dated in the future).
+    expect(end.filters).toContainEqual(["or", "valid_to.is.null,valid_to.gt.2026-09-01", undefined]);
   });
 
   it("It changed twice on one day: the value that started today is ended too (eleventh review)", async () => {
@@ -330,5 +340,177 @@ describe("useFacts", () => {
     await expect(result.current.addFact.mutateAsync({ label: "Birthday", value: "x" })).rejects.toThrow("That date is not valid.");
     expect(showToast.error).toHaveBeenCalledWith("That date is not valid.");
     expect(showToast.success).not.toHaveBeenCalled();
+  });
+  it("Fix a mistake into a value that is already live says so in words and writes nothing", async () => {
+    rows.facts = [
+      fact({ claim_id: "en", value: "English" }),
+      fact({ claim_id: "typo", value: "Englsh", created_at: "2026-02-01T00:00:00Z" }),
+    ];
+    const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+    await waitFor(() => expect(result.current.facts).toHaveLength(2));
+    await expect(
+      result.current.fixFact.mutateAsync({ fact: rows.facts[1], value: "english" }),
+    ).rejects.toBeInstanceOf(DuplicateFactValueError);
+    expect(fake.current!.on("claims", "update")).toHaveLength(0);
+    expect(showToast.error).not.toHaveBeenCalled();
+    const [message, options] = vi.mocked(toast.info).mock.calls[0] as unknown as [
+      string,
+      { action: { label: string; onClick: () => void } },
+    ];
+    expect(message).toBe('"english" is already recorded under Languages, so this entry was not changed.');
+    expect(message).not.toMatch(/claims_one_live_value|duplicate key/);
+    // One click removes the mistaken entry ("Was wrong").
+    expect(options.action.label).toBe("Remove this entry");
+    options.action.onClick();
+    await waitFor(() => expect(fake.current!.on("claims", "delete")).toHaveLength(1));
+    expect(filterValue(fake.current!.on("claims", "delete")[0], "eq", "id")).toBe("typo");
+  });
+
+  it("Fix a mistake: the database's unique-index refusal (a stale page) reads the same", async () => {
+    const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+    const client = fake.current!.client as { from: (table: string) => any };
+    const original = client.from;
+    client.from = (table: string) => {
+      const chain = original(table);
+      if (table !== "claims") return chain;
+      const update = chain.update;
+      chain.update = (payload: unknown) => {
+        update(payload);
+        chain.then = (resolve: (v: unknown) => unknown) =>
+          Promise.resolve({
+            data: null,
+            error: { code: "23505", message: 'duplicate key value violates unique constraint "claims_one_live_value"' },
+          }).then(resolve);
+        return chain;
+      };
+      return chain;
+    };
+    try {
+      await expect(
+        result.current.fixFact.mutateAsync({ fact: fact({ value: "Englsh" }), value: "English" }),
+      ).rejects.toBeInstanceOf(DuplicateFactValueError);
+    } finally {
+      client.from = original;
+    }
+  });
+
+  it("turns the claim guards' raw messages into words", () => {
+    expect(describeFactRefusal("claim_quality_guard")).not.toContain("claim_quality_guard");
+    expect(
+      describeClaimWriteError({
+        code: "23514",
+        message: "claim_quality_guard: the value is a placeholder or repeats the attribute (city)",
+      }).message,
+    ).toBe(describeFactRefusal("claim_quality_guard"));
+    expect(
+      describeClaimWriteError({
+        code: "23514",
+        message: "claim_evidence_required: automated facts need a verbatim source quote",
+      }).message,
+    ).toBe("A source quote is needed for this fact.");
+  });
+
+  it("today is the profile's day: IANA zones, and UTC for an empty or unknown zone (user_today)", () => {
+    const now = new Date("2026-09-28T23:30:00Z");
+    expect(todayInTimeZone("Europe/Berlin", now)).toBe("2026-09-29");
+    expect(todayInTimeZone("America/New_York", now)).toBe("2026-09-28");
+    expect(todayInTimeZone("", now)).toBe("2026-09-28");
+    expect(todayInTimeZone(null, now)).toBe("2026-09-28");
+    expect(todayInTimeZone("Mars/Olympus", now)).toBe("2026-09-28");
+  });
+
+  it("No longer true and Keep this one end values on the profile's day, not the browser's", async () => {
+    // 12:00 UTC is already tomorrow on Kiritimati (UTC+14), whatever zone this machine is in.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-28T12:00:00Z"));
+    try {
+      rows.timezone = "Pacific/Kiritimati";
+      const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+      await result.current.endFact.mutateAsync({ fact: fact() });
+      const [end] = fake.current!.on("claims", "update");
+      expect(end.payload).toEqual({ valid_to: "2026-09-29" });
+
+      const [slot] = groupSlots([
+        fact({ claim_id: "a", value: "Berlin", has_conflict: true }),
+        fact({ claim_id: "b", value: "London", has_conflict: true }),
+      ]);
+      await result.current.keepOnly.mutateAsync({ slot, keep: slot.current[0] });
+      const keep = fake.current!.on("claims", "update")[1];
+      expect(keep.payload).toEqual({ valid_to: "2026-09-29" });
+      await waitFor(() => expect(result.current.actions.today!()).toBe("2026-09-29"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Fix the date moves a mistyped future start, and the value it replaced ends on the new day", async () => {
+    rows.facts = [
+      fact({
+        claim_id: "old",
+        attribute: "current-city",
+        label: "Current city",
+        value: "Berlin",
+        valid_from: "2020-01-01",
+        valid_to: "2062-09-01",
+      }),
+      fact({
+        claim_id: "new",
+        attribute: "current-city",
+        label: "Current city",
+        value: "London",
+        valid_from: "2062-09-01",
+        is_current: false,
+      }),
+    ];
+    const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+    await waitFor(() => expect(result.current.facts).toHaveLength(2));
+    await result.current.redateFact.mutateAsync({ fact: rows.facts[1], validFrom: "2026-09-01" });
+    const [start, previous] = fake.current!.on("claims", "update");
+    expect(filterValue(start, "eq", "id")).toBe("new");
+    expect(start.payload).toMatchObject({ valid_from: "2026-09-01" });
+    expect(filterValue(previous, "in", "id")).toEqual(["old"]);
+    expect(previous.payload).toEqual({ valid_to: "2026-09-01" });
+  });
+
+  it("Fix the date refuses a start on or after the day the value ended", async () => {
+    const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+    await expect(
+      result.current.redateFact.mutateAsync({
+        fact: fact({ valid_from: "2020-01-01", valid_to: "2024-01-01", is_current: false }),
+        validFrom: "2025-01-01",
+      }),
+    ).rejects.toThrow("The start has to be before the day it ended (2024-01-01).");
+    expect(fake.current!.on("claims", "update")).toHaveLength(0);
+  });
+
+  it("Was wrong on a value dated in the future: the value it was to replace no longer ends then", async () => {
+    rows.facts = [
+      fact({ claim_id: "old", attribute: "current-city", value: "Berlin", valid_to: "2062-09-01" }),
+      fact({ claim_id: "new", attribute: "current-city", value: "London", valid_from: "2062-09-01", is_current: false }),
+    ];
+    const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+    await waitFor(() => expect(result.current.facts).toHaveLength(2));
+    await result.current.retract.mutateAsync(rows.facts[1]);
+    const [del] = fake.current!.on("claims", "delete");
+    expect(filterValue(del, "eq", "id")).toBe("new");
+    const [reopen] = fake.current!.on("claims", "update");
+    expect(filterValue(reopen, "in", "id")).toEqual(["old"]);
+    expect(reopen.payload).toEqual({ valid_to: null });
+  });
+
+  it("Still true reopens an ended value, unless the same value is already current", async () => {
+    rows.facts = [
+      fact({ claim_id: "live", value: "German" }),
+      fact({ claim_id: "ended", value: "French", is_current: false, valid_to: "2026-01-01" }),
+      fact({ claim_id: "again", value: "german", is_current: false, valid_to: "2025-01-01" }),
+    ];
+    const { result } = renderHook(() => useFacts({ type: "contact", id: "p1" }), { wrapper: wrapper(newClient()) });
+    await waitFor(() => expect(result.current.facts).toHaveLength(3));
+    await result.current.reopenFact.mutateAsync(rows.facts[1]);
+    const [update] = fake.current!.on("claims", "update");
+    expect(update.payload).toEqual({ valid_to: null });
+    expect(filterValue(update, "eq", "id")).toBe("ended");
+    await expect(result.current.reopenFact.mutateAsync(rows.facts[2])).rejects.toThrow("is already a current value");
+    expect(fake.current!.on("claims", "update")).toHaveLength(1);
   });
 });

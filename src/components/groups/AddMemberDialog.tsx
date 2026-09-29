@@ -11,6 +11,7 @@ import { useAddMembership } from "@/hooks/useGroupMemberships";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
 import { initials } from "@/lib/group-utils";
+import { fetchAllPages } from "@/lib/postgrest";
 
 type ContactGroup = Database["public"]["Tables"]["contact_groups"]["Row"];
 type Contact = Pick<Database["public"]["Tables"]["contacts"]["Row"], "id" | "name" | "company" | "role">;
@@ -24,16 +25,22 @@ export function AddMemberDialog({ group, existingPersonIds }: { group: ContactGr
   const { data: contacts = [], isLoading } = useQuery<Contact[]>({
     queryKey: ["contacts", user?.id, "group-picker"],
     enabled: !!user && open,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("contacts").select("id, name, company, role").eq("user_id", user!.id).is("merged_into", null).order("name");
-      if (error) throw error;
-      return data || [];
-    },
+    // Read to the end: an unpaged select stops at 1,000 people, and anyone
+    // past that could not be added from here.
+    queryFn: () =>
+      fetchAllPages<Contact>((from, to) =>
+        supabase.from("contacts").select("id, name, company, role").eq("user_id", user!.id).is("merged_into", null).order("name").order("id").range(from, to),
+      ),
   });
   const available = contacts.filter((contact) => !existingPersonIds.has(contact.id) && contact.name.toLowerCase().includes(search.toLowerCase()));
 
   const submit = async () => {
-    await Promise.all(selected.map((personId) => addMembership.mutateAsync({ groupId: group.id, personId })));
+    try {
+      await Promise.all(selected.map((personId) => addMembership.mutateAsync({ groupId: group.id, personId })));
+    } catch {
+      // useAddMembership has already said what failed; keep the dialog open.
+      return;
+    }
     showToast.success("Members added");
     setSelected([]);
     setOpen(false);

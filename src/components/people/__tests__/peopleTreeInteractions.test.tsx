@@ -199,3 +199,28 @@ describe("PeopleTree — favorites and infinite scroll", () => {
     }
   });
 });
+
+describe("PeopleTree — groups beyond the loaded pages", () => {
+  it("shows a group member whose name sorts past the loaded pages, from the membership row", () => {
+    renderTree({
+      memberships: [
+        { id: "m1", group_id: "g-team", contact_id: "p-anna", status: null },
+        {
+          id: "m2",
+          group_id: "g-team",
+          contact_id: "p-zoe",
+          status: null,
+          contacts: { id: "p-zoe", name: "Zoe Late", aliases: [], is_favorite: false, last_viewed_at: null, merged_into: null },
+        },
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Team/ }));
+    expect(screen.getByText("Zoe Late")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Team/ })).toHaveTextContent("2");
+  });
+
+  it("does not say 'No people found' while a search is still running", () => {
+    renderTree({ people: [], searchQuery: "zo", serverSearch: true, loading: true });
+    expect(screen.queryByText("No people found")).not.toBeInTheDocument();
+  });
+});

@@ -19,12 +19,22 @@ interface MediaElementInfo {
 
 /**
  * Extracts the storage path segment from a Supabase storage URL.
- * URLs look like: https://xxx.supabase.co/storage/v1/object/public/note-attachments/userId/file.png
- * We need to match against the storage_path stored in media_analysis which is like: userId/file.png
+ * Attachments render through signed URLs:
+ *   https://xxx.supabase.co/storage/v1/object/sign/note-attachments/userId/file.png?token=...
+ * (older content may hold .../object/public/note-attachments/...). We need to
+ * match against the storage_path stored in media_analysis, like userId/file.png.
+ * Matching the whole URL captured "?token=..." too, so no signed image ever
+ * matched and the analysis badges and Retry never appeared: read the path only.
  */
 function extractStoragePath(url: string): string | null {
   try {
-    const match = url.match(/\/note-attachments\/(.+)$/);
+    let path: string;
+    try {
+      path = new URL(url, window.location.href).pathname;
+    } catch {
+      path = url.split(/[?#]/)[0];
+    }
+    const match = path.match(/\/note-attachments\/(.+)$/);
     return match ? decodeURIComponent(match[1]) : null;
   } catch {
     return null;

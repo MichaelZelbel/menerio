@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, HardDrive, ChevronRight, Folder, Home, RefreshCw, Trash2, CheckCircle2 } from "lucide-react";
 import { showToast } from "@/lib/toast";
+import { functionErrorMessage } from "@/lib/function-error";
 import { formatDistanceToNow } from "date-fns";
 
 interface GDriveConnection {
@@ -35,15 +36,27 @@ interface DriveFolder {
 }
 
 
+// Throws the invoke error itself: its `context` holds the function's answer,
+// which functionErrorMessage turns into a sentence. Its own message is always
+// "Edge Function returned a non-2xx status code", which used to be the toast.
 async function callProxy<T = unknown>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke("gdrive-proxy", { body });
-  if (error) throw new Error((data as { error?: string } | null)?.error || error.message);
+  if (error) throw error;
   if ((data as { error?: string } | null)?.error) throw new Error((data as { error: string }).error);
   return data as T;
 }
 
+// Google's own error code from the consent screen ("access_denied", ...).
+function oauthErrorMessage(code: string): string {
+  return code === "access_denied"
+    ? "Google Drive was not connected, because access was not granted."
+    : "Could not connect Google Drive. Try again.";
+}
+
 export function GoogleDriveScans() {
   const [loading, setLoading] = useState(true);
+  // The status could not be read: showing "Not connected" then would be a guess.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connection, setConnection] = useState<GDriveConnection | null>(null);
 
@@ -53,6 +66,7 @@ export function GoogleDriveScans() {
   const [targetFolder, setTargetFolder] = useState("auto-import");
   const [saving, setSaving] = useState(false);
   const popupRef = useRef<Window | null>(null);
+  const popupWatchRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [imports, setImports] = useState<GDriveImport[]>([]);
 
@@ -70,9 +84,11 @@ export function GoogleDriveScans() {
       const res = await callProxy<{ connection: GDriveConnection | null }>({ action: "status" });
       setConnection(res.connection);
       setTargetFolder(res.connection?.target_note_folder || "auto-import");
+      setLoadFailed(false);
       if (res.connection?.connected) await loadImports();
     } catch (e) {
       console.error("gdrive status failed", e);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -90,7 +106,7 @@ export function GoogleDriveScans() {
       await loadImports();
       await refresh();
     } catch (e) {
-      showToast.error(e instanceof Error ? e.message : "Sync failed");
+      showToast.error(await functionErrorMessage(e, "Sync failed. Try again."));
     } finally {
       setSyncing(false);
     }
@@ -110,7 +126,7 @@ export function GoogleDriveScans() {
         showToast.success("Google Drive connected");
         await refresh();
       } catch (e) {
-        showToast.error(e instanceof Error ? e.message : "Could not connect Google Drive");
+        showToast.error(await functionErrorMessage(e, "Could not connect Google Drive. Try again."));
       } finally {
         setConnecting(false);
       }
@@ -118,16 +134,27 @@ export function GoogleDriveScans() {
     [refresh],
   );
 
+  const stopPopupWatch = useCallback(() => {
+    if (popupWatchRef.current !== null) {
+      window.clearInterval(popupWatchRef.current);
+      popupWatchRef.current = null;
+    }
+  }, []);
+
+  // No interval outlives the page.
+  useEffect(() => stopPopupWatch, [stopPopupWatch]);
+
   // Listen for the popup handing back the exchange code.
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const data = event.data as { type?: string; code?: string; error?: string } | null;
       if (!data || data.type !== "gdrive-oauth") return;
+      stopPopupWatch();
       popupRef.current?.close();
       if (data.error) {
         setConnecting(false);
-        showToast.error(data.error);
+        showToast.error(oauthErrorMessage(data.error));
         return;
       }
       if (data.code) completeAuth(data.code);
@@ -140,7 +167,7 @@ export function GoogleDriveScans() {
       sessionStorage.removeItem("gdrive-oauth");
       try {
         const parsed = JSON.parse(stored) as { code?: string; error?: string };
-        if (parsed.error) showToast.error(parsed.error);
+        if (parsed.error) showToast.error(oauthErrorMessage(parsed.error));
         else if (parsed.code) completeAuth(parsed.code);
       } catch {
         /* ignore */
@@ -148,7 +175,7 @@ export function GoogleDriveScans() {
     }
 
     return () => window.removeEventListener("message", onMessage);
-  }, [completeAuth]);
+  }, [completeAuth, stopPopupWatch]);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -161,10 +188,21 @@ export function GoogleDriveScans() {
       if (!popupRef.current) {
         setConnecting(false);
         showToast.error("Please allow popups to connect Google Drive");
+        return;
       }
+      // Closing the Google window without finishing sends no message, and the
+      // button used to stay disabled with a spinner until the page was reloaded.
+      // A message already on its way still completes the connection.
+      stopPopupWatch();
+      popupWatchRef.current = window.setInterval(() => {
+        if (!popupRef.current || popupRef.current.closed) {
+          stopPopupWatch();
+          setConnecting(false);
+        }
+      }, 500);
     } catch (e) {
       setConnecting(false);
-      showToast.error(e instanceof Error ? e.message : "Could not start Google authorization");
+      showToast.error(await functionErrorMessage(e, "Could not start the Google sign-in. Try again."));
     }
   };
 
@@ -178,7 +216,7 @@ export function GoogleDriveScans() {
       setFolders(res.folders || []);
       if (!parent) setBreadcrumb([]);
     } catch (e) {
-      showToast.error(e instanceof Error ? e.message : "Could not list Drive folders");
+      showToast.error(await functionErrorMessage(e, "Could not list your Drive folders. Try again."));
     } finally {
       setBrowsing(false);
     }
@@ -207,7 +245,7 @@ export function GoogleDriveScans() {
       setConnection(res.connection);
       showToast.success("Saved");
     } catch (e) {
-      showToast.error(e instanceof Error ? e.message : "Could not save");
+      showToast.error(await functionErrorMessage(e, "Could not save. Try again."));
     } finally {
       setSaving(false);
     }
@@ -222,7 +260,7 @@ export function GoogleDriveScans() {
       setBreadcrumb([]);
       showToast.success("Google Drive disconnected");
     } catch (e) {
-      showToast.error(e instanceof Error ? e.message : "Could not disconnect");
+      showToast.error(await functionErrorMessage(e, "Could not disconnect Google Drive. Try again."));
     } finally {
       setSaving(false);
     }
@@ -233,6 +271,33 @@ export function GoogleDriveScans() {
       <Card>
         <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading Google Drive settings…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loadFailed) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <HardDrive className="h-4 w-4" /> Google Drive scans
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-destructive" role="alert">
+            Could not check whether Google Drive is connected.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setLoading(true);
+              void refresh();
+            }}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" /> Try again
+          </Button>
         </CardContent>
       </Card>
     );
@@ -379,10 +444,11 @@ export function GoogleDriveScans() {
 
             <div className="flex items-center justify-between gap-3">
               <div>
-                <Label>Import enabled</Label>
+                <Label htmlFor="gdrive-sync-enabled">Import enabled</Label>
                 <p className="text-xs text-muted-foreground">Pause importing without disconnecting.</p>
               </div>
               <Switch
+                id="gdrive-sync-enabled"
                 checked={connection?.sync_enabled !== false}
                 disabled={saving}
                 onCheckedChange={(v) => saveSettings({ sync_enabled: v })}

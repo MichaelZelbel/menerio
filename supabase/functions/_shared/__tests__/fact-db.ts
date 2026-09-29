@@ -145,7 +145,12 @@ export interface FactDb {
  * The database. `facts` builds claims and both views; `contacts` and
  * `entities` decide what agent_facts keeps, as the SQL view does.
  */
-export function factDb(seed: { facts?: FixtureFact[]; tables?: Record<string, Row[]> }): FactDb {
+export function factDb(seed: {
+  facts?: FixtureFact[];
+  tables?: Record<string, Row[]>;
+  /** PostgREST's row cap per response (Supabase: 1,000). Off unless a test sets it. */
+  maxRows?: number;
+}): FactDb {
   const tables: Record<string, Row[]> = { ...(seed.tables ?? {}) };
   tables.contacts ??= [];
   tables.entities ??= [];
@@ -232,7 +237,10 @@ export function factDb(seed: { facts?: FixtureFact[]; tables?: Record<string, Ro
             const match = (r: Row) => filters.every((f) => f(r));
             let rows: Row[];
             if (entry.action === "insert") {
-              rows = payload.map((p) => ({ id: p.id ?? `${table}-${++seq}`, embedding: null, ...p }));
+              // The column defaults a claim gets in the database, so a test that
+              // writes and then reads counts the new row as current.
+              const defaults = table === "claims" ? { valid_to: null, rank: "normal" } : {};
+              rows = payload.map((p) => ({ id: p.id ?? `${table}-${++seq}`, embedding: null, ...defaults, ...p }));
               if (table === "claims") {
                 for (const r of rows) {
                   const clash = tables.claims.find((c) => c.user_id === r.user_id && c.subject_type === r.subject_type &&
@@ -256,6 +264,7 @@ export function factDb(seed: { facts?: FixtureFact[]; tables?: Record<string, Ro
             }
             if (window) rows = rows.slice(window[0], window[1] + 1);
             if (max != null) rows = rows.slice(0, max);
+            if (seed.maxRows != null && entry.action === "select") rows = rows.slice(0, seed.maxRows);
             if (one) return { data: rows[0] ?? null, error: null };
             return { data: rows, error: null };
           }).then(ok, fail),

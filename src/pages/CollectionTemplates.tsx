@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { BRAND } from "@/lib/brand";
+import { LoadErrorState } from "@/components/collections/LoadErrorState";
 
 type Template = Database["public"]["Tables"]["collection_templates"]["Row"];
 type FieldType =
@@ -115,7 +116,19 @@ function TemplateCard({ template, onClick }: { template: Template; onClick: () =
   const fields = parseFields(template.field_schema);
   const usage = formatUsage(template.usage_count);
   return (
-    <Card className="cursor-pointer transition-colors hover:bg-accent/50" onClick={onClick}>
+    <Card
+      role="button"
+      tabIndex={0}
+      aria-label={`Preview the ${template.name} template`}
+      className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+    >
       <CardHeader>
         <div className="mb-2 text-4xl" aria-hidden="true">{template.icon || "📁"}</div>
         <CardTitle className="text-base">{template.name}</CardTitle>
@@ -197,11 +210,14 @@ export default function CollectionTemplates() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     const loadTemplates = async () => {
       setIsLoading(true);
+      setLoadFailed(false);
       const { data, error } = await supabase
         .from("collection_templates")
         .select("*")
@@ -210,7 +226,8 @@ export default function CollectionTemplates() {
         .order("name", { ascending: true });
       if (cancelled) return;
       if (error) {
-        toast.error("Could not load templates", { description: error.message });
+        // A failure with Retry, not "No templates yet".
+        setLoadFailed(true);
         setIsLoading(false);
         return;
       }
@@ -219,7 +236,7 @@ export default function CollectionTemplates() {
     };
     loadTemplates();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadTick]);
 
   const filteredTemplates = useMemo(() => {
     if (selectedCategory === "All") return templates;
@@ -248,6 +265,12 @@ export default function CollectionTemplates() {
 
       {isLoading ? (
         <TemplateSkeleton />
+      ) : loadFailed ? (
+        <LoadErrorState
+          className="min-h-[45vh]"
+          title="The templates could not be loaded."
+          onRetry={() => setReloadTick((tick) => tick + 1)}
+        />
       ) : templates.length === 0 ? (
         <div className="flex min-h-[45vh] items-center justify-center text-center">
           <div>
@@ -256,6 +279,8 @@ export default function CollectionTemplates() {
             <p className="mt-1 text-sm text-muted-foreground">Templates will appear here once they are added.</p>
           </div>
         </div>
+      ) : filteredTemplates.length === 0 ? (
+        <p className="py-16 text-center text-sm text-muted-foreground">No templates in this category yet.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredTemplates.map((template) => <TemplateCard key={template.id} template={template} onClick={() => { setSelectedTemplate(template); setInstructionsOpen(false); }} />)}

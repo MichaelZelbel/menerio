@@ -14,6 +14,8 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, Brain, FileText, Upload, Copy, Check, Sparkles } from "lucide-react";
 import { BRAND } from "@/lib/brand";
+import { functionErrorMessage } from "@/lib/function-error";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 const AI_MEMORY_PROMPT = `I'm setting up a personal knowledge system called ${BRAND.name}. Please check your memory and conversation history for everything you know about me — my role, projects, preferences, key people, decisions, and recurring topics. Organize it into categories: People, Projects, Preferences, Decisions, Professional context, Personal context. Present each item as a clear standalone statement. I'll save these to my system.`;
 
@@ -84,8 +86,12 @@ export function ImportMigrate() {
         title: "Wikilink backfill complete",
         description: `Scanned ${data?.scanned ?? 0} notes, added ${data?.links_added ?? 0} connections${data?.unresolved_count ? `, ${data.unresolved_count} unresolved titles` : ""}.`,
       });
-    } catch (err: any) {
-      toast({ title: "Backfill failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } catch (err) {
+      toast({
+        title: "Backfill failed",
+        description: await functionErrorMessage(err, "The connections could not be rebuilt. Try again."),
+        variant: "destructive",
+      });
     } finally {
       setBackfillLoading(false);
     }
@@ -115,9 +121,11 @@ export function ImportMigrate() {
         title: "Profile enrichment started",
         description: `${message} Profile facts from your recent notes and moments will keep arriving over the next few minutes.`,
       });
-    } catch (err: any) {
-      const message = err?.message ?? "Unknown error";
-      setPeopleResult(`Enrichment failed: ${message}`);
+    } catch (err) {
+      // The invoke error's own message is always "Edge Function returned a
+      // non-2xx status code"; the function's answer is read from it instead.
+      const message = await functionErrorMessage(err, "The profiles could not be enriched. Try again.");
+      setPeopleResult(`Enrichment failed. ${message}`);
       toast({ title: "Enrichment failed", description: message, variant: "destructive" });
     } finally {
       setProfileBackfillLoading(false);
@@ -147,7 +155,10 @@ export function ImportMigrate() {
   const [progressTotal, setProgressTotal] = useState(0);
 
   const copyPrompt = async () => {
-    await navigator.clipboard.writeText(AI_MEMORY_PROMPT);
+    if (!(await copyToClipboard(AI_MEMORY_PROMPT))) {
+      toast({ variant: "destructive", title: "Could not copy", description: COPY_FAILED_MESSAGE });
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -204,8 +215,8 @@ export function ImportMigrate() {
       if ((res.data?.created ?? 0) > 0 || (res.data?.linked ?? 0) > 0) {
         qc.invalidateQueries({ queryKey: ["contacts"] });
       }
-    } catch (err: any) {
-      peopleMessage = `People step failed: ${err?.message ?? "unknown error"}`;
+    } catch (err) {
+      peopleMessage = `People could not be created from this import. ${await functionErrorMessage(err, "Run \"Enrich profiles now\" below to try again.")}`;
     }
 
     setResult({ ...result, people: peopleMessage });

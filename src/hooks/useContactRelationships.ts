@@ -3,6 +3,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { relationshipPairKey, type EntityRef } from "@/lib/relationship-canonical";
 import { relationshipWriteDecision } from "@/lib/profile-integrity";
+import { fetchAllPages } from "@/lib/postgrest";
+
+/** A relationship write refused as a duplicate (the dedup check or the database's pair index). */
+export function isDuplicateRelationshipError(error: unknown): boolean {
+  const e = error as { code?: string; message?: string } | null;
+  const message = String(e?.message ?? "");
+  return e?.code === "23505" || message.includes("pair_key") || message.includes("uq_contact_relationship");
+}
 
 export interface ContactRelationship {
   id: string;
@@ -39,17 +47,26 @@ export function useContactRelationships(contactId: string | null) {
     queryKey,
     queryFn: async () => {
       if (!user) return [];
+      // The id goes into a filter string: only ever a uuid.
+      if (contactId !== null && !/^[0-9a-f-]{36}$/i.test(contactId)) return [];
 
-      // We need to fetch all relationships and filter for ones involving this entity
-      // Since we can't do OR in supabase-js easily with different column combos,
-      // fetch all user relationships and filter client-side (typically small set)
-      const { data, error } = await supabase
-        .from("contact_relationships")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
+      // Only the rows that involve this person (or the owner), read to the
+      // end. Reading every relationship of the account stopped at PostgREST's
+      // 1,000 rows, and a person past that cap showed none of theirs.
+      const involving =
+        contactId === null
+          ? "source_type.eq.self,target_type.eq.self"
+          : `and(source_type.eq.contact,source_id.eq.${contactId}),and(target_type.eq.contact,target_id.eq.${contactId})`;
+      const data = await fetchAllPages<Omit<ContactRelationship, "source_contact" | "target_contact">>((from, to) =>
+        supabase
+          .from("contact_relationships")
+          .select("*")
+          .eq("user_id", user.id)
+          .or(involving)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      );
 
       // Filter to relationships involving this entity
       const filtered = (data || []).filter((r: any) => {
@@ -123,12 +140,18 @@ export function useContactRelationships(contactId: string | null) {
 
       // Symmetric dedup against existing rows (skip on update of same row).
       // A failed lookup read as "no rows", so the duplicate check passed and
-      // an equivalent relationship was written a second time.
-      const { data: existing, error: existingError } = await supabase
-        .from("contact_relationships")
-        .select("id, source_type, source_id, target_type, target_id, label")
-        .eq("user_id", user.id);
-      if (existingError) throw existingError;
+      // an equivalent relationship was written a second time. Read to the end:
+      // past 1,000 rows the check missed the duplicate the same way.
+      const existing = await fetchAllPages<
+        Pick<ContactRelationship, "id" | "source_type" | "source_id" | "target_type" | "target_id" | "label">
+      >((from, to) =>
+        supabase
+          .from("contact_relationships")
+          .select("id, source_type, source_id, target_type, target_id, label")
+          .eq("user_id", user.id)
+          .order("id")
+          .range(from, to),
+      );
       const dup = (existing || []).find((r: any) => {
         if (data.id && r.id === data.id) return false;
         const ra: EntityRef = { type: r.source_type, id: r.source_id };

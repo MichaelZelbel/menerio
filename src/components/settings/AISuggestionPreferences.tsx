@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Brain, Loader2, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Brain, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -77,32 +77,46 @@ export function AISuggestionPreferences() {
   const { toast } = useToast();
   const [prefs, setPrefs] = useState<Preferences>(defaults);
   const [loading, setLoading] = useState(true);
+  // A failed load left the defaults on screen, and Save then wrote them over
+  // the real settings. While it is set, the form is not shown and cannot save.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!user) return;
-
-    supabase
+  // Keyed on the id, not the user object: a new object for the same account
+  // (a token refresh on returning to the tab) must not reload the form over
+  // unsaved changes.
+  const userId = user?.id;
+  const load = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    const { data, error } = await supabase
       .from("ai_suggestion_preferences" as any)
       .select("suggestion_mode, suggestion_sensitivity, auto_add_sensitive, profile_language")
-      .eq("user_id", user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        const row = data as any;
-        if (row) {
-          setPrefs({
-            suggestion_mode: row.suggestion_mode || defaults.suggestion_mode,
-            suggestion_sensitivity: row.suggestion_sensitivity || defaults.suggestion_sensitivity,
-            auto_add_sensitive: row.auto_add_sensitive ?? defaults.auto_add_sensitive,
-            profile_language: row.profile_language || defaults.profile_language,
-          });
-        }
-        setLoading(false);
-      });
-  }, [user]);
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) {
+      setLoadFailed(true);
+    } else {
+      setLoadFailed(false);
+      const row = data as any;
+      if (row) {
+        setPrefs({
+          suggestion_mode: row.suggestion_mode || defaults.suggestion_mode,
+          suggestion_sensitivity: row.suggestion_sensitivity || defaults.suggestion_sensitivity,
+          auto_add_sensitive: row.auto_add_sensitive ?? defaults.auto_add_sensitive,
+          profile_language: row.profile_language || defaults.profile_language,
+        });
+      }
+    }
+    setLoading(false);
+  }, [userId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const save = async () => {
-    if (!user) return;
+    if (!user || loadFailed) return;
     setSaving(true);
 
     const { error } = await supabase
@@ -122,6 +136,21 @@ export function AISuggestionPreferences() {
       <Card>
         <CardContent className="flex items-center justify-center py-12">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loadFailed) {
+    return (
+      <Card>
+        <CardContent className="space-y-3 py-8 text-center">
+          <p className="text-sm text-destructive" role="alert">
+            Could not load your AI suggestion settings, so they cannot be changed right now.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            <RefreshCw className="mr-2 h-4 w-4" /> Try again
+          </Button>
         </CardContent>
       </Card>
     );
@@ -185,7 +214,7 @@ export function AISuggestionPreferences() {
 
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-1">
-            <Label className="flex items-center gap-2">
+            <Label htmlFor="ai-auto-add-sensitive" className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-muted-foreground" />
               Auto-add sensitive insights
             </Label>
@@ -194,6 +223,7 @@ export function AISuggestionPreferences() {
             </p>
           </div>
           <Switch
+            id="ai-auto-add-sensitive"
             checked={prefs.auto_add_sensitive}
             onCheckedChange={(checked) => setPrefs((p) => ({ ...p, auto_add_sensitive: checked }))}
           />
@@ -202,7 +232,7 @@ export function AISuggestionPreferences() {
         <Separator />
 
         <div className="space-y-2">
-          <Label className="text-sm font-semibold">Profile language</Label>
+          <Label htmlFor="ai-profile-language" className="text-sm font-semibold">Profile language</Label>
           <p className="text-xs text-muted-foreground">
             Standardised profile facts — job title, nationality, languages, city and country names — are written in
             this language, even when the note was written in another one. Names, addresses and quotes are never translated.
@@ -211,7 +241,7 @@ export function AISuggestionPreferences() {
             value={prefs.profile_language}
             onValueChange={(value) => setPrefs((p) => ({ ...p, profile_language: value }))}
           >
-            <SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger>
+            <SelectTrigger id="ai-profile-language" className="w-full sm:w-64"><SelectValue /></SelectTrigger>
             <SelectContent>
               {PROFILE_LANGUAGES.map((lang) => (
                 <SelectItem key={lang} value={lang}>{lang}</SelectItem>
@@ -220,7 +250,7 @@ export function AISuggestionPreferences() {
           </Select>
         </div>
 
-        <Button onClick={save} disabled={saving}>
+        <Button onClick={save} disabled={saving || loadFailed}>
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Save Settings
         </Button>

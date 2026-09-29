@@ -43,22 +43,28 @@ export interface WikiRevisionReviewItem {
   source_note?: { id: string; title: string } | null;
 }
 
-export function useReviewQueue() {
+/**
+ * @param contactId Only the suggestions about one person (a person page's
+ * "N pending profile suggestions" link). Filtered in the database: filtering
+ * the 500 newest rows in the page found nothing for a person whose
+ * suggestions were older, while the badge that led there counted them.
+ */
+export function useReviewQueue(contactId: string | null = null) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ["review-queue", user?.id],
+    queryKey: ["review-queue", user?.id, contactId ?? "all"],
     queryFn: async () => {
       // Only fetch the columns a card actually renders, and cap at 500 rows.
       // The full count is served by the separate head:true query below.
-      const { data, error } = await supabase
+      let query = supabase
         .from("review_queue" as any)
         .select("id,user_id,suggestion_type,target_entity_id,target_entity_type,applied_at,source_note_id,suppression_key,extracted_value,is_sensitive,title,description,payload,status,created_at,reviewed_at,confidence_score,blocked_at, source_note:notes!review_queue_source_note_id_fkey(title)")
         .in("status", ["pending", "pending_review", "auto_applied_unreviewed"])
-        .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`)
-        .order("created_at", { ascending: false })
-        .range(0, 499);
+        .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
+      if (contactId) query = query.contains("payload", { contact_id: contactId });
+      const { data, error } = await query.order("created_at", { ascending: false }).range(0, 499);
       if (error) throw error;
       return (data || []) as unknown as ReviewItem[];
     },

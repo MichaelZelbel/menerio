@@ -206,7 +206,7 @@ export function ApiKeysManager() {
                     <code className="flex-1 text-xs bg-muted p-2 rounded font-mono break-all">
                       {generatedKey}
                     </code>
-                    <Button size="sm" variant="outline" onClick={handleCopy}>
+                    <Button size="sm" variant="outline" onClick={handleCopy} aria-label={copied ? "Copied" : "Copy API key"}>
                       {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                     </Button>
                   </div>
@@ -323,7 +323,12 @@ export function ApiKeysManager() {
                 {key.is_active && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        aria-label={`Revoke ${key.name}`}
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </AlertDialogTrigger>

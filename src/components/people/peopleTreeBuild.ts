@@ -68,10 +68,19 @@ export function buildPeopleTree(input: {
   people: PersonLite[];
   groups: GroupLite[];
   memberships: MembershipLite[];
+  /**
+   * Group members known from elsewhere (the membership query carries each
+   * member's row). `people` is loaded 50 at a time by name, so without these a
+   * group listed, and counted, only the members already scrolled into view.
+   * They fill groups only; the ungrouped list stays the loaded pages.
+   */
+  members?: PersonLite[];
 }): PeopleTreeResult {
-  const { people, groups, memberships } = input;
+  const { people, groups, memberships, members = [] } = input;
 
   const peopleById = new Map<string, PersonLite>();
+  members.forEach((p) => peopleById.set(p.id, p));
+  // A loaded row is the freshest copy of a person.
   people.forEach((p) => peopleById.set(p.id, p));
 
   const activeGroups = groups.filter(isActiveGroup);

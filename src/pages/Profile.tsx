@@ -34,7 +34,7 @@ export default function Profile() {
     upsertView,
     deleteView,
   } = useProfile();
-  const { facts, currentFacts, isLoading: factsLoading, actions } = useFacts(SELF);
+  const { facts, currentFacts, isLoading: factsLoading, actions, addFact } = useFacts(SELF);
   const isLoading = sectionsLoading || factsLoading;
 
   const { user } = useAuth();
@@ -102,7 +102,7 @@ export default function Profile() {
         </div>
         <h1 className="text-2xl font-semibold mb-2">Build your personal profile</h1>
         <p className="text-muted-foreground max-w-md mb-6">
-          Help AI agents understand who you are. Fill in what matters to you — everything is optional, and you can add your own categories anytime.
+          Help AI agents understand who you are. Fill in what matters to you. Everything is optional, and you can add your own categories anytime.
         </p>
         <Button onClick={() => seedDefaults.mutate()} disabled={seedDefaults.isPending}>
           Get Started
@@ -113,12 +113,12 @@ export default function Profile() {
 
   return (
     <>
-      <SEOHead title="My Profile — Menerio" description="Manage the personal profile AI agents use to understand you — your bio, preferences, goals, and context that powers personalized responses." noIndex />
+      <SEOHead title="My Profile — Menerio" description="Manage the personal profile AI agents use to understand you: your bio, preferences, goals, and context that powers personalized responses." noIndex />
       <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
         <div>
           <h1 className="text-2xl font-semibold">My Profile</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Your personal context layer for AI agents. Fill in what matters — everything is optional.
+            Your personal context layer for AI agents. Fill in what matters. Everything is optional.
           </p>
         </div>
 
@@ -138,7 +138,7 @@ export default function Profile() {
               categories={categories}
               factCount={currentFacts.length}
               noteCount={noteCount}
-              onAccept={(data) => actions.add(data)}
+              onAccept={(data) => addFact.mutateAsync(data)}
             />
             <ProfileSections
               categories={categories}

@@ -8,6 +8,7 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 import { ShieldAlert } from "lucide-react";
+import { Link } from "react-router-dom";
 
 interface ModerationBlockDialogProps {
   isOpen: boolean;
@@ -45,9 +46,16 @@ export function ModerationBlockDialog({
               )}
               <p className="text-xs text-muted-foreground">
                 Please review our{" "}
-                <a href="/terms" className="underline text-primary">
+                {/* The guidelines page itself (this pointed at the Terms of
+                    Service), in a new tab so the note being edited stays open. */}
+                <Link
+                  to="/community-guidelines"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline text-primary"
+                >
                   Community Guidelines
-                </a>{" "}
+                </Link>{" "}
                 for more information.
               </p>
             </div>

@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { dbErrorMessage } from "@/lib/function-error";
+import { fetchAllPages } from "@/lib/postgrest";
 import { usePeopleSync } from "@/hooks/usePeopleSync";
 
 type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
@@ -23,8 +25,25 @@ export type PersonGroupMembership = MembershipRow & {
   contact_groups: ContactGroupRow | null;
 };
 
+/** The member's own row, as the People tree lists it. */
+export type MemberContact = {
+  id: string;
+  name: string;
+  aliases: string[] | null;
+  is_favorite: boolean | null;
+  last_viewed_at: string | null;
+  merged_into: string | null;
+};
+
 /** Slim shape for the aggregate membership query that powers the People tree. */
-export type MembershipLite = Pick<MembershipRow, "id" | "group_id" | "contact_id" | "status">;
+export type MembershipLite = Pick<MembershipRow, "id" | "group_id" | "contact_id" | "status"> & {
+  /**
+   * The member, so a group lists all its people. The tree's own list loads
+   * people 50 at a time by name, and a group used to show (and count) only
+   * the members that had been scrolled into view.
+   */
+  contacts?: MemberContact | null;
+};
 
 type AddMembershipInput = {
   groupId: string;
@@ -80,16 +99,17 @@ export function useAllMemberships() {
   return useQuery<MembershipLite[]>({
     queryKey: ["contact_group_memberships", "all", user?.id],
     enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("contact_group_memberships")
-        .select("id, group_id, contact_id, status")
-        .eq("user_id", user!.id)
-        .is("archived_at", null);
-
-      if (error) throw error;
-      return ((data || []) as unknown) as MembershipLite[];
-    },
+    // Read to the end: an unpaged select stops at 1,000 rows without a word.
+    queryFn: async () =>
+      fetchAllPages<MembershipLite>((from, to) =>
+        supabase
+          .from("contact_group_memberships")
+          .select("id, group_id, contact_id, status, contacts:contact_id(id, name, aliases, is_favorite, last_viewed_at, merged_into)")
+          .eq("user_id", user!.id)
+          .is("archived_at", null)
+          .order("id")
+          .range(from, to),
+      ),
   });
 }
 
@@ -98,10 +118,13 @@ export function usePersonGroupMemberships(personId: string | null | undefined) {
     queryKey: ["person_groups", personId],
     enabled: !!personId,
     queryFn: async () => {
+      // Inner join on live groups: a membership of a trashed group used to
+      // show on the person's Groups tab as if the group still existed.
       const { data, error } = await supabase
         .from("contact_group_memberships")
-        .select("*, contact_groups:group_id(*)")
+        .select("*, contact_groups:group_id!inner(*)")
         .eq("contact_id", personId!)
+        .eq("contact_groups.is_trashed", false)
         .is("archived_at", null)
         .order("updated_at", { ascending: false });
 
@@ -172,7 +195,7 @@ export function useAddMembership() {
       // a "duplicate key" message — translate it to a friendly line, since the
       // person is simply already a member.
       const message = String(error?.message || "").toLowerCase();
-      showToast.error(message.includes("duplicate") ? "Already a member" : error.message);
+      showToast.error(message.includes("duplicate") ? "Already a member" : dbErrorMessage(error, "Could not add the member."));
     },
   });
 }
@@ -202,7 +225,7 @@ export function useUpdateMembership() {
       invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.contact_id);
       triggerPeopleSync();
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not save the membership.")),
   });
 }
 
@@ -226,7 +249,7 @@ export function useRemoveMembership() {
       // detection — force both affected pages.
       triggerPeopleSync({ people: [personId], groups: [groupId] });
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not remove the member.")),
   });
 }
 
@@ -250,7 +273,7 @@ export function useArchiveMembership() {
       invalidateMembershipQueries(qc, groupId || membership.group_id, personId || membership.contact_id);
       triggerPeopleSync();
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not archive the membership.")),
   });
 }
 
@@ -284,7 +307,7 @@ export function useReorderMemberships() {
       personIds.forEach((personId) => qc.invalidateQueries({ queryKey: ["person_groups", personId] }));
       triggerPeopleSync();
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not reorder the members.")),
   });
 }
 
@@ -308,6 +331,6 @@ export function useMoveMembershipStage() {
       invalidateMembershipQueries(qc, membership.group_id, membership.contact_id);
       triggerPeopleSync();
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not move the member to that stage.")),
   });
 }

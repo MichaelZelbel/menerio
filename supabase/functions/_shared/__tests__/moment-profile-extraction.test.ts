@@ -7,7 +7,7 @@ vi.mock("../fact-store.ts", async (importOriginal) => ({
   writeFact: (...args: unknown[]) => writeFact(...args),
 }));
 
-const { prepareForInsert } = await import("../moment-profile-extraction.ts");
+const { participantsForModel, prepareForInsert } = await import("../moment-profile-extraction.ts");
 
 // Facts found in a timeline moment go through the one write path, as ai_moment
 // with the moment as their source.
@@ -53,5 +53,24 @@ describe("moment facts", () => {
     const result = await prepareForInsert(db, suggestion({ evidence_quote: "Lisbon" }), prefs);
     expect(result.status).toBe("pending_review");
     expect(writeFact).not.toHaveBeenCalled();
+  });
+});
+
+// Review 2026-09-29: the moment went to the model with every participant, and
+// facts were written back about people hidden from AI or marked sensitive.
+describe("moment participants the model may hear about", () => {
+  const anna = { id: "a", name: "Anna", ai_visibility: "visible", is_sensitive: false };
+  const hidden = { id: "h", name: "Hidden", ai_visibility: "hidden", is_sensitive: false };
+  const sensitive = { id: "s", name: "Sensitive", ai_visibility: "visible", is_sensitive: true };
+
+  it("a person hidden from AI is not named to the model", () => {
+    expect(participantsForModel([anna, hidden], true)).toEqual({ people: [{ contact_id: "a", canonical_name: "Anna" }] });
+  });
+
+  it("a moment with a sensitive person is skipped while the owner hides sensitive people", () => {
+    expect(participantsForModel([anna, sensitive], true)).toEqual({ skip: "sensitive_participant" });
+    expect(participantsForModel([anna, sensitive], false)).toEqual({
+      people: [{ contact_id: "a", canonical_name: "Anna" }, { contact_id: "s", canonical_name: "Sensitive" }],
+    });
   });
 });

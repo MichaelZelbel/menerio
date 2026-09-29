@@ -27,7 +27,14 @@ export interface ToolbarLayoutContext {
   hasRemoveLink: boolean;
 }
 
-/** Left-to-right visual order of the formatting groups. */
+/**
+ * Left-to-right visual order of the formatting groups.
+ *
+ * "align" is not offered: notes are stored as Markdown, which has no syntax
+ * for paragraph alignment, so an aligned paragraph came back left-aligned the
+ * next time the note opened. A button whose effect silently disappears is
+ * worse than none. (Table column alignment is kept; GFM has syntax for it.)
+ */
 export const DISPLAY_ORDER: ToolbarGroupId[] = [
   "history",
   "blockType",
@@ -36,7 +43,6 @@ export const DISPLAY_ORDER: ToolbarGroupId[] = [
   "color",
   "lists",
   "blockFormat",
-  "align",
   "insert",
   "clear",
 ];
@@ -53,7 +59,6 @@ export const COLLAPSE_ORDER: ToolbarGroupId[] = [
   "extendedMarks",
   "coreMarks",
   "color",
-  "align",
   "blockFormat",
   "history",
   "insert",

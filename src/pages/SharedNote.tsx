@@ -8,7 +8,7 @@ import { format } from "date-fns";
 import { SEOHead } from "@/components/SEOHead";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import DOMPurify from "dompurify";
+import { sanitizeSharedNoteHtml } from "@/lib/shared-note-html";
 import { BRAND } from "@/lib/brand";
 
 interface SharedNoteData {
@@ -100,7 +100,7 @@ export default function SharedNote() {
 
   const displayTitle = note.title || "Untitled";
   const isHtml = looksLikeHtml(note.content);
-  const safeHtml = isHtml ? DOMPurify.sanitize(note.content, { USE_PROFILES: { html: true } }) : "";
+  const safeHtml = isHtml ? sanitizeSharedNoteHtml(note.content) : "";
 
   return (
     <>

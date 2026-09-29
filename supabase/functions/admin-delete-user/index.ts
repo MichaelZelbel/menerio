@@ -70,9 +70,6 @@ serve(async (req) => {
     const storage = await removeUserStorage(adminClient, target_user_id);
     for (const err of storage.errors) console.error("[admin-delete-user] storage cleanup:", err);
 
-    await adminClient.from("user_roles").delete().eq("user_id", target_user_id);
-    await adminClient.from("profiles").delete().eq("id", target_user_id);
-
     // Deleting the auth user cascades owned rows (notes, contacts, …) via their
     // on-delete-cascade FKs to auth.users. Migration 20260916120000 gave every
     // public table with a user_id column that key; before it, contacts, moments,
@@ -82,6 +79,12 @@ serve(async (req) => {
       console.error("[admin-delete-user] auth delete failed:", deleteError);
       return json({ error: "Failed to delete user" }, 500);
     }
+
+    // Role and profile cascade too; swept by hand only after the auth delete
+    // succeeded. Deleted first, a failed auth delete left a live account with
+    // no role and no profile (a premium user silently became a free one).
+    await adminClient.from("user_roles").delete().eq("user_id", target_user_id);
+    await adminClient.from("profiles").delete().eq("id", target_user_id);
 
     console.log(`[admin-delete-user] admin ${caller.id} deleted user ${target_user_id}`);
     return json({ success: true });

@@ -242,3 +242,27 @@ describe("wouldCreateCycle", () => {
     expect(typeof wouldCreateCycle(malformed, "z", "a")).toBe("boolean");
   });
 });
+
+describe("buildPeopleTree — members the loaded pages do not hold yet", () => {
+  it("lists and counts every member of a group, and keeps them out of the ungrouped list", () => {
+    const tree = buildPeopleTree({
+      people: [person("anna"), person("bob")],
+      groups: [group("family")],
+      memberships: [membership("family", "anna"), membership("family", "zoe")],
+      members: [person("zoe", { name: "Zoe" })],
+    });
+    expect(tree.roots[0].people.map((p) => p.id)).toEqual(["anna", "zoe"]);
+    expect(tree.roots[0].subtreeCount).toBe(2);
+    expect(tree.ungrouped.map((p) => p.id)).toEqual(["bob"]);
+  });
+
+  it("prefers the loaded row over the member copy", () => {
+    const tree = buildPeopleTree({
+      people: [person("anna", { name: "Anna (renamed)" })],
+      groups: [group("family")],
+      memberships: [membership("family", "anna")],
+      members: [person("anna", { name: "Anna" })],
+    });
+    expect(tree.roots[0].people[0].name).toBe("Anna (renamed)");
+  });
+});

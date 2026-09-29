@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { DashboardSidebar } from "./DashboardSidebar";
@@ -9,6 +10,8 @@ import { NotificationCenter } from "@/components/notifications/NotificationCente
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LowBalanceBanner } from "./LowBalanceBanner";
 import { useProcessingSweep } from "@/hooks/useProcessingSweep";
+import { RouteErrorBoundary } from "@/components/ErrorBoundary";
+import { PageLoader } from "@/components/LoadingStates";
 
 
 
@@ -34,7 +37,14 @@ export function DashboardLayout() {
 
           
           <main className="flex-1 overflow-auto p-6">
-            <Outlet />
+            {/* A crashing page no longer takes the sidebar with it, and the
+                boundary clears on the next navigation. Loading a page's code
+                keeps the sidebar and header on screen. */}
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageLoader />}>
+                <Outlet />
+              </Suspense>
+            </RouteErrorBoundary>
           </main>
         </div>
         <GlobalAIChatFAB />

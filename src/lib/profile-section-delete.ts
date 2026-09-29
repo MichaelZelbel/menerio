@@ -23,5 +23,11 @@ export async function deleteProfileSection(db: any, id: string): Promise<void> {
     if (error) throw error;
   }
   const { error } = await db.from("profile_categories").delete().eq("id", id);
-  if (error) throw error;
+  if (error) {
+    // The guard's own text ("private_section_not_empty: ...") is not a sentence.
+    if (String(error.message ?? "").startsWith("private_section_not_empty")) {
+      throw new Error("A private section that still holds facts cannot be deleted. Move or remove its facts first.");
+    }
+    throw error;
+  }
 }

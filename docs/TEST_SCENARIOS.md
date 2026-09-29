@@ -1122,7 +1122,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 
 ## Section 16: Premium Feature Gating
 
-> **Not currently reachable in the UI.** `PremiumGate` (`src/components/subscription/PremiumGate.tsx`) exists, but no page or component renders it, so no feature is gated today. Keep these scenarios for when a feature is wrapped again.
+> **Not currently reachable in the UI.** No feature is gated today. The unused `PremiumGate` component was removed on 2026-09-29 (last version in commit `dc6d5255`, `src/components/subscription/PremiumGate.tsx`). Keep these scenarios for when a feature is gated again.
 
 ### TS-PREMIUM-001: Premium Gate — Free User Blocked
 
@@ -1761,7 +1761,7 @@ Unit tests run with `npm test`. Real SQL tests require an explicitly supplied di
 
 ### TS-CAPTURE-007: Quick Capture FAB
 
-> **Not currently reachable in the UI.** The `QuickCapture` component (`src/components/notes/QuickCapture.tsx`) exists but nothing renders it, and the "New Note" split button offers only New Note, New Person, New Moment and New Prompt (Querino). Kept for when it is wired back in.
+> **Not currently reachable in the UI.** The "New Note" split button offers only New Note, New Person, New Moment and New Prompt (Querino). The unused `QuickCapture` component was removed on 2026-09-29 (last version in commit `dc6d5255`, `src/components/notes/QuickCapture.tsx`); restore it from there if quick capture is wired back in.
 
 - **Objective:** Validate in-app quick capture
 - **Preconditions:** Signed in

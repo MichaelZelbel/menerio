@@ -3,8 +3,14 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
-import { runChat } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat, sourceIsDataRule } from "../_shared/llm-router.ts";
 import { INGEST_THOUGHT_METADATA_PROMPT } from "../_shared/llm-defaults.ts";
+
+/**
+ * The most text the metadata call reads, process-note's budget for the same
+ * call. The note itself is stored whole.
+ */
+const MAX_AI_INPUT_CHARS = 24_000;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -34,8 +40,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user) return json({ error: "unauthorized" }, 401);
 
-    const body = await req.json();
-    const messageText = (body.text || body.content || "").trim();
+    // A malformed body is the caller's mistake: 400, not a 500 it retries.
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "Body must be JSON" }, 400);
+    }
+    const rawText = body?.text || body?.content || "";
+    if (typeof rawText !== "string") return json({ error: "text or content must be a string" }, 400);
+    const messageText = rawText.trim();
     if (!messageText) return json({ error: "text or content required" }, 400);
     const source = body.source || "slack";
 
@@ -52,17 +66,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
             db: supabase,
             userId: user.id,
             callSite: "ingest-thought.metadata",
-            messages: [{ role: "user", content: messageText }],
+            messages: [{ role: "user", content: messageText.slice(0, MAX_AI_INPUT_CHARS) }],
             defaults: {
               provider: "openrouter",
               model: "deepseek/deepseek-v4-flash",
               systemPrompt: INGEST_THOUGHT_METADATA_PROMPT,
             },
+            systemSuffix: sourceIsDataRule(),
             callOptions: { response_format: { type: "json_object" } },
           }),
         ]);
         if (embResult) embedding = embResult.embedding;
-        try { metadata = JSON.parse(chatResult.content); } catch { /* keep default */ }
+        // JSON.parse("null") is null, and `(null).topics` below threw after
+        // the AI was paid for: answered 500, capture lost. Only an object
+        // replaces the default; a ```json fenced reply is read too.
+        const parsed = parseModelJson<Record<string, unknown>>(chatResult.content);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed;
       } catch (err: any) {
         // A provider timeout or 5xx used to be rethrown before the insert, so
         // the capture was answered 500 and lost. Save it with the default

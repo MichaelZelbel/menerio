@@ -52,6 +52,41 @@ export async function resolveEntityByName(db: any, userId: string, name: string)
   return { error: `"${name.trim()}" matches more than one entity: ${listed}${pool.length > 5 ? "; and more" : ""}. Call again with subject_id.` };
 }
 
+/**
+ * An entity row as an assistant may receive it. Hidden: nothing (null).
+ * Sensitive: id, name and type only, the way a sensitive person keeps only
+ * id, name and relationship; its description, aliases and metadata say what
+ * agent_facts withholds. create_entity handed a hidden entity back whole when
+ * its name was reused, and search_entities returned a sensitive one whole.
+ */
+export function entityForAgent<T extends { id: string; name: string; entity_type?: string | null; ai_visibility?: string | null; is_sensitive?: boolean | null }>(
+  row: T | null | undefined,
+): T | { id: string; name: string; entity_type: string | null; is_sensitive: true; _redacted: string } | null {
+  if (!row || row.ai_visibility !== "visible") return null;
+  if (row.is_sensitive !== true) return row;
+  return {
+    id: row.id,
+    name: row.name,
+    entity_type: row.entity_type ?? null,
+    is_sensitive: true,
+    _redacted: "Details hidden: this entity is marked sensitive.",
+  };
+}
+
+// ─── get_user_profile's instructions ─────────────────────────────────
+
+/**
+ * The owner's active agent instructions an assistant may receive, in order.
+ * "Private (never shared)" never leaves, whatever scope is asked for: scope
+ * "private" used to return exactly those.
+ */
+export function sharedInstructions(rows: Array<{ instruction?: unknown; applies_to?: unknown }>, scope?: string | null): string[] {
+  return rows
+    .filter((i) => i.applies_to !== "private" && (!scope || i.applies_to === "all" || i.applies_to === scope))
+    .map((i) => i.instruction)
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+}
+
 // ─── get_claims ──────────────────────────────────────────────────────
 
 export interface GetClaimsArgs {
@@ -310,6 +345,7 @@ export async function addClaim(db: any, userId: string, args: AddClaimArgs): Pro
     outcome: OUTCOME_TEXT[f.outcome] ?? f.outcome,
     ...(f.claimId ? { claim_id: f.claimId } : {}),
     ...(f.closed ? { closed_previous: f.closed } : {}),
+    ...(f.validTo ? { valid_to: f.validTo, valid_to_note: "A later value is already on file, so this one is recorded as ending the day that one starts." } : {}),
     ...(f.conflict ? { two_answers: "A current value this writer may not close stays alongside; both are shown until the user decides." } : {}),
     ...(f.reason ? { reason: f.reason } : {}),
   }));

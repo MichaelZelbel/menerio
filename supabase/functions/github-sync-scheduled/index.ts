@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { isValidCronRequest } from "../_shared/cron-auth.ts";
 import { runGithubSync } from "../_shared/github-sync-run.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
+import { secretEquals } from "../_shared/secret-equals.ts";
 const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-key", "Content-Type": "application/json" };
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers });
@@ -9,7 +10,10 @@ Deno.serve(async (req) => {
     const url = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const authorization = req.headers.get("Authorization") || "";
-    const scheduler = (Boolean(serviceKey) && authorization === `Bearer ${serviceKey}`) || await isValidCronRequest(req);
+    // Digest compare: `===` on the service key stopped at the first differing
+    // character, so response timing told a caller how much of it they had right.
+    const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    const scheduler = await secretEquals(bearer, serviceKey) || await isValidCronRequest(req);
     let userId: string | null = null;
     if (!scheduler) {
       if (!authorization.startsWith("Bearer ")) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers });

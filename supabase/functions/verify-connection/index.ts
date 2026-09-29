@@ -44,6 +44,13 @@ Deno.serve(async (req: Request) => {
       return json({ error: "connection has been revoked" }, 401);
     }
 
+    // Paused in Settings. receive-note, link-note and patch-response all refuse
+    // such an app; this answered "ok" (and turned a pending one active), so the
+    // app reported itself connected while every call it then made was refused.
+    if (!app.is_active) {
+      return json({ error: "unauthorized — app is deactivated" }, 401);
+    }
+
     if (app.connection_status === "active") {
       return json({ ok: true, already_connected: true, app_name: "menerio" }, 200);
     }

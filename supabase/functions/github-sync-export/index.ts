@@ -470,7 +470,15 @@ async function syncSingleNote(
       filePath = syncEntry?.github_path || filePath;
       // Get current file SHA
       const existing = await githubGetFile(ghToken, owner, repo, filePath, branch);
-      if (existing?.sha) {
+      // Only a file that is this note's: one GitHub holds a version of it in
+      // (the log has its sha) that no other note claims, or one carrying its
+      // id. Trashing a note that never reached GitHub deleted whatever file
+      // shared its name: another note's, or one written in Obsidian.
+      const ours = Boolean(existing?.sha) && (
+        (Boolean(syncEntry?.github_sha) && !(await pathClaimedByAnotherNote(supabase, userId, filePath, String(note.id))))
+        || fileCarriesNoteId(existing, String(note.id))
+      );
+      if (ours) {
         await githubDeleteFile(ghToken, owner, repo, filePath, existing.sha, `Delete: ${note.title}`, branch);
       }
       // Remove sync log entry
@@ -479,6 +487,12 @@ async function syncSingleNote(
     }
 
     // Create/Update
+    // A conflict is settled in the conflicts panel. The next editor save used
+    // to push the local text over the remote edit and mark the note synced,
+    // which removed the conflict and the remote text with it.
+    if (syncEntry?.sync_status === "conflict") {
+      return { success: false, conflict: true, error: "Sync conflict: resolve it under Settings before this note is exported again", path: syncEntry.github_path };
+    }
     const frontmatter = buildFrontmatter(note);
     // Content is now stored as Markdown; only convert if legacy HTML detected
     const rawContent = String(note.content || "");
@@ -506,10 +520,16 @@ async function syncSingleNote(
     const fullContent = `${frontmatter}\n\n${mdBody}`;
 
     const desiredPath = buildNotePath(vaultPath, note);
-    filePath = syncEntry?.github_path || desiredPath;
-    if (!syncEntry || syncEntry.github_path !== desiredPath) {
+    // The logged path is this note's only when GitHub got a version of the note
+    // there and no other note claims it. A failed first export logs the path
+    // it meant to use, often a same-named file of another note, which the next
+    // save then overwrote and a rename deleted.
+    const ownsLoggedPath = Boolean(syncEntry?.github_sha)
+      && !(await pathClaimedByAnotherNote(supabase, userId, syncEntry.github_path, String(note.id)));
+    filePath = ownsLoggedPath ? syncEntry.github_path : desiredPath;
+    if (!ownsLoggedPath || syncEntry.github_path !== desiredPath) {
       filePath = await resolveCollisionSafePath(supabase, userId, ghToken, owner, repo, branch, desiredPath, String(note.id));
-      if (syncEntry?.github_path && syncEntry.github_path !== filePath) {
+      if (ownsLoggedPath && syncEntry.github_path !== filePath) {
         const oldFile = await githubGetFile(ghToken, owner, repo, syncEntry.github_path, branch);
         if (oldFile?.sha) await githubDeleteFile(ghToken, owner, repo, syncEntry.github_path, oldFile.sha, `Rename: ${note.title}`, branch);
       }
@@ -541,7 +561,19 @@ async function syncSingleNote(
 
     return { success: true, action, path: filePath, commit_sha: result.commit?.sha };
   } catch (err) {
-    // Log the error
+    // Log the error. An existing entry keeps its path, sha and synced_at: they
+    // still describe the last version GitHub really has. Stamping synced_at
+    // with the failure time made the note read as unchanged, so no pull ever
+    // retried it, and a path the export only meant to use became the note's.
+    if (syncEntry?.id) {
+      await supabase.from("github_sync_log")
+        .update({ sync_status: "error", error_message: String(err) })
+        .eq("id", syncEntry.id)
+        .eq("user_id", userId);
+      return { success: false, error: String(err), path: filePath };
+    }
+    // A new entry has no sha, which tells the pull nothing of this note is at
+    // that path yet: it retries the push and never imports the file found there.
     await supabase.from("github_sync_log").upsert(
       {
         user_id: userId,
@@ -572,22 +604,39 @@ async function resolveCollisionSafePath(
 ) {
   for (let i = 0; i < 100; i++) {
     const candidate = i === 0 ? desiredPath : incrementPath(desiredPath, i);
-    const { data: pathOwner } = await supabase
-      .from("github_sync_log")
-      .select("note_id")
-      .eq("user_id", userId)
-      .eq("github_path", candidate)
-      .neq("note_id", noteId)
-      .maybeSingle();
-    if (pathOwner) continue;
+    if (await pathClaimedByAnotherNote(supabase, userId, candidate, noteId)) continue;
     const remoteFile = await githubGetFile(ghToken, owner, repo, candidate, branch);
     if (!remoteFile) return candidate;
-    if (remoteFile) {
-      const content = await githubGetFileContent(ghToken, owner, repo, candidate, branch).catch(() => "");
-      if (content.includes(`id: ${noteId}`) || content.includes(`id: "${noteId}"`)) return candidate;
-    }
+    if (fileCarriesNoteId(remoteFile, noteId)) return candidate;
   }
   throw new Error("Could not find a free GitHub path for note");
+}
+
+/**
+ * True when another note's sync entry names this path. A list, not
+ * maybeSingle(): two entries on one path (written before paths were
+ * collision-safe) made maybeSingle() fail, which read as "free".
+ */
+async function pathClaimedByAnotherNote(supabase: DbClient, userId: string, path: string, noteId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("github_sync_log")
+    .select("note_id")
+    .eq("user_id", userId)
+    .eq("github_path", path)
+    .neq("note_id", noteId)
+    .limit(1);
+  return Array.isArray(data) ? data.length > 0 : Boolean(data);
+}
+
+/** True when a GitHub contents response is a Markdown file carrying this note's frontmatter id. */
+function fileCarriesNoteId(file: { content?: string } | null, noteId: string): boolean {
+  if (!file?.content) return false;
+  try {
+    const text = decodeURIComponent(escape(atob(file.content.replace(/\n/g, ""))));
+    return text.includes(`id: ${noteId}`) || text.includes(`id: "${noteId}"`);
+  } catch {
+    return false;
+  }
 }
 
 async function handleBulkSync(
@@ -720,12 +769,6 @@ async function githubGetFile(token: string, owner: string, repo: string, path: s
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitHub GET file failed: ${res.status}`);
   return await res.json();
-}
-
-async function githubGetFileContent(token: string, owner: string, repo: string, path: string, ref: string) {
-  const file = await githubGetFile(token, owner, repo, path, ref);
-  if (!file?.content) return "";
-  return decodeURIComponent(escape(atob(file.content.replace(/\n/g, ""))));
 }
 
 async function githubPutFile(

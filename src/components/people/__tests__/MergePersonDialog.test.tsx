@@ -11,6 +11,10 @@ vi.mock("@/lib/toast", () => ({
   showToast: { success: vi.fn(), error: vi.fn() },
 }));
 
+// Role queries over a dialog of 60+ buttons take seconds in jsdom: 4 to 11 s
+// per test measured while other suites ran, so the 5 s default flaked.
+vi.setConfig({ testTimeout: 30_000 });
+
 const invokeMock = vi.fn(async (..._args: unknown[]) => ({ data: { success: true }, error: null }));
 
 const contacts = Array.from({ length: 61 }, (_, i) => ({ id: `p-${i}`, name: i === 60 ? 'Zoe Beyond Page' : `Person ${String(i).padStart(2, '0')}`, aliases: [] }));

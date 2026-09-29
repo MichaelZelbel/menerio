@@ -69,12 +69,15 @@ Deno.serve(async (req) => {
       const conflicts = rows || [];
       const personIds = conflicts.filter((r: any) => r.entity_type === "person").map((r: any) => r.entity_id);
       const groupIds = conflicts.filter((r: any) => r.entity_type === "group").map((r: any) => r.entity_id);
+      // Scoped to the caller: entity_id has no foreign key and the sync log is
+      // writable by its owner, so a row naming another account's contact id
+      // used to return that contact's name here.
       const [contactsRes, groupsRes] = await Promise.all([
         personIds.length
-          ? serviceClient.from("contacts").select("id, name").in("id", personIds)
+          ? serviceClient.from("contacts").select("id, name").eq("user_id", userId).in("id", personIds)
           : Promise.resolve({ data: [] }),
         groupIds.length
-          ? serviceClient.from("contact_groups").select("id, name").in("id", groupIds)
+          ? serviceClient.from("contact_groups").select("id, name").eq("user_id", userId).in("id", groupIds)
           : Promise.resolve({ data: [] }),
       ]);
       const names = new Map<string, string>();

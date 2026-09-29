@@ -29,7 +29,6 @@ describe("EditorToolbar (Priority+ layout)", () => {
       "Numbered list",
       "Checklist",
       "Quote",
-      "Align left",
       "Insert link",
       "Insert table",
       "Clear formatting",
@@ -37,6 +36,8 @@ describe("EditorToolbar (Priority+ layout)", () => {
       expect(screen.getByTitle(title)).toBeInTheDocument();
     }
     expect(screen.queryByTitle("More formatting")).not.toBeInTheDocument();
+    // Paragraph alignment cannot be stored in Markdown, so it is not offered.
+    expect(screen.queryByTitle("Align left")).not.toBeInTheDocument();
   });
 
   it("collapses low-priority groups into the overflow popover when narrow, keeping lists inline", async () => {
@@ -53,14 +54,14 @@ describe("EditorToolbar (Priority+ layout)", () => {
     // Bubble-menu-covered and low-priority groups are gone from the row...
     expect(screen.queryByTitle("Bold (Ctrl+B)")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Quote")).not.toBeInTheDocument();
-    expect(screen.queryByTitle("Align left")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Clear formatting")).not.toBeInTheDocument();
 
     // ...and reachable through the overflow popover.
     const trigger = screen.getByTitle("More formatting");
     fireEvent.click(trigger);
     expect(await screen.findByTitle("Quote")).toBeInTheDocument();
     expect(screen.getByTitle("Bold (Ctrl+B)")).toBeInTheDocument();
-    expect(screen.getByTitle("Align left")).toBeInTheDocument();
+    expect(screen.getByTitle("Clear formatting")).toBeInTheDocument();
   });
 
   it("never renders formatting groups twice (inline XOR overflow)", () => {

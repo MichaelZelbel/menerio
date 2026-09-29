@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 import {
+  balanceUnavailableResponse,
   checkBalance,
   insufficientCreditsResponse,
 } from "../_shared/llm-credits.ts";
@@ -92,7 +93,8 @@ async function createWeeklyReviewForUser(
 
   const balance = await checkBalance(supabaseAdmin, userId);
   if (!balance.allowed) {
-    return { skipped: "insufficient_credits" };
+    // An unreadable allowance is not an empty one: it answered 402 "out of credits".
+    return { skipped: balance.unavailable ? "balance_unavailable" : "insufficient_credits" };
   }
 
   const { data: notes, error: notesError } = await supabaseAdmin
@@ -275,11 +277,17 @@ Deno.serve(async (req) => {
     if (result.skipped === "insufficient_credits") {
       return insufficientCreditsResponse(corsHeaders);
     }
+    if (result.skipped === "balance_unavailable") {
+      return balanceUnavailableResponse(corsHeaders);
+    }
 
     return json(result);
   } catch (err) {
     if (err instanceof Error && (err.message === "INSUFFICIENT_CREDITS" || err.message === "NO_ACTIVE_PERIOD")) {
       return insufficientCreditsResponse(corsHeaders);
+    }
+    if (err instanceof Error && err.message === "BALANCE_UNAVAILABLE") {
+      return balanceUnavailableResponse(corsHeaders);
     }
     console.error("weekly-review error:", err);
     return json({ error: err instanceof Error ? err.message : "An unknown error occurred" }, 500);

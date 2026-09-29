@@ -16,41 +16,44 @@ const corsHeaders = {
  * Thin wrapper around analyze-media. PDFs are processed via Mistral OCR
  * (mistral-ocr-latest) which extracts per-page markdown text and embedded
  * images; each page becomes its own media_analysis record.
+ *
+ * analyze-media checks the note and the storage path and answers at once (the
+ * OCR itself runs in its background), so its answer is awaited and passed on.
+ * This used to fire it in the background and answer 200 "processing" even when
+ * analyze-media refused the request (a path outside the caller's folder, a
+ * note that is not theirs) and nothing was ever analysed.
  */
-async function processPdf(
+async function triggerAnalysis(
   noteId: string,
   storagePath: string,
   originalFilename: string | null,
-  userId: string,
   authHeader: string
-) {
-  try {
-    // Trigger analyze-media with media_type "pdf" — the vision model
-    // (gpt-4o-mini) can handle PDF content sent as base64
-    const analyzeUrl = `${SUPABASE_URL}/functions/v1/analyze-media`;
-    const resp = await fetch(analyzeUrl, {
-      method: "POST",
-      headers: {
-        Authorization: authHeader,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        note_id: noteId,
-        storage_path: storagePath,
-        media_type: "pdf",
-        original_filename: originalFilename,
-      }),
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => "");
-      console.error(`analyze-pdf: analyze-media call failed: ${resp.status} ${errText}`);
-    } else {
-      console.log(`analyze-pdf: triggered analysis for note=${noteId}, path=${storagePath}`);
-    }
-  } catch (err) {
-    console.error("analyze-pdf background error:", err);
+): Promise<Response> {
+  const analyzeUrl = `${SUPABASE_URL}/functions/v1/analyze-media`;
+  const resp = await fetch(analyzeUrl, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      note_id: noteId,
+      storage_path: storagePath,
+      media_type: "pdf",
+      original_filename: originalFilename,
+    }),
+  });
+  const text = await resp.text().catch(() => "");
+  if (!resp.ok) {
+    console.error(`analyze-pdf: analyze-media call failed: ${resp.status} ${text}`);
+  } else {
+    console.log(`analyze-pdf: triggered analysis for note=${noteId}, path=${storagePath}`);
   }
+  const fallback = resp.ok ? { ok: true, processing: true } : { error: "Analysis could not be started" };
+  return new Response(text || JSON.stringify(fallback), {
+    status: resp.status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -93,17 +96,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    // @ts-expect-error EdgeRuntime is a Supabase global not in TS scope
-    EdgeRuntime.waitUntil(
-      processPdf(note_id, storage_path, original_filename ?? null, user.id, authHeader)
-    );
-
-    return new Response(
-      JSON.stringify({ ok: true, processing: true }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return await triggerAnalysis(note_id, storage_path, original_filename ?? null, authHeader);
   } catch (err: any) {
     console.error("analyze-pdf handler error:", err);
     return new Response(JSON.stringify({ error: err.message }), {

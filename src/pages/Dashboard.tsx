@@ -19,10 +19,15 @@ import { ProfileWidget } from "@/components/dashboard/widgets/ProfileWidget";
 import { GroupPulseCard } from "@/components/dashboard/widgets/GroupPulseCard";
 import { GettingStartedChecklist } from "@/components/dashboard/widgets/GettingStartedChecklist";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { CardSkeleton } from "@/components/LoadingStates";
 
 interface LayoutProps {
   notes: ReturnType<typeof useNotes>["data"] & {};
   hasNotes: boolean;
+  /** Whether the notes are known yet: a load in flight or a failed load is not "no notes". */
+  notesStatus: "loading" | "error" | "ready";
+  onRetryNotes: () => void;
   hasProfile: boolean;
   hasAiNote: boolean;
   onCreateNote: () => void;
@@ -30,10 +35,12 @@ interface LayoutProps {
 }
 
 /** The default arrangement: notes front and center. */
-const NotesFirstLayout = ({ notes, hasNotes, hasProfile, hasAiNote, onCreateNote, firstCapturesSlot }: LayoutProps) => (
+const NotesFirstLayout = ({ notes, hasNotes, notesStatus, onRetryNotes, hasProfile, hasAiNote, onCreateNote, firstCapturesSlot }: LayoutProps) => (
   <div className="grid gap-6 lg:grid-cols-3">
     <div className="lg:col-span-2 space-y-6">
-      {!hasNotes && (
+      {!hasNotes && notesStatus === "loading" && <CardSkeleton />}
+      {!hasNotes && notesStatus === "error" && <NotesLoadError onRetry={onRetryNotes} />}
+      {!hasNotes && notesStatus === "ready" && (
         <Card className="border-dashed">
           <CardContent className="py-8">
             <CaptureEmptyState onCreateNote={onCreateNote} />
@@ -56,6 +63,18 @@ const NotesFirstLayout = ({ notes, hasNotes, hasProfile, hasAiNote, onCreateNote
       <GettingStartedChecklist hasProfile={hasProfile} hasNotes={hasNotes} hasAiNote={hasAiNote} />
     </div>
   </div>
+);
+
+/** A failed notes load, said as one, instead of the "capture your first note" empty state. */
+const NotesLoadError = ({ onRetry }: { onRetry: () => void }) => (
+  <Card role="alert">
+    <CardContent className="flex flex-col items-start gap-3 py-6 text-sm">
+      <p>Your notes could not be loaded. Check your connection and try again.</p>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        Try again
+      </Button>
+    </CardContent>
+  </Card>
 );
 
 /** Cherishly's arrangement: the people you cherish come first. */
@@ -82,7 +101,11 @@ const Dashboard = () => {
   const { profile, role, user } = useAuth();
   const firstCaptures = useShowFirstCaptures();
   const { credits, isLoading: creditsLoading } = useAICredits();
-  const { data: notes = [] } = useNotes("all");
+  const { data: notes = [], isLoading: notesLoading, isError: notesFailed, refetch: refetchNotes } = useNotes("all");
+  // Until the notes are known, "no notes" is not a fact: the empty state
+  // ("capture your first note") used to show while they loaded, and for good
+  // when the load failed.
+  const notesStatus: LayoutProps["notesStatus"] = notesLoading ? "loading" : notesFailed ? "error" : "ready";
   const navigate = useNavigate();
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "there";
 
@@ -120,6 +143,8 @@ const Dashboard = () => {
         <PeopleFirstLayout
           notes={notes}
           hasNotes={hasNotes}
+          notesStatus={notesStatus}
+          onRetryNotes={() => void refetchNotes()}
           hasProfile={hasProfile}
           hasAiNote={aiProcessedCount > 0}
           onCreateNote={() => navigate("/dashboard/notes?action=create")}
@@ -129,6 +154,8 @@ const Dashboard = () => {
         <NotesFirstLayout
           notes={notes}
           hasNotes={hasNotes}
+          notesStatus={notesStatus}
+          onRetryNotes={() => void refetchNotes()}
           hasProfile={hasProfile}
           hasAiNote={aiProcessedCount > 0}
           onCreateNote={() => navigate("/dashboard/notes?action=create")}

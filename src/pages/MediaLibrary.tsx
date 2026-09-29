@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { SEOHead } from "@/components/SEOHead";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,6 @@ import {
   AlertCircle,
   X,
   Play,
-  Square,
   Sparkles,
   RefreshCw,
 } from "lucide-react";
@@ -35,6 +34,7 @@ import { toast } from "sonner";
 import { useReanalyzeMedia } from "@/hooks/useMediaAnalysis";
 import { MediaDetailDialog, MediaDetailItem } from "@/components/media/MediaDetailDialog";
 import { PdfThumbnail } from "@/components/media/PdfThumbnail";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 
 interface MediaItem {
   id: string;
@@ -157,6 +157,45 @@ const AVG_TOKENS_PER_IMAGE = 700;
 const TOKENS_PER_CREDIT = 200;
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
+const MEDIA_COLUMNS =
+  "id, note_id, storage_path, media_type, page_number, original_filename, description, extracted_text, topics, raw_analysis, analysis_status, created_at, updated_at";
+
+// .in() lists and signed-URL batches go out in slices of this size: hundreds
+// of values in one request make URLs long enough for proxies to refuse.
+const CHUNK_SIZE = 100;
+
+function chunk<T>(values: T[], size = CHUNK_SIZE): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+
+/** Run one query per slice of `values` and join the rows; any failed slice fails the whole read. */
+async function selectInChunks<T>(
+  values: string[],
+  query: (slice: string[]) => PromiseLike<{ data: unknown; error: unknown }>,
+): Promise<T[]> {
+  const parts = await Promise.all(
+    chunk(values).map(async (slice) => {
+      const { data, error } = await query(slice);
+      if (error) throw error;
+      return (data as T[] | null) ?? [];
+    }),
+  );
+  return parts.flat();
+}
+
+const isPendingStatus = (status: string) => status === "pending" || status === "processing";
+
+/**
+ * backfill-media-analysis is called with fetch, not functions.invoke, so a
+ * non-2xx answer is wrapped the way invoke wraps it: functionErrorMessage then
+ * reads the status and the function's own { error } from `context`.
+ */
+function backfillError(resp: Response): Error {
+  return Object.assign(new Error(`backfill-media-analysis answered ${resp.status}`), { context: resp });
+}
+
 function BatchAnalysisPanel() {
   const [scanResult, setScanResult] = useState<{
     unanalyzed_images: number;
@@ -168,7 +207,6 @@ function BatchAnalysisPanel() {
   const [scanning, setScanning] = useState(false);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ processed: number; total: number; failed: number } | null>(null);
-  const [stopRequested, setStopRequested] = useState(false);
 
   const handleScan = useCallback(async () => {
     setScanning(true);
@@ -185,11 +223,11 @@ function BatchAnalysisPanel() {
         body: JSON.stringify({ mode: "scan" }),
       });
 
-      if (!resp.ok) throw new Error("Scan failed");
+      if (!resp.ok) throw backfillError(resp);
       const result = await resp.json();
       setScanResult(result);
-    } catch (err: any) {
-      toast.error("Failed to scan: " + err.message);
+    } catch (err: unknown) {
+      toast.error(await functionErrorMessage(err, "Your media could not be scanned. Try again."));
     } finally {
       setScanning(false);
     }
@@ -198,7 +236,6 @@ function BatchAnalysisPanel() {
   const handleRun = useCallback(async () => {
     if (!scanResult || scanResult.unanalyzed_total === 0) return;
     setRunning(true);
-    setStopRequested(false);
     setProgress({ processed: 0, total: scanResult.unanalyzed_total, failed: 0 });
 
     try {
@@ -214,7 +251,7 @@ function BatchAnalysisPanel() {
         body: JSON.stringify({ mode: "run", batch_size: 5, delay_ms: 2000 }),
       });
 
-      if (!resp.ok) throw new Error("Backfill failed");
+      if (!resp.ok) throw backfillError(resp);
       const result = await resp.json();
       setProgress({ processed: result.processed, total: result.total, failed: result.failed || 0 });
       toast.success(result.message);
@@ -226,8 +263,8 @@ function BatchAnalysisPanel() {
         unanalyzed_pdfs: 0,
         already_analyzed: prev.already_analyzed + (result.processed || 0),
       } : null);
-    } catch (err: any) {
-      toast.error("Backfill failed: " + err.message);
+    } catch (err: unknown) {
+      toast.error(await functionErrorMessage(err, "The analysis could not be run. Try again."));
     } finally {
       setRunning(false);
     }
@@ -287,21 +324,20 @@ function BatchAnalysisPanel() {
             )}
 
             <div className="flex gap-2">
-              {!running ? (
-                <Button size="sm" onClick={handleRun}>
-                  <Play className="h-3 w-3 mr-1" />
-                  Start analysis
-                </Button>
-              ) : (
-                <Button size="sm" variant="destructive" onClick={() => setStopRequested(true)} disabled={stopRequested}>
-                  <Square className="h-3 w-3 mr-1" />
-                  {stopRequested ? "Stopping…" : "Stop"}
-                </Button>
-              )}
+              {/* The server analyzes every item in one request and cannot be
+                  stopped part way, so there is no Stop button: it used to set
+                  a flag nothing read while the paid run went on. */}
+              <Button size="sm" onClick={handleRun} disabled={running}>
+                {running ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
+                {running ? "Analyzing…" : "Start analysis"}
+              </Button>
               <Button size="sm" variant="ghost" onClick={handleScan} disabled={scanning || running}>
                 Re-scan
               </Button>
             </div>
+            {running && (
+              <p className="text-[10px] text-muted-foreground">Once started, the analysis runs until every item is done.</p>
+            )}
           </div>
         )}
       </CardContent>
@@ -311,33 +347,76 @@ function BatchAnalysisPanel() {
 
 export default function MediaLibrary() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const reanalyze = useReanalyzeMedia();
   const [searchQuery, setSearchQuery] = useState("");
   const [contentTypeFilter, setContentTypeFilter] = useState("all");
   const [openItem, setOpenItem] = useState<MediaDetailItem | null>(null);
   const [brokenPreviews, setBrokenPreviews] = useState<Record<string, true>>({});
 
-  const { data: mediaItems = [], isLoading } = useQuery({
-    queryKey: ["media-library", user?.id],
+  const mediaQueryKey = useMemo(() => ["media-library", user?.id] as const, [user?.id]);
+  const {
+    data: mediaData,
+    isLoading,
+    isError: mediaFailed,
+    error: mediaError,
+    refetch: refetchMedia,
+  } = useQuery({
+    queryKey: mediaQueryKey,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("media_analysis")
-        .select("id, note_id, storage_path, media_type, page_number, original_filename, description, extracted_text, topics, raw_analysis, analysis_status, created_at, updated_at")
+        .select(MEDIA_COLUMNS)
         .order("created_at", { ascending: false })
         .limit(500);
       if (error) throw error;
       return (data || []) as MediaItem[];
     },
     enabled: !!user,
-    refetchInterval: (query) => {
-      const items = query.state.data as MediaItem[] | undefined;
-      if (
-        reanalyze.hasActivePendingJobs() ||
-        items?.some((m) => m.analysis_status === "pending" || m.analysis_status === "processing")
-      ) {
-        return 3000;
+  });
+  const mediaItems = useMemo(() => mediaData ?? [], [mediaData]);
+
+  // While anything is being analyzed, poll only those rows' status (a few
+  // bytes each). A row still in progress that changed is read in full and
+  // merged; when a watched row finishes or disappears the list is read once
+  // more, because a PDF run also inserts new page rows and deletes its
+  // placeholder. This used to re-download all 500 rows, extracted text
+  // included, every 3 seconds for as long as anything was pending.
+  // A string, so the memo below changes only when the set of retried paths does
+  // (useReanalyzeMedia returns a new object on every render).
+  const pendingPathsKey = [...reanalyze.pendingPaths].sort().join("\n");
+  const watchedIds = useMemo(() => {
+    const retried = new Set(pendingPathsKey ? pendingPathsKey.split("\n") : []);
+    return mediaItems
+      .filter((m) => isPendingStatus(m.analysis_status) || retried.has(m.storage_path))
+      .map((m) => m.id);
+  }, [mediaItems, pendingPathsKey]);
+  useQuery({
+    queryKey: ["media-library-status", user?.id, watchedIds],
+    enabled: !!user && watchedIds.length > 0,
+    refetchInterval: 3000,
+    queryFn: async () => {
+      const rows = await selectInChunks<{ id: string; analysis_status: string; updated_at: string | null }>(watchedIds, (slice) =>
+        supabase.from("media_analysis").select("id, analysis_status, updated_at").in("id", slice),
+      );
+      const current = new Map((queryClient.getQueryData<MediaItem[]>(mediaQueryKey) ?? []).map((m) => [m.id, m]));
+      const changedRows = rows.filter((r) => {
+        const known = current.get(r.id);
+        return !known || known.analysis_status !== r.analysis_status || known.updated_at !== r.updated_at;
+      });
+      if (rows.length < watchedIds.length || changedRows.some((r) => !isPendingStatus(r.analysis_status))) {
+        await queryClient.invalidateQueries({ queryKey: mediaQueryKey });
+        return rows;
       }
-      return false;
+      const changed = changedRows.map((r) => r.id);
+      if (changed.length > 0) {
+        const fresh = await selectInChunks<MediaItem>(changed, (slice) =>
+          supabase.from("media_analysis").select(MEDIA_COLUMNS).in("id", slice),
+        );
+        const byId = new Map(fresh.map((m) => [m.id, m]));
+        queryClient.setQueryData<MediaItem[]>(mediaQueryKey, (old) => old?.map((m) => byId.get(m.id) ?? m));
+      }
+      return rows;
     },
   });
 
@@ -351,12 +430,11 @@ export default function MediaLibrary() {
     queryKey: ["media-library-attachment-meta", user?.id, storagePaths.join("|")],
     queryFn: async () => {
       if (storagePaths.length === 0) return {} as Record<string, { sha256: string | null; created_at: string | null }>;
-      const { data } = await supabase
-        .from("note_attachments")
-        .select("storage_path, sha256, created_at")
-        .in("storage_path", storagePaths);
+      const data = await selectInChunks<{ storage_path: string; sha256: string | null; created_at: string | null }>(storagePaths, (slice) =>
+        supabase.from("note_attachments").select("storage_path, sha256, created_at").in("storage_path", slice),
+      );
       const map: Record<string, { sha256: string | null; created_at: string | null }> = {};
-      (data || []).forEach((row: { storage_path: string; sha256: string | null; created_at: string | null }) => {
+      data.forEach((row) => {
         map[row.storage_path] = { sha256: row.sha256, created_at: row.created_at };
       });
       return map;
@@ -406,21 +484,29 @@ export default function MediaLibrary() {
     return counts;
   }, [mediaItems, canonicalPathByDuplicateKey]);
 
-  const { data: signedUrls = {} } = useQuery({
-    queryKey: ["media-library-signed-urls", mediaItems.map((m) => m.storage_path).join("|")],
+  // One request per 100 files instead of one per file (up to 500 at once).
+  // A failed batch only leaves its previews unavailable.
+  const { data: signedUrls = {}, isLoading: signedUrlsLoading } = useQuery({
+    queryKey: ["media-library-signed-urls", user?.id, storagePaths],
     queryFn: async () => {
-      const paths = [...new Set(mediaItems.map((m) => m.storage_path).filter(Boolean))];
-      const entries = await Promise.all(
-        paths.map(async (path) => {
+      const map: Record<string, string> = {};
+      await Promise.all(
+        chunk(storagePaths).map(async (slice) => {
           const { data, error } = await supabase.storage
             .from("note-attachments")
-            .createSignedUrl(path, 60 * 60);
-          return [path, error ? "" : data.signedUrl] as const;
-        })
+            .createSignedUrls(slice, 60 * 60);
+          if (error) {
+            console.warn("MediaLibrary: could not sign previews", error);
+            return;
+          }
+          for (const entry of data || []) {
+            if (entry.path && entry.signedUrl && !entry.error) map[entry.path] = entry.signedUrl;
+          }
+        }),
       );
-      return Object.fromEntries(entries) as Record<string, string>;
+      return map;
     },
-    enabled: !!user && mediaItems.length > 0,
+    enabled: !!user && storagePaths.length > 0,
     staleTime: 45 * 60 * 1000,
   });
 
@@ -430,12 +516,11 @@ export default function MediaLibrary() {
     queryKey: ["media-library-notes", noteIds],
     queryFn: async () => {
       if (noteIds.length === 0) return {};
-      const { data } = await supabase
-        .from("notes")
-        .select("id, title")
-        .in("id", noteIds);
+      const data = await selectInChunks<{ id: string; title: string }>(noteIds, (slice) =>
+        supabase.from("notes").select("id, title").in("id", slice),
+      );
       const map: Record<string, string> = {};
-      (data || []).forEach((n: any) => { map[n.id] = n.title; });
+      data.forEach((n) => { map[n.id] = n.title; });
       return map;
     },
     enabled: noteIds.length > 0,
@@ -596,6 +681,12 @@ export default function MediaLibrary() {
               </div>
             ))}
           </div>
+        ) : mediaFailed && !mediaData ? (
+          <div role="alert" className="flex flex-col items-center justify-center h-64 text-muted-foreground space-y-3 text-center">
+            <p className="text-sm font-medium text-foreground">Your media could not be loaded</p>
+            <p className="text-xs">{dbErrorMessage(mediaError, "Something went wrong on our side. Try again.")}</p>
+            <Button variant="outline" size="sm" onClick={() => void refetchMedia()}>Try again</Button>
+          </div>
         ) : filteredGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
             <Image className="h-12 w-12 mb-3 opacity-30" />
@@ -641,7 +732,8 @@ export default function MediaLibrary() {
                   },
                   {
                     onSuccess: () => toast.success("Reanalyzing…"),
-                    onError: (err: Error) => toast.error(err.message),
+                    onError: async (err: Error) =>
+                      toast.error(await functionErrorMessage(err, "The analysis could not be restarted. Try again.")),
                   }
                 );
               };
@@ -653,6 +745,8 @@ export default function MediaLibrary() {
                   tabIndex={0}
                   onClick={openDocument}
                   onKeyDown={(e) => {
+                    // Keys on the nested Retry button are that button's own.
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       openDocument();
@@ -675,7 +769,7 @@ export default function MediaLibrary() {
                       <div className="flex flex-col items-center gap-2 text-muted-foreground/70 px-3 text-center">
                         <Image className="h-10 w-10" />
                         <span className="text-[10px] leading-tight">
-                          {hasBrokenPreview ? "Preview unavailable" : "Loading preview…"}
+                          {hasBrokenPreview || !signedUrlsLoading ? "Preview unavailable" : "Loading preview…"}
                         </span>
                       </div>
                     ) : (

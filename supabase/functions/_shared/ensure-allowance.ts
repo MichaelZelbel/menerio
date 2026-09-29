@@ -46,7 +46,11 @@ export async function ensureAllowanceForUser(db: Db, userId: string, now: Date =
     .maybeSingle();
   if (existing) return existing;
 
-  const { data: roleData } = await db.rpc("get_user_role", { _user_id: userId });
+  // A failed read is not "free". The row written below is the month's allowance
+  // for good (the lookup above returns it from then on), so a premium account
+  // that hit a timeout here was left on the free tier until the month ended.
+  const { data: roleData, error: roleErr } = await db.rpc("get_user_role", { _user_id: userId });
+  if (roleErr) throw roleErr;
   const role = roleData || "free";
 
   const settings = await creditSettings(db);
@@ -63,7 +67,7 @@ export async function ensureAllowanceForUser(db: Db, userId: string, now: Date =
   // July over into September, which the strict version can do, and would never have
   // rolled August into September.
   let rolloverTokens = 0;
-  const { data: prevPeriod } = await db
+  const { data: prevPeriod, error: prevErr } = await db
     .from("ai_allowance_periods")
     .select("tokens_granted, tokens_used")
     .eq("user_id", userId)
@@ -71,6 +75,8 @@ export async function ensureAllowanceForUser(db: Db, userId: string, now: Date =
     .order("period_end", { ascending: false })
     .limit(1)
     .maybeSingle();
+  // Same reason: an unread previous month is not "nothing to roll over".
+  if (prevErr) throw prevErr;
   if (prevPeriod) {
     const unused = Math.max(0, prevPeriod.tokens_granted - prevPeriod.tokens_used);
     rolloverTokens = Math.min(unused, baseTokens);

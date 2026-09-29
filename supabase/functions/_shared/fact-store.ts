@@ -19,6 +19,7 @@ import { cleanIncomingFact } from "./fact-input.ts";
 import { isReservedAttribute, normalizeAttribute, reviewByFor } from "./claims.ts";
 import { placeClaim } from "./fact-placement.ts";
 import { isListValuedLabel } from "./profile-canonical-schema.ts";
+import { selectAllRows } from "./paged-select.ts";
 
 export type SubjectType = "self" | "contact" | "entity";
 export type FactOrigin =
@@ -83,7 +84,13 @@ export interface PlanContext {
 }
 
 export type PieceOutcome =
-  | { kind: "insert"; attribute: string; label: string; categorySlug: string; value: string; cardinality: "one" | "many"; close: string[]; closeOn: string; conflict: boolean }
+  | {
+    kind: "insert"; attribute: string; label: string; categorySlug: string; value: string; cardinality: "one" | "many";
+    close: string[]; closeOn: string;
+    /** The first day of the next value already on file: the new one ends there (null: open-ended). */
+    endsOn: string | null;
+    conflict: boolean;
+  }
   | { kind: "already_recorded"; attribute: string; claimId: string }
   | { kind: "history_not_revived"; attribute: string; claimId: string }
   | { kind: "suppressed"; attribute: string }
@@ -95,6 +102,32 @@ export const norm = (value: string) => String(value ?? "").trim().toLowerCase();
 
 export function suppressionKey(subject: FactSubject, attribute: string, value: string): string {
   return `${subject.type}:${subject.id ?? ""}:${attribute}:${norm(value)}`;
+}
+
+/**
+ * Whether a suggested fact is already on file for its subject, or was called
+ * wrong. For suggestion lists built by a model that was shown agent_facts
+ * only: it never saw a fact in a private section, so it suggested that value
+ * again, into a public section, where accepting it handed it to every
+ * assistant. `known` is the subject's current rows from profile_facts (the
+ * owner's view, private included). A private value is matched under any
+ * label, since the model names attributes its own way; any other value under
+ * the same attribute. Pure.
+ */
+export function suggestionAlreadyKnown(
+  subject: FactSubject,
+  suggestion: { label: string; value: string },
+  known: Array<{ attribute: string; value: string; visibility_scope?: string | null }>,
+  suppressed: ReadonlySet<string>,
+): boolean {
+  const value = norm(suggestion.value).replace(/\s+/g, " ");
+  if (!value) return false;
+  const attribute = normalizeAttribute(suggestion.label);
+  if (suppressed.has(suppressionKey(subject, attribute, suggestion.value))) return true;
+  return known.some((k) => {
+    if (norm(k.value).replace(/\s+/g, " ") !== value) return false;
+    return k.visibility_scope === "private" || k.attribute === attribute;
+  });
 }
 
 /** The single facts a value holds, each with the label and section it belongs under. */
@@ -128,7 +161,10 @@ export function piecesOf(input: FactInput): Array<{ label: string; categorySlug:
  * - One value per attribute ('one', from the slot, else attribute_rules, else
  *   'one'): the new value closes the current ones at validFrom or today. A
  *   machine never closes a human's value; it is added alongside and shows as
- *   two answers until someone decides.
+ *   two answers until someone decides. A value on file that starts later (a
+ *   later change, or one planned for a future day) ends the new one on its
+ *   first day, so an old note read again goes into history instead of
+ *   standing beside today's value as a second answer.
  * - Several values ('many'): added.
  */
 export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
@@ -172,6 +208,7 @@ export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
     const closeOn = input.validFrom ?? ctx.today;
     let close: string[] = [];
     let conflict = false;
+    let endsOn: string | null = null;
     if (cardinality === "one") {
       // The live values that started on or before the new one's day (a value that
       // starts later is left alone). "On": a second change the same day replaces
@@ -180,10 +217,18 @@ export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
       const closable = current.filter((c) => ctx.isHuman || c.rank !== "preferred");
       close = closable.map((c) => c.id);
       conflict = closable.length < current.length || alsoPlanned.length > 0;
+      // A value that starts later is left alone, and it ends this one on its
+      // first day. Without the end both were current once that day came, and
+      // an old note read again ("moved to London in 2019" beside "Berlin since
+      // 2021") stood as a second answer that no caller was told about.
+      endsOn = mine
+        .map((c) => c.valid_from)
+        .filter((d): d is string => d !== null && d > closeOn)
+        .sort()[0] ?? null;
     }
     alsoPlanned.push(norm(piece.value));
     planned.set(attribute, alsoPlanned);
-    out.push({ kind: "insert", attribute, label: piece.label, categorySlug: piece.categorySlug, value: piece.value, cardinality, close, closeOn, conflict });
+    out.push({ kind: "insert", attribute, label: piece.label, categorySlug: piece.categorySlug, value: piece.value, cardinality, close, closeOn, endsOn, conflict });
   }
   return out;
 }
@@ -191,7 +236,12 @@ export function planFacts(input: FactInput, ctx: PlanContext): PieceOutcome[] {
 export interface WriteResult {
   ok: boolean;
   /** One entry per single fact the value held. */
-  facts: Array<{ attribute: string | null; outcome: PieceOutcome["kind"] | "inserted"; claimId?: string; closed?: number; conflict?: boolean; reason?: string }>;
+  facts: Array<{
+    attribute: string | null; outcome: PieceOutcome["kind"] | "inserted"; claimId?: string; closed?: number;
+    /** Set when a later value on file ends the new one: it went in as history, or as current until then. */
+    validTo?: string;
+    conflict?: boolean; reason?: string;
+  }>;
 }
 
 export class FactWritesPaused extends Error {
@@ -248,8 +298,14 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
       subjectFilter(db.from("claims").select("id, attribute, value, valid_from, valid_to, rank")).in("attribute", attributes),
       subjectFilter(db.from("fact_slots").select("attribute, cardinality, category_slug")).in("attribute", attributes),
       db.from("attribute_rules").select("attribute, cardinality").in("attribute", attributes),
-      db.from("ai_suggestion_suppressions").select("suppression_key").eq("user_id", userId).eq("suggestion_type", "claim")
-        .like("suppression_key", `${input.subject.type}:${input.subject.id ?? ""}:%`),
+      // Paged: every Revert and "Was wrong" adds a key, and past the server's
+      // 1,000-row cap the rest went unread, so a machine could write a value
+      // back that the user had called wrong.
+      selectAllRows<{ suppression_key: string }>((from, to) =>
+        db.from("ai_suggestion_suppressions").select("suppression_key").eq("user_id", userId).eq("suggestion_type", "claim")
+          .like("suppression_key", `${input.subject.type}:${input.subject.id ?? ""}:%`)
+          .order("suppression_key", { ascending: true }).range(from, to))
+        .then((data) => ({ data, error: null }), (error) => ({ data: null, error: error ?? { message: "error" } })),
       sections === null ? { data: [], error: null }
         : input.subject.id === null ? sections.is("contact_id", null) : sections.eq("contact_id", input.subject.id),
     ]);
@@ -318,6 +374,7 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
       attribute: step.attribute,
       value: step.value,
       valid_from: input.validFrom ?? null,
+      valid_to: step.endsOn,
       confidence: input.confidence ?? (input.origin === "user_manual" ? "certain" : "likely"),
       cardinality: step.cardinality,
       source_type: input.sourceType ?? (input.origin === "user_manual" ? "manual" : "ai"),
@@ -337,7 +394,10 @@ export async function writeFact(db: any, userId: string, input: FactInput, opts:
       const { error: closeError } = await db.from("claims").update({ valid_to: step.closeOn }).in("id", step.close).eq("user_id", userId).is("valid_to", null);
       if (closeError) throw new Error(`fact-store close: ${closeError.message}`);
     }
-    result.facts.push({ attribute: step.attribute, outcome: "inserted", claimId: inserted?.id, closed: step.close.length, conflict: step.conflict });
+    result.facts.push({
+      attribute: step.attribute, outcome: "inserted", claimId: inserted?.id, closed: step.close.length,
+      ...(step.endsOn ? { validTo: step.endsOn } : {}), conflict: step.conflict,
+    });
   }
   return result;
 }

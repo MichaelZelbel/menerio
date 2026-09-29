@@ -26,6 +26,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Loader2, CheckCircle2, ExternalLink, Copy, MessageSquare } from "lucide-react";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 async function sha256Hex(value: string): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -38,7 +39,6 @@ export function SlackIntegration() {
   const [channelId, setChannelId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [appId, setAppId] = useState<string | null>(null);
 
@@ -49,14 +49,17 @@ export function SlackIntegration() {
   // Slack's verification against it always failed.
   const captureUrl = `https://${projectRef}.supabase.co/functions/v1/ingest-thought`;
 
-  // Load existing config
+  // Load existing config. Keyed on the id, not the user object: a new object
+  // for the same account (a token refresh on returning to the tab) must not
+  // reload the form over what the person has typed.
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     (async () => {
       const { data, error } = await supabase
         .from("connected_apps" as any)
         .select("id, permissions")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .eq("app_name", "slack")
         .maybeSingle();
       if (error) {
@@ -73,7 +76,7 @@ export function SlackIntegration() {
       }
       setLoading(false);
     })();
-  }, [user]);
+  }, [userId]);
 
   const handleSave = async () => {
     if (!user) return;
@@ -119,35 +122,14 @@ export function SlackIntegration() {
     }
   };
 
-  const handleTest = async () => {
-    if (!botToken.trim() || !channelId.trim()) {
-      showToast.error("Enter both Bot Token and Channel ID first");
-      return;
-    }
-    setTesting(true);
-    try {
-      const res = await fetch("https://slack.com/api/chat.postMessage", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${botToken.trim()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          channel: channelId.trim(),
-          text: "🧠 Menerio is connected! Your thoughts in this channel will be captured automatically.",
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        showToast.success("Test message sent to Slack!");
-      } else {
-        showToast.error(`Slack error: ${data.error}`);
-      }
-    } catch {
-      showToast.error("Failed to reach Slack API");
-    } finally {
-      setTesting(false);
-    }
+  // This used to post a test message to slack.com straight from the browser.
+  // The Authorization header and JSON body make the browser ask Slack first
+  // (a CORS preflight), which Slack's Web API does not answer, so the button
+  // reported "Failed to reach Slack API" whatever the token. Say so instead.
+  const handleTest = () => {
+    showToast.info(
+      "Slack does not let a web page send a test message. After saving, post a message in the capture channel and check that it arrives as a note.",
+    );
   };
 
   const handleDisconnect = async () => {
@@ -226,9 +208,9 @@ export function SlackIntegration() {
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 shrink-0"
-                      onClick={() => {
-                        navigator.clipboard.writeText(captureUrl);
-                        showToast.success("URL copied");
+                      onClick={async () => {
+                        if (await copyToClipboard(captureUrl)) showToast.success("URL copied");
+                        else showToast.error(COPY_FAILED_MESSAGE);
                       }}
                     >
                       <Copy className="h-3 w-3" />
@@ -286,8 +268,7 @@ export function SlackIntegration() {
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Save
           </Button>
-          <Button variant="outline" size="sm" onClick={handleTest} disabled={testing || !botToken.trim()}>
-            {testing && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          <Button variant="outline" size="sm" onClick={handleTest} disabled={!botToken.trim()}>
             Test Connection
           </Button>
           {connected && (

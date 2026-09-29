@@ -256,10 +256,19 @@ export function useToggleFavoritePerson() {
     },
     onMutate: async ({ id, isFavorite }) => {
       const queryKey = ["contacts", user?.id];
+      // The People tree also shows group members from the membership query,
+      // which carries each member's row: its star has to follow too.
+      const membersKey = ["contact_group_memberships", "all", user?.id];
       await qc.cancelQueries({ queryKey });
-      const previous = qc.getQueriesData({ queryKey });
+      await qc.cancelQueries({ queryKey: membersKey });
+      const previous = [...qc.getQueriesData({ queryKey }), ...qc.getQueriesData({ queryKey: membersKey })];
       qc.setQueriesData({ queryKey }, (old: unknown) => updateContactCache(old, id, { is_favorite: isFavorite }));
-      return { previous, queryKey };
+      qc.setQueriesData({ queryKey: membersKey }, (old: unknown) =>
+        Array.isArray(old)
+          ? old.map((m) => (m?.contacts?.id === id ? { ...m, contacts: { ...m.contacts, is_favorite: isFavorite } } : m))
+          : old,
+      );
+      return { previous, queryKey, membersKey };
     },
     onError: (e: any, _vars, context) => {
       context?.previous.forEach(([key, data]) => qc.setQueryData(key, data));
@@ -267,6 +276,7 @@ export function useToggleFavoritePerson() {
     },
     onSettled: (_data, _err, _vars, context) => {
       qc.invalidateQueries({ queryKey: context?.queryKey ?? ["contacts", user?.id] });
+      qc.invalidateQueries({ queryKey: context?.membersKey ?? ["contact_group_memberships", "all"] });
     },
     onSuccess: () => triggerPeopleSync(),
   });

@@ -11,7 +11,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { RouteErrorBoundary } from "@/components/ErrorBoundary";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { RequiresOnline } from "@/components/RequiresOnline";
 import { MaybePowerSyncProvider } from "@/sync/PowerSyncProvider";
@@ -91,7 +91,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
-            <ErrorBoundary>
+            <RouteErrorBoundary>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   {/* The Cherishly landing ships its own header (ported 1:1
@@ -220,7 +220,7 @@ const App = () => (
               <CookieConsentBanner />
               <OfflineIndicator />
               <SyncManager />
-            </ErrorBoundary>
+            </RouteErrorBoundary>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

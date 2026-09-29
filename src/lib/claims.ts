@@ -183,7 +183,7 @@ function formatDate(value: string): string {
   return dt.toLocaleDateString(undefined, { year: "numeric", month: "short" });
 }
 
-/** "since 2023", "2021 to 2024", "until 2025", or "" when undated. */
+/** "since 2023", "2021 to 2024", "until 2025", "starts Oct 2026", or "" when undated. */
 export function formatValidityRange(
   claim: Pick<Claim, "valid_from" | "valid_to">,
   today: string = todayISO(),
@@ -191,6 +191,8 @@ export function formatValidityRange(
   const from = claim.valid_from ? formatDate(claim.valid_from) : null;
   const to = claim.valid_to ? formatDate(claim.valid_to) : null;
   if (from && to) return `${from} to ${to}`;
+  // A value dated in the future is not true yet: "since" would say it is.
+  if (from && claim.valid_from! > today) return `starts ${from}`;
   if (from) return isCurrentClaim(claim, today) ? `since ${from}` : `from ${from}`;
   if (to) return `until ${to}`;
   return "";

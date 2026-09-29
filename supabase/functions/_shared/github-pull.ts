@@ -167,6 +167,30 @@ function filePathToFolderPath(filePath: string, basePath: string): string {
   return parts.join("/");
 }
 
+/**
+ * The first of `<name>.md`, `<name> 1.md`, `<name> 2.md` ... that no other
+ * sync-log entry claims and that is either absent from GitHub or already
+ * carries this note's id. Same naming and the same test as
+ * github-sync-export's resolveCollisionSafePath, so both writers agree on
+ * where a note lives. Returns the file found there, for its sha.
+ */
+async function collisionSafeNotePath(
+  token: string, owner: string, repo: string, branch: string,
+  desiredPath: string, noteId: string,
+  claimedByAnother: (path: string, noteId: string) => boolean,
+): Promise<{ path: string; file: any }> {
+  for (let i = 0; i < 100; i++) {
+    const candidate = i === 0 ? desiredPath : desiredPath.replace(/\.md$/i, ` ${i}.md`);
+    if (claimedByAnother(candidate, noteId)) continue;
+    const file = await githubGetFile(token, owner, repo, candidate, branch);
+    if (!file) return { path: candidate, file: null };
+    let text = "";
+    try { text = decodeURIComponent(escape(atob(String(file.content || "").replace(/\n/g, "")))); } catch { /* not ours */ }
+    if (text.includes(`id: ${noteId}`) || text.includes(`id: "${noteId}"`)) return { path: candidate, file };
+  }
+  throw new Error("Could not find a free GitHub path for note");
+}
+
 // ─── Main handler ────────────────────────────────────────────────────
 
 export async function pullGithubConnection(client: DbClient, userId: string, ghConn: any, body: any = {}) {
@@ -206,13 +230,29 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
     // still count as "tracked" so they are never imported as notes.
     const syncEntries = await selectAllRows<any>((from, to) => serviceClient.from("github_sync_log").select("*").eq("user_id", userId).order("id").range(from, to));
 
-    const syncByPath = new Map<string, any>();
+    const noteEntries: any[] = [];
     const syncByNoteId = new Map<string, any>();
     const trackedPaths = new Set<string>();
+    // Who claims each repository path. The push step below used to write a note
+    // to `<title>.md` whatever was already there, so two notes with the same
+    // title in the same folder shared one file: the second overwrote the first,
+    // and the next pull copied that text into the first note. Paths are now
+    // handed out collision-safe (same " 1", " 2" suffixes as github-sync-export),
+    // and a path two entries already share is never pulled from.
+    const pathOwners = new Map<string, Set<string>>();
+    const claimPath = (path: string, owner: string) => {
+      const owners = pathOwners.get(path) ?? new Set<string>();
+      owners.add(owner);
+      pathOwners.set(path, owners);
+    };
+    const claimedByAnother = (path: string, noteId: string) =>
+      [...(pathOwners.get(path) ?? [])].some((o) => o !== noteId);
     for (const e of syncEntries || []) {
       trackedPaths.add(e.github_path);
-      if (!e.entity_type || e.entity_type === "note") {
-        syncByPath.set(e.github_path, e);
+      const isNote = !e.entity_type || e.entity_type === "note";
+      claimPath(e.github_path, isNote ? String(e.note_id) : `${e.entity_type}:${e.entity_id}`);
+      if (isNote) {
+        noteEntries.push(e);
         syncByNoteId.set(e.note_id, e);
       }
     }
@@ -250,7 +290,19 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
     const results = { pulled: 0, conflicts: 0, new_imports: 0, deleted_remote: 0, errors: 0, repository_created: repoState.created, details: [] as any[] };
 
     // 3. Check each tracked file for changes
-    for (const [path, syncEntry] of (ghConn.sync_direction === "export" ? new Map() : syncByPath)) {
+    for (const syncEntry of (ghConn.sync_direction === "export" ? [] : noteEntries)) {
+      const path: string = syncEntry.github_path;
+      // No sha: GitHub never got a version of this note (a failed first export
+      // records the path it meant to use). Whatever file sits there belongs to
+      // something else, and "importing" it replaced the note with that file.
+      // The push step retries the note instead.
+      if (!syncEntry.github_sha) continue;
+      // Another entry claims the same path (written before pushes were
+      // collision-safe): the file may hold the other note's text.
+      if (claimedByAnother(path, String(syncEntry.note_id))) {
+        results.details.push({ path, action: "shared_path", noteId: syncEntry.note_id });
+        continue;
+      }
       const remoteFile = remoteByPath.get(path);
 
       if (!remoteFile) {
@@ -289,6 +341,11 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
             error_message: "Both local and remote were modified since last sync",
           })
           .eq("id", syncEntry.id);
+        // The push step reads this map. Without the new status it still saw
+        // the entry as synced, pushed the local version over the remote edit
+        // it had just flagged, and recorded the note as synced again, so the
+        // conflict disappeared together with the remote text.
+        syncByNoteId.set(note.id, { ...syncEntry, sync_status: "conflict", github_sha: remoteFile.sha });
         results.conflicts++;
         results.details.push({ path, action: "conflict", noteId: note.id });
       } else {
@@ -428,6 +485,7 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
           continue;
         }
         syncByNoteId.set(inserted.id, importedEntry);
+        claimPath(path, String(inserted.id));
 
         results.new_imports++;
         results.details.push({ path, action: "new_import", noteId: inserted.id });
@@ -503,7 +561,9 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
       const syncEntry = syncByNoteId.get(stub.id);
       if (syncEntry?.sync_status === "conflict") continue; // Don't push conflicted notes
 
-      const needsPush = !syncEntry || (syncEntry.synced_at && new Date(stub.updated_at) > new Date(syncEntry.synced_at));
+      // An "error" entry is a failed export. It carried the failure time as
+      // synced_at, so the note never read as changed and was never retried.
+      const needsPush = !syncEntry || syncEntry.sync_status === "error" || (syncEntry.synced_at && new Date(stub.updated_at) > new Date(syncEntry.synced_at));
       if (!needsPush) continue;
 
       try {
@@ -518,15 +578,26 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
         const fileName = (note.title || "Untitled").replace(/[<>:"/\\|?*]/g, "").replace(/\s+/g, " ").trim().slice(0, 200) || "Untitled";
         const base = vaultPath === "/" ? "" : vaultPath.replace(/^\/|\/$/g, "");
         const folder = String(note.folder_path || "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/");
-        const filePath = [base, folder, `${fileName}.md`].filter(Boolean).join("/");
+        const desiredPath = [base, folder, `${fileName}.md`].filter(Boolean).join("/");
         const meta = (note.metadata || {}) as Record<string, unknown>;
 
-        // Check if path changed (rename)
-        if (syncEntry && syncEntry.github_path !== filePath) {
-          // Delete old file
-          const oldFile = await githubGetFile(ghToken, owner, repo, syncEntry.github_path, branch);
-          if (oldFile?.sha) {
-            await githubDeleteFile(ghToken, owner, repo, syncEntry.github_path, oldFile.sha, `Rename: ${note.title}`, branch);
+        // The note's current path is its own only when GitHub has a version of
+        // it there (a sha) and no other entry claims the same path.
+        const ownsCurrentPath = Boolean(syncEntry?.github_sha) && !claimedByAnother(syncEntry.github_path, String(note.id));
+        let filePath = desiredPath;
+        let existing: any = null;
+        if (ownsCurrentPath && syncEntry.github_path === desiredPath) {
+          existing = await githubGetFile(ghToken, owner, repo, filePath, branch);
+        } else {
+          ({ path: filePath, file: existing } = await collisionSafeNotePath(
+            ghToken, owner, repo, branch, desiredPath, String(note.id), claimedByAnother,
+          ));
+          // Rename: delete the old file, but only one that really is this note's.
+          if (ownsCurrentPath && syncEntry.github_path !== filePath) {
+            const oldFile = await githubGetFile(ghToken, owner, repo, syncEntry.github_path, branch);
+            if (oldFile?.sha) {
+              await githubDeleteFile(ghToken, owner, repo, syncEntry.github_path, oldFile.sha, `Rename: ${note.title}`, branch);
+            }
           }
         }
 
@@ -549,7 +620,6 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
         const mdBody = looksLikeHtml(rawContent) ? htmlToMarkdownServer(rawContent) : rawContent;
         const fullContent = frontmatterLines.join("\n") + "\n\n" + mdBody;
 
-        const existing = await githubGetFile(ghToken, owner, repo, filePath, branch);
         const commitMsg = syncEntry ? `Update: ${note.title}` : `Create: ${note.title}`;
         const result = await githubPutFile(ghToken, owner, repo, filePath, fullContent, commitMsg, branch, existing?.sha);
 
@@ -566,6 +636,10 @@ export async function pullGithubConnection(client: DbClient, userId: string, ghC
           synced_at: new Date().toISOString(),
           error_message: null,
         }, { onConflict: "user_id,note_id" });
+        if (syncEntry?.github_path && syncEntry.github_path !== filePath) {
+          pathOwners.get(syncEntry.github_path)?.delete(String(note.id));
+        }
+        claimPath(filePath, String(note.id));
 
         pushed++;
       } catch (err) {

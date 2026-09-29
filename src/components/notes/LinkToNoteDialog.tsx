@@ -15,6 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileText, Search, Link2, Loader2 } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { useQueryClient } from "@tanstack/react-query";
+import { appendWikilinkToContent } from "@/utils/markdown-converter";
 
 interface LinkToNoteDialogProps {
   open: boolean;
@@ -77,14 +78,19 @@ export function LinkToNoteDialog({
       if (readError) throw readError;
       if (!sourceNote) throw new Error("Note not found");
 
-      const wikilinkHtml = `<p><span data-type="wikilink" data-note-id="${targetNoteId}" data-note-title="${targetNoteTitle}" data-display-text="">${targetNoteTitle}</span></p>`;
-      const updatedContent = sourceNote.content + "\n" + wikilinkHtml;
+      // In the note's own format: `[[Title]]` for a Markdown note. The raw
+      // HTML span appended here before made the whole note load as HTML, and
+      // it was not the markup the wikilink node reads, so the next edit
+      // deleted the connection again.
+      const updatedContent = appendWikilinkToContent(sourceNote.content, targetNoteId, targetNoteTitle);
 
-      const { error: updateError } = await supabase
-        .from("notes")
-        .update({ content: updatedContent })
-        .eq("id", sourceNoteId);
-      if (updateError) throw updateError;
+      if (updatedContent !== sourceNote.content) {
+        const { error: updateError } = await supabase
+          .from("notes")
+          .update({ content: updatedContent })
+          .eq("id", sourceNoteId);
+        if (updateError) throw updateError;
+      }
 
       queryClient.invalidateQueries({ queryKey: ["backlinks"] });
       queryClient.invalidateQueries({ queryKey: ["note-connections"] });

@@ -12,9 +12,18 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { dbErrorMessage } from "@/lib/function-error";
 
-type WikiPage = Database["public"]["Tables"]["wiki_pages"]["Row"];
-type WikiRevision = Database["public"]["Tables"]["wiki_revisions"]["Row"];
+// Only what the index shows: every page's full content and each revision's
+// before and after text used to be downloaded here and never displayed.
+type WikiPage = Pick<
+  Database["public"]["Tables"]["wiki_pages"]["Row"],
+  "id" | "slug" | "title" | "summary" | "page_type" | "source_count" | "updated_at"
+>;
+type WikiRevision = Pick<
+  Database["public"]["Tables"]["wiki_revisions"]["Row"],
+  "id" | "page_title" | "page_slug" | "change_type" | "change_summary" | "created_at"
+>;
 
 const revisionBadgeVariant: Record<string, "success" | "info" | "secondary" | "destructive"> = {
   created: "success",
@@ -70,12 +79,12 @@ export default function WikiHome() {
   const [search, setSearch] = useState("");
   const [restructuring, setRestructuring] = useState(false);
 
-  const { data: pages = [], isLoading: pagesLoading } = useQuery<WikiPage[]>({
+  const { data: pagesData, isLoading: pagesLoading, isError: pagesFailed, error: pagesError, refetch: refetchPages } = useQuery<WikiPage[]>({
     queryKey: ["wiki-pages"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("wiki_pages")
-        .select("id, user_id, slug, title, summary, content, page_type, source_count, metadata, last_synthesized_at, created_at, updated_at")
+        .select("id, slug, title, summary, page_type, source_count, updated_at")
         .order("page_type", { ascending: true })
         .order("title", { ascending: true });
       if (error) throw error;
@@ -88,13 +97,15 @@ export default function WikiHome() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("wiki_revisions")
-        .select("id, user_id, wiki_page_id, page_title, page_slug, change_type, change_summary, previous_content, new_content, source_note_id, source_revision_id, status, reviewed_at, rolled_back_at, created_at")
+        .select("id, page_title, page_slug, change_type, change_summary, created_at")
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;
       return data || [];
     },
   });
+
+  const pages = useMemo(() => pagesData ?? [], [pagesData]);
 
   const groupedPages = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -112,7 +123,9 @@ export default function WikiHome() {
 
   const groupEntries = Object.entries(groupedPages).sort(([a], [b]) => a.localeCompare(b));
   const isLoading = pagesLoading || revisionsLoading;
-  const hasNoPages = !pagesLoading && pages.length === 0;
+  // A failed read is not an empty Lexicon.
+  const loadFailed = pagesFailed && !pagesData;
+  const hasNoPages = !pagesLoading && !loadFailed && pages.length === 0;
 
   return (
     <div className="space-y-6">
@@ -165,6 +178,12 @@ export default function WikiHome() {
 
       {isLoading ? (
         <WikiHomeSkeleton />
+      ) : loadFailed ? (
+        <div role="alert" className="text-center py-16 text-muted-foreground space-y-4">
+          <p className="text-lg font-medium text-foreground">Your Lexicon could not be loaded</p>
+          <p className="text-sm">{dbErrorMessage(pagesError, "Something went wrong on our side. Try again.")}</p>
+          <Button variant="outline" size="sm" onClick={() => void refetchPages()}>Try again</Button>
+        </div>
       ) : hasNoPages ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">

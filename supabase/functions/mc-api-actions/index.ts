@@ -161,6 +161,21 @@ Deno.serve(async (req) => {
         return errorJson("BAD_REQUEST", "No valid fields to update", 400);
       }
 
+      // An item this key may not read (hidden from AI, or about a person
+      // marked sensitive) is not its to change either, the same rule as MCP.
+      // Without this a blind PUT answered with the hidden item's content, and
+      // `contact_id: null` unlinked the sensitive person so a GET then showed it.
+      const { data: current, error: currentErr } = await supabase
+        .from("action_items")
+        .select("id, ai_visibility, contact_id")
+        .eq("id", action)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (currentErr) return dbErrorResponse(currentErr);
+      if (!current || !actionIsVisible(current, await loadMcVisibility(supabase, userId))) {
+        return errorJson("NOT_FOUND", "Action item not found", 404);
+      }
+
       // A contact id is stored as given with the service key, so check it is
       // one of this user's people rather than linking the item to a stranger's.
       if (typeof updates.contact_id === "string") {

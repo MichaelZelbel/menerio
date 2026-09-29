@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2, Plus, Search, Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSearch, Compass, UsersRound, Users } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { useAllMemberships } from "@/hooks/useGroupMemberships";
 import { GROUP_TEMPLATES, getTemplateById, instantiateTemplate, type GroupTemplate } from "@/lib/group-templates";
 import { showToast } from "@/lib/toast";
 import { InitialMigrationCard } from "@/components/groups/InitialMigrationCard";
+import { LoadErrorState } from "@/components/collections/LoadErrorState";
 import type { Database, Json } from "@/integrations/supabase/types";
 
 const iconMap = { Sparkles, Landmark, Clapperboard, Handshake, Podcast, UserSearch, Compass, UsersRound };
@@ -33,43 +34,45 @@ function TemplateIcon({ icon, className = "h-5 w-5" }: { icon?: string | null; c
 }
 
 function GroupCard({ group, memberCount }: { group: ContactGroup; memberCount: number }) {
-  const navigate = useNavigate();
   const firstCriterion = parseArray<SuccessCriterion>(group.success_criteria)[0];
   const target = Number(firstCriterion?.target || 0);
   const current = Number(firstCriterion?.current || 0);
   const progress = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
 
   return (
-    <Card className="cursor-pointer transition-colors hover:bg-accent/50" onClick={() => navigate(`/dashboard/groups/${group.slug}`)}>
-      <CardHeader className="pb-3">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <TemplateIcon icon={group.icon} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <CardTitle className="truncate text-base">{group.name}</CardTitle>
-            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{group.description || "No description"}</p>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{memberCount} member{memberCount === 1 ? "" : "s"}</span>
-          {group.archived_at && <Badge variant="secondary">Archived</Badge>}
-        </div>
-        {firstCriterion ? (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="truncate text-muted-foreground">{firstCriterion.label}</span>
-              <span className="text-muted-foreground">{current}/{target || "—"}</span>
+    // A real link, so the card is reachable with Tab and opens with Enter.
+    <Link to={`/dashboard/groups/${group.slug}`} className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      <Card className="cursor-pointer transition-colors hover:bg-accent/50">
+        <CardHeader className="pb-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <TemplateIcon icon={group.icon} />
             </div>
-            <Progress value={progress} className="h-2" />
+            <div className="min-w-0 flex-1">
+              <CardTitle className="truncate text-base">{group.name}</CardTitle>
+              <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{group.description || "No description"}</p>
+            </div>
           </div>
-        ) : (
-          <div className="h-2 rounded-full bg-secondary" />
-        )}
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{memberCount} member{memberCount === 1 ? "" : "s"}</span>
+            {group.archived_at && <Badge variant="secondary">Archived</Badge>}
+          </div>
+          {firstCriterion ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="truncate text-muted-foreground">{firstCriterion.label}</span>
+                <span className="text-muted-foreground">{current}/{target || "—"}</span>
+              </div>
+              <Progress value={progress} className="h-2" />
+            </div>
+          ) : (
+            <div className="h-2 rounded-full bg-secondary" />
+          )}
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
@@ -190,7 +193,7 @@ function NewGroupDialog() {
 }
 
 export default function Groups() {
-  const { data: groups = [], isLoading } = useGroups();
+  const { data: groups = [], isLoading, isError, isSuccess, refetch } = useGroups();
   // One aggregate membership query for the whole page instead of one per card
   // (kills the N+1). Per-group counts are derived from this single index.
   const { data: memberships = [] } = useAllMemberships();
@@ -199,7 +202,11 @@ export default function Groups() {
 
   const memberCountByGroup = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const m of memberships) counts.set(m.group_id, (counts.get(m.group_id) ?? 0) + 1);
+    for (const m of memberships) {
+      // A merged-away person lives on in the contact they were merged into.
+      if (m.contacts?.merged_into) continue;
+      counts.set(m.group_id, (counts.get(m.group_id) ?? 0) + 1);
+    }
     return counts;
   }, [memberships]);
 
@@ -219,7 +226,7 @@ export default function Groups() {
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-display font-bold">Groups</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{groups.filter((g) => !g.archived_at).length} active · {groups.filter((g) => g.archived_at).length} archived</p>
+          {isSuccess && <p className="mt-1 text-sm text-muted-foreground">{groups.filter((g) => !g.archived_at).length} active · {groups.filter((g) => g.archived_at).length} archived</p>}
         </div>
         <NewGroupDialog />
       </div>
@@ -238,17 +245,39 @@ export default function Groups() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : isError ? (
+        // Not "No groups yet": that invited converting tags into groups that
+        // already exist, creating duplicates.
+        <LoadErrorState title="Your groups could not be loaded." onRetry={() => refetch()} />
       ) : filtered.length === 0 ? (
-        <>
+        groups.length === 0 ? (
+          <>
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
+                <Users className="mb-3 h-8 w-8 text-muted-foreground" />
+                <p className="font-medium">No groups yet.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Start with a template to organize your people.</p>
+              </CardContent>
+            </Card>
+            {isSuccess && <InitialMigrationCard />}
+          </>
+        ) : (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-14 text-center">
               <Users className="mb-3 h-8 w-8 text-muted-foreground" />
-              <p className="font-medium">No groups yet.</p>
-              <p className="mt-1 text-sm text-muted-foreground">Start with a template to organize your people.</p>
+              <p className="font-medium">
+                {searchQuery.trim()
+                  ? "No groups match your search."
+                  : filter === "archived"
+                    ? "No archived groups."
+                    : "No active groups."}
+              </p>
+              {!searchQuery.trim() && filter === "active" && (
+                <p className="mt-1 text-sm text-muted-foreground">All your groups are archived.</p>
+              )}
             </CardContent>
           </Card>
-          {groups.length === 0 && <InitialMigrationCard />}
-        </>
+        )
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {filtered.map((group) => (

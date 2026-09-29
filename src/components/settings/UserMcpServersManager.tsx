@@ -29,6 +29,7 @@ import {
 import { Plus, Loader2, Trash2, Server } from "lucide-react";
 import { toast } from "sonner";
 import { BRAND } from "@/lib/brand";
+import { dbErrorMessage } from "@/lib/function-error";
 
 /**
  * Connected AI tools (outbound MCP servers). Lets the user register third-party
@@ -63,7 +64,7 @@ export function UserMcpServersManager() {
       .select("id, name, url, enabled, created_at")
       .order("created_at", { ascending: true });
     if (error) {
-      toast.error("Could not load MCP servers", { description: error.message });
+      toast.error(dbErrorMessage(error, "Could not load your MCP servers. Reload the page to try again."));
     } else {
       setServers((data || []) as McpServer[]);
     }
@@ -92,7 +93,7 @@ export function UserMcpServersManager() {
     });
     setSaving(false);
     if (error) {
-      toast.error("Could not add server", { description: error.message });
+      toast.error(dbErrorMessage(error, "Could not add the server. Check the name and URL and try again."));
       return;
     }
     toast.success("MCP server added");
@@ -111,7 +112,7 @@ export function UserMcpServersManager() {
       .update({ enabled })
       .eq("id", server.id);
     if (error) {
-      toast.error("Could not update server", { description: error.message });
+      toast.error(dbErrorMessage(error, "Could not change the server. Try again."));
       load();
     }
   }
@@ -119,7 +120,7 @@ export function UserMcpServersManager() {
   async function removeServer(id: string) {
     const { error } = await (supabase as any).from("user_mcp_servers").delete().eq("id", id);
     if (error) {
-      toast.error("Could not delete server", { description: error.message });
+      toast.error(dbErrorMessage(error, "Could not remove the server. Try again."));
       return;
     }
     toast.success("Server removed");
@@ -224,11 +225,11 @@ export function UserMcpServersManager() {
                 <Switch
                   checked={server.enabled}
                   onCheckedChange={(v) => toggleEnabled(server, v)}
-                  aria-label="Enable server"
+                  aria-label={`Enable ${server.name}`}
                 />
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="icon" aria-label="Delete server">
+                    <Button variant="ghost" size="icon" aria-label={`Remove ${server.name}`}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </AlertDialogTrigger>

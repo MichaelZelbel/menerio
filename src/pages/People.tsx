@@ -40,6 +40,7 @@ import {
   useCreatePerson,
   useDeletePerson,
   useToggleFavoritePerson,
+  type Person,
 } from "@/hooks/usePeople";
 
 export default function People() {
@@ -193,8 +194,19 @@ export default function People() {
     setDeleteTargetId(null);
   };
 
-  const mergeSource = mergeTreeId ? people.find((p) => p.id === mergeTreeId) ?? null : null;
-  const deleteTarget = deleteTargetId ? people.find((p) => p.id === deleteTargetId) ?? null : null;
+  // A row in Favorites, Recent or a group can be someone the name-sorted pages
+  // have not loaded yet. Looked up in the loaded pages only, "Merge…" on such a
+  // row did nothing and the delete dialog could not name them.
+  const findPerson = (id: string | null): Pick<Person, "id" | "name" | "aliases"> | null => {
+    if (!id) return null;
+    const known = people.find((p) => p.id === id) ?? pinnedPeople.find((p) => p.id === id)
+      ?? (selectedPerson?.id === id ? selectedPerson : undefined);
+    if (known) return known;
+    const member = memberships.find((m) => m.contact_id === id && m.contacts)?.contacts;
+    return member ? { id: member.id, name: member.name, aliases: member.aliases ?? [] } : null;
+  };
+  const mergeSource = findPerson(mergeTreeId);
+  const deleteTarget = findPerson(deleteTargetId);
 
   return (
     <div className="flex h-[calc(100dvh-104px)] overflow-hidden">
@@ -264,6 +276,7 @@ export default function People() {
           totalPeople={total}
           hasMore={!!hasNextPage}
           loadingMore={isFetchingNextPage}
+          loading={peopleQuery.isPending}
           onLoadMore={loadMorePeople}
           onSelectPerson={openPerson}
           onToggleFavorite={(id, isFavorite) => toggleFavorite.mutate({ id, isFavorite })}

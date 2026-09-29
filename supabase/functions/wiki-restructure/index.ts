@@ -322,6 +322,9 @@ async function isRestructureAllowed(page: PageRow): Promise<boolean> {
 async function runJob(db: any, billingDb: any, actorId: string, pages: PageRow[], dryRun: boolean) {
   const startedAt = Date.now();
   const results: unknown[] = [];
+  // Whose page each result is about, index for index with `results`.
+  const resultOwners: string[] = [];
+  const failedOwners: string[] = [];
   let failed = 0;
   let aborted: string | null = null;
   const operation = dryRun ? "restructure_dry_run" : "restructure";
@@ -331,6 +334,7 @@ async function runJob(db: any, billingDb: any, actorId: string, pages: PageRow[]
     let result: unknown;
     if (page.user_id && ownersOutOfCredit.has(page.user_id)) {
       results.push({ slug: page.slug, method: "skipped", changed: false, rejected_reason: "owner out of credit" });
+      resultOwners.push(page.user_id);
       continue;
     }
     try {
@@ -341,6 +345,7 @@ async function runJob(db: any, billingDb: any, actorId: string, pages: PageRow[]
         // is counted against the page.
         if (page.user_id) ownersOutOfCredit.add(page.user_id);
         results.push({ slug: page.slug, method: "skipped", changed: false, rejected_reason: error.message });
+        resultOwners.push(page.user_id);
         continue;
       }
       if (error instanceof SweepAbort) {
@@ -355,23 +360,30 @@ async function runJob(db: any, billingDb: any, actorId: string, pages: PageRow[]
         break;
       }
       failed += 1;
+      failedOwners.push(page.user_id);
       console.error("wiki-restructure page failed", page.slug, error);
       result = { slug: page.slug, method: "error", changed: false, rejected_reason: error instanceof Error ? error.message : String(error) };
     }
     results.push(result);
+    resultOwners.push(page.user_id);
     // Log per page so progress survives a runtime shutdown mid-sweep. Under the
     // page's own owner: the cron sweep spans every user, and logging under the
     // first candidate's id showed one user the slugs of everyone else's pages.
     await logWiki(db, page.user_id || actorId, operation, { total: 1, failed: 0, page: page.slug, results: [result] });
   }
 
+  // The summary goes to one account's log. A cron sweep spans every account and
+  // the summary was filed under the first candidate's owner with everyone's
+  // results in it: other users' page slugs and the "lost N tokens: <names>"
+  // rejection reasons. Only the summary owner's own pages go in it.
+  const ownResults = results.filter((_, i) => resultOwners[i] === actorId);
   await logWiki(db, actorId, operation, {
-    total: pages.length,
-    failed,
+    total: pages.filter((p) => p.user_id === actorId).length,
+    failed: failedOwners.filter((owner) => owner === actorId).length,
     aborted,
     summary: true,
     duration_ms: Date.now() - startedAt,
-    results: results.slice(0, 100),
+    results: ownResults.slice(0, 100),
   });
 }
 

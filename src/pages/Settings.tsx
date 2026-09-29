@@ -49,6 +49,7 @@ import { SingleFileIntegration } from "@/components/settings/SingleFileIntegrati
 import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
 import { AiVisibilitySettings } from "@/components/settings/AiVisibilitySettings";
 import { BRAND } from "@/lib/brand";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -191,7 +192,11 @@ export default function Settings() {
     });
 
     if (uploadError) {
-      toast({ variant: "destructive", title: "Upload failed", description: uploadError.message });
+      toast({
+        variant: "destructive",
+        title: "Upload failed",
+        description: dbErrorMessage(uploadError, "The picture could not be uploaded. Try again."),
+      });
       setAvatarUploading(false);
       return;
     }
@@ -199,7 +204,11 @@ export default function Settings() {
     const { error: profileError } = await supabase.from("profiles").update({ avatar_url: path }).eq("id", user.id);
     if (profileError) {
       await supabase.storage.from("avatars").remove([path]);
-      toast({ variant: "destructive", title: "Upload failed", description: profileError.message });
+      toast({
+        variant: "destructive",
+        title: "Upload failed",
+        description: dbErrorMessage(profileError, "The picture could not be saved to your profile. Try again."),
+      });
       setAvatarUploading(false);
       return;
     }
@@ -244,7 +253,12 @@ export default function Settings() {
       });
 
       if (res.error || res.data?.error) {
-        toast({ variant: "destructive", title: "Error", description: res.data?.error || "Failed to delete account." });
+        // On a refusal `data` is null and the function's answer ("Invalid
+        // password", an e-mail that does not match) sits in the error's
+        // context; `res.data?.error` never named it.
+        const fallback = "Could not delete the account. Try again.";
+        const description = res.error ? await functionErrorMessage(res.error, fallback) : fallback;
+        toast({ variant: "destructive", title: "Account not deleted", description });
         setDeleteLoading(false);
         return;
       }

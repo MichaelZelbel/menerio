@@ -37,6 +37,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useBulkSelect, type UseBulkSelectResult } from "./useBulkSelect";
 import { BulkActionBar } from "./BulkActionBar";
 import { CaptureEmptyState } from "./CaptureEmptyState";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 export type NoteTreeSortField = "updated_at" | "created_at" | "title";
 export type NoteTreeSortDirection = "asc" | "desc";
@@ -69,6 +70,22 @@ interface FolderNode {
   children: FolderNode[];
   notes: (Note | SemanticSearchResult)[];
   noteCount: number;
+}
+
+/**
+ * Drag payload types. A single note travels under its own type, never
+ * text/plain: text/plain is what any dragged text carries, so dropping editor
+ * text on a folder tried to move a note whose id was that text ("invalid input
+ * syntax for type uuid"), and dropping a note into the editor typed its bare id.
+ */
+const NOTE_ID_TYPE = "application/x-note-id";
+const NOTE_IDS_TYPE = "application/x-note-ids";
+const FOLDER_PATH_TYPE = "application/x-folder-path";
+
+/** True when a drag carries a note or a folder from this tree. */
+function isTreeDrag(dataTransfer: DataTransfer): boolean {
+  const types = Array.from(dataTransfer.types ?? []);
+  return types.includes(NOTE_ID_TYPE) || types.includes(NOTE_IDS_TYPE) || types.includes(FOLDER_PATH_TYPE);
 }
 
 const normalizePath = (path: string | null | undefined) =>
@@ -207,7 +224,7 @@ const FolderRow = memo(function FolderRow({
             draggable={!isRoot}
             onDragStart={(event) => {
               if (isRoot) return;
-              event.dataTransfer.setData("application/x-folder-path", node.path);
+              event.dataTransfer.setData(FOLDER_PATH_TYPE, node.path);
               event.dataTransfer.effectAllowed = "move";
               const el = event.currentTarget;
               setTimeout(() => el.classList.add("opacity-40"), 0);
@@ -225,6 +242,11 @@ const FolderRow = memo(function FolderRow({
             onDoubleClick={() => onToggleFolder(node.path)}
             onDragOver={(event) => {
               event.preventDefault();
+              // Only notes and folders from this tree can be dropped here.
+              if (!isTreeDrag(event.dataTransfer)) {
+                event.dataTransfer.dropEffect = "none";
+                return;
+              }
               event.dataTransfer.dropEffect = "move";
               if (dragOverPath !== node.path) setDragOverPath(node.path);
             }}
@@ -424,9 +446,9 @@ const NoteRow = memo(function NoteRow({
           draggable={canDrag}
           onDragStart={(event) => {
             if (multiActive && isMultiSelected && selectedIds.length > 1) {
-              event.dataTransfer.setData("application/x-note-ids", JSON.stringify(selectedIds));
+              event.dataTransfer.setData(NOTE_IDS_TYPE, JSON.stringify(selectedIds));
             }
-            event.dataTransfer.setData("text/plain", note.id);
+            event.dataTransfer.setData(NOTE_ID_TYPE, note.id);
             event.dataTransfer.effectAllowed = "move";
             const el = event.currentTarget;
             setTimeout(() => el.classList.add("opacity-40"), 0);
@@ -482,9 +504,9 @@ const NoteRow = memo(function NoteRow({
       </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
         <ContextMenuItem
-          onClick={() => {
-            navigator.clipboard.writeText(`${window.location.origin}/dashboard/notes/${note.id}`);
-            showToast.copied();
+          onClick={async () => {
+            if (await copyToClipboard(`${window.location.origin}/dashboard/notes/${note.id}`)) showToast.copied();
+            else showToast.error(COPY_FAILED_MESSAGE);
           }}
         >
           <Link2 className="mr-2 h-3.5 w-3.5" /> Copy link
@@ -816,12 +838,14 @@ export function NoteTree({
   const handleDrop = useCallback((path: string, event: DragEvent) => {
     event.preventDefault();
     setDragOverPath(null);
-    const folderPath = event.dataTransfer.getData("application/x-folder-path");
+    // Anything else (text from the editor, a file, a link) is not ours to move.
+    if (!isTreeDrag(event.dataTransfer)) return;
+    const folderPath = event.dataTransfer.getData(FOLDER_PATH_TYPE);
     if (folderPath) {
       if (onMoveFolder) onMoveFolder(folderPath, path);
       return;
     }
-    const idsPayload = event.dataTransfer.getData("application/x-note-ids");
+    const idsPayload = event.dataTransfer.getData(NOTE_IDS_TYPE);
     if (idsPayload) {
       try {
         const ids = JSON.parse(idsPayload) as string[];
@@ -834,7 +858,7 @@ export function NoteTree({
         // fall through to single id
       }
     }
-    const noteId = event.dataTransfer.getData("text/plain");
+    const noteId = event.dataTransfer.getData(NOTE_ID_TYPE);
     if (noteId) onMoveNote(noteId, path);
   }, [bulk, onMoveFolder, onMoveNote]);
 
@@ -849,10 +873,42 @@ export function NoteTree({
     }
   }, [duplicateNote, navigate, onSelectFolder, onSelectNote]);
 
-  if (notes.length === 0 && folderPaths.length === 0) {
+  // The only way into Trash in the notes view is this row, so it has to be
+  // there even when nothing else is: trashing the last note used to swap the
+  // tree for the empty state and leave the note with no way back.
+  const trashRow = (
+    <VirtualRootRow
+      key="__trash__"
+      rootKey="__trash__"
+      label="Trash"
+      icon={Trash2}
+      notes={trashList}
+      expanded={expanded}
+      onToggle={toggleVirtualRoot}
+      depthStep={depthStep}
+      noteBasePad={noteBasePad}
+      folderOptions={folderOptions}
+      selectedId={selectedId}
+      multiActive={multiActive}
+      selectedIds={selectedIds}
+      bulk={bulk}
+      draggingKey={draggingKey}
+      onSelectFolder={onSelectFolder}
+      onSelectNote={onSelectNote}
+      onMoveNote={onMoveNote}
+      onRestoreNote={onRestoreNote}
+      onDeleteNotePermanently={onDeleteNotePermanently}
+      onDuplicateNote={handleDuplicateNote}
+      setDragOverPath={setDragOverPath}
+      setDraggingKey={setDraggingKey}
+    />
+  );
+
+  if (notes.length === 0 && folderPaths.length === 0 && favoritesList.length === 0) {
     return (
       <div className="flex-1 overflow-y-auto">
         <CaptureEmptyState onCreateNote={() => onCreateNoteInFolder("")} variant="compact" />
+        {trashList.length > 0 && <div className="px-2 pb-2">{trashRow}</div>}
       </div>
     );
   }
@@ -920,31 +976,7 @@ export function NoteTree({
           setDragOverPath={setDragOverPath}
           setDraggingKey={setDraggingKey}
         />
-        <VirtualRootRow
-          key="__trash__"
-          rootKey="__trash__"
-          label="Trash"
-          icon={Trash2}
-          notes={trashList}
-          expanded={expanded}
-          onToggle={toggleVirtualRoot}
-          depthStep={depthStep}
-          noteBasePad={noteBasePad}
-          folderOptions={folderOptions}
-          selectedId={selectedId}
-          multiActive={multiActive}
-          selectedIds={selectedIds}
-          bulk={bulk}
-          draggingKey={draggingKey}
-          onSelectFolder={onSelectFolder}
-          onSelectNote={onSelectNote}
-          onMoveNote={onMoveNote}
-          onRestoreNote={onRestoreNote}
-          onDeleteNotePermanently={onDeleteNotePermanently}
-          onDuplicateNote={handleDuplicateNote}
-          setDragOverPath={setDragOverPath}
-          setDraggingKey={setDraggingKey}
-        />
+        {trashRow}
       </div>
 
       {multiActive && (

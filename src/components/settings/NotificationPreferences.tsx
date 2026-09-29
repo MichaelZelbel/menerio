@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Bell, Loader2, Mail } from "lucide-react";
+import { Bell, Loader2, Mail, RefreshCw } from "lucide-react";
 
 interface Preferences {
   daily_digest_enabled: boolean;
@@ -36,33 +36,49 @@ export function NotificationPreferences() {
   const { toast } = useToast();
   const [prefs, setPrefs] = useState<Preferences>(defaults);
   const [loading, setLoading] = useState(true);
+  // A failed load left the defaults on screen, and Save then wrote them over
+  // the real settings. While it is set, the form is not shown and cannot save.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!user) return;
-    supabase
+  // Keyed on the id, not the user object: a new object for the same account
+  // (a token refresh on returning to the tab) must not reload the form over
+  // unsaved changes.
+  const userId = user?.id;
+  const load = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    // maybeSingle: no row yet is a new account on the defaults, not an error.
+    const { data, error } = await supabase
       .from("notification_preferences")
       .select("*")
-      .eq("user_id", user.id)
-      .single()
-      .then(({ data }) => {
-        if (data) {
-          setPrefs({
-            daily_digest_enabled: data.daily_digest_enabled,
-            digest_time: data.digest_time,
-            notify_stale_actions: data.notify_stale_actions,
-            notify_contact_followup: data.notify_contact_followup,
-            notify_patterns: data.notify_patterns,
-            notify_weekly_review: data.notify_weekly_review,
-            digest_email: data.digest_email || "",
-          });
-        }
-        setLoading(false);
-      });
-  }, [user]);
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) {
+      setLoadFailed(true);
+    } else {
+      setLoadFailed(false);
+      if (data) {
+        setPrefs({
+          daily_digest_enabled: data.daily_digest_enabled,
+          digest_time: data.digest_time,
+          notify_stale_actions: data.notify_stale_actions,
+          notify_contact_followup: data.notify_contact_followup,
+          notify_patterns: data.notify_patterns,
+          notify_weekly_review: data.notify_weekly_review,
+          digest_email: data.digest_email || "",
+        });
+      }
+    }
+    setLoading(false);
+  }, [userId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const save = async () => {
-    if (!user) return;
+    if (!user || loadFailed) return;
     setSaving(true);
 
     const payload = {
@@ -97,6 +113,21 @@ export function NotificationPreferences() {
     );
   }
 
+  if (loadFailed) {
+    return (
+      <Card>
+        <CardContent className="space-y-3 py-8 text-center">
+          <p className="text-sm text-destructive" role="alert">
+            Could not load your notification settings, so they cannot be changed right now.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            <RefreshCw className="mr-2 h-4 w-4" /> Try again
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -116,10 +147,11 @@ export function NotificationPreferences() {
 
           <div className="flex items-center justify-between">
             <div>
-              <Label>Enable daily digest</Label>
+              <Label htmlFor="notif-daily-digest">Enable daily digest</Label>
               <p className="text-xs text-muted-foreground">Receive a summary email of your brain activity.</p>
             </div>
             <Switch
+              id="notif-daily-digest"
               checked={prefs.daily_digest_enabled}
               onCheckedChange={(v) => update("daily_digest_enabled", v)}
             />
@@ -128,9 +160,9 @@ export function NotificationPreferences() {
           {prefs.daily_digest_enabled && (
             <div className="space-y-3 pl-1">
               <div className="space-y-1.5">
-                <Label>Preferred time</Label>
+                <Label htmlFor="notif-digest-time">Preferred time</Label>
                 <Select value={prefs.digest_time} onValueChange={(v) => update("digest_time", v)}>
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger id="notif-digest-time" className="w-40">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -141,8 +173,9 @@ export function NotificationPreferences() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Digest email (optional)</Label>
+                <Label htmlFor="notif-digest-email">Digest email (optional)</Label>
                 <Input
+                  id="notif-digest-email"
                   type="email"
                   value={prefs.digest_email}
                   onChange={(e) => update("digest_email", e.target.value)}
@@ -167,10 +200,11 @@ export function NotificationPreferences() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <Label>Stale action items</Label>
+                <Label htmlFor="notif-stale-actions">Stale action items</Label>
                 <p className="text-xs text-muted-foreground">Alert when action items have no updates for 14+ days.</p>
               </div>
               <Switch
+                id="notif-stale-actions"
                 checked={prefs.notify_stale_actions}
                 onCheckedChange={(v) => update("notify_stale_actions", v)}
               />
@@ -178,10 +212,11 @@ export function NotificationPreferences() {
 
             <div className="flex items-center justify-between">
               <div>
-                <Label>Contact follow-ups</Label>
+                <Label htmlFor="notif-contact-followup">Contact follow-ups</Label>
                 <p className="text-xs text-muted-foreground">Remind when contacts are overdue for check-in.</p>
               </div>
               <Switch
+                id="notif-contact-followup"
                 checked={prefs.notify_contact_followup}
                 onCheckedChange={(v) => update("notify_contact_followup", v)}
               />
@@ -189,10 +224,11 @@ export function NotificationPreferences() {
 
             <div className="flex items-center justify-between">
               <div>
-                <Label>Pattern detection</Label>
+                <Label htmlFor="notif-patterns">Pattern detection</Label>
                 <p className="text-xs text-muted-foreground">Notify when AI detects recurring themes.</p>
               </div>
               <Switch
+                id="notif-patterns"
                 checked={prefs.notify_patterns}
                 onCheckedChange={(v) => update("notify_patterns", v)}
               />
@@ -200,10 +236,11 @@ export function NotificationPreferences() {
 
             <div className="flex items-center justify-between">
               <div>
-                <Label>Weekly review reminder</Label>
+                <Label htmlFor="notif-weekly-review">Weekly review reminder</Label>
                 <p className="text-xs text-muted-foreground">Remind every Friday to generate your weekly review.</p>
               </div>
               <Switch
+                id="notif-weekly-review"
                 checked={prefs.notify_weekly_review}
                 onCheckedChange={(v) => update("notify_weekly_review", v)}
               />
@@ -211,7 +248,7 @@ export function NotificationPreferences() {
           </div>
         </div>
 
-        <Button onClick={save} disabled={saving}>
+        <Button onClick={save} disabled={saving || loadFailed}>
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Save Preferences
         </Button>

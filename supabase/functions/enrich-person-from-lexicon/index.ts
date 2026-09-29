@@ -381,9 +381,47 @@ async function applyLexiconFact(db: any, userId: string, s: any): Promise<any> {
   return { ...s, status: "pending_review" };
 }
 
+/**
+ * Why this person may not be enriched, or null. Enrichment sends every note,
+ * moment, Lexicon page and scan about them to a model. A person hidden from AI
+ * is in no AI pipeline; a merged-away record is not a person any more; and a
+ * sensitive person's notes and moments are hidden from AI while
+ * hide_sensitive_from_ai is on (the default), which is what ai_can_see says of
+ * them. All three used to be sent.
+ */
+function enrichmentRefusal(
+  contact: { merged_into?: string | null; ai_visibility?: string | null; is_sensitive?: boolean | null },
+  hideSensitive: boolean,
+): string | null {
+  if (contact.merged_into) return "contact_not_found";
+  if (contact.ai_visibility !== "visible") return "hidden_from_ai";
+  if (contact.is_sensitive === true && hideSensitive) return "sensitive_person";
+  return null;
+}
+
 async function run(userId: string, contactId: string) {
   // Go-live has paused every fact writer: nothing is bought or written.
   if (await factWritesPaused(supabase)) return { ok: false, reason: "fact_writes_paused" };
+  const { data: person, error: personErr } = await supabase
+    .from("contacts")
+    .select("id, merged_into, ai_visibility, is_sensitive")
+    .eq("id", contactId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (personErr) return { ok: false, reason: "contact_unreadable" };
+  if (!person) return { ok: false, reason: "contact_not_found" };
+  let hideSensitive = true;
+  if ((person as any).is_sensitive === true) {
+    const { data: pref, error: prefErr } = await supabase
+      .from("mcp_preferences")
+      .select("hide_sensitive_from_ai")
+      .eq("user_id", userId)
+      .maybeSingle();
+    // Fail closed: an unread setting counts as "hide".
+    hideSensitive = prefErr ? true : (pref as any)?.hide_sensitive_from_ai !== false;
+  }
+  const refusal = enrichmentRefusal(person as any, hideSensitive);
+  if (refusal) return { ok: false, reason: refusal };
   const balance = await checkBalance(supabase as any, userId);
   if (!balance.allowed) return { ok: false, reason: "insufficient_credits" };
 

@@ -20,7 +20,8 @@ serve(async (req) => {
 
     const [{ data: interactions, error: interactionsError }, { data: notes, error: notesError }] = await Promise.all([
       admin.from("contact_interactions").select("type, summary, interaction_date, group_id, action_items").eq("user_id", userId).eq("contact_id", membership.contact_id).order("interaction_date", { ascending: false }).limit(5),
-      admin.from("notes").select("title, content, created_at, metadata").eq("user_id", userId).contains("metadata", { people: [membership.contacts?.name] }).order("created_at", { ascending: false }).limit(3),
+      // Not trashed and not hidden from AI: these bodies go into the prompt.
+      admin.from("notes").select("title, content, created_at, metadata").eq("user_id", userId).eq("is_trashed", false).neq("ai_visibility", "hidden").contains("metadata", { people: [membership.contacts?.name] }).order("created_at", { ascending: false }).limit(3),
     ]);
     if (interactionsError) throw interactionsError;
     if (notesError) throw notesError;

@@ -32,8 +32,11 @@ import {
   SkipForward,
 } from "lucide-react";
 import confetti from "canvas-confetti";
+import { BRAND } from "@/lib/brand";
 
-const WIZARD_KEY = "menerio-wizard-completed";
+// Per account: one flag for the whole browser made a second account signed in
+// on the same browser skip the setup the first one had finished.
+const wizardKey = (userId: string) => `menerio-wizard-completed:${userId}`;
 
 const STEPS = [
   { id: "welcome", label: "Welcome", icon: Sparkles },
@@ -80,19 +83,38 @@ export default function Wizard() {
   const [selectedFocus, setSelectedFocus] = useState<string[]>([]);
 
   // Already completed check
+  const userId = user?.id;
   useEffect(() => {
-    if (localStorage.getItem(WIZARD_KEY) === "true") {
-      navigate("/dashboard", { replace: true });
+    if (!userId) return;
+    let done = false;
+    try {
+      done = localStorage.getItem(wizardKey(userId)) === "true";
+    } catch {
+      /* storage blocked: show the wizard */
     }
-  }, [navigate]);
+    if (done) navigate("/dashboard", { replace: true });
+  }, [navigate, userId]);
 
-  // Pre-fill profile
-  useEffect(() => {
-    if (profile) {
-      setDisplayName(profile.display_name || "");
-      setAvatarUrl(profile.avatar_url);
+  const markCompleted = useCallback(() => {
+    if (!userId) return;
+    try {
+      localStorage.setItem(wizardKey(userId), "true");
+    } catch {
+      /* storage blocked: nothing to remember it in */
     }
-  }, [profile]);
+  }, [userId]);
+
+  // Pre-fill profile. Keyed on the values, not the object: a new profile
+  // object with the same values must not wipe what is being typed.
+  const profileLoaded = !!profile;
+  const profileName = profile?.display_name;
+  const profileAvatar = profile?.avatar_url;
+  useEffect(() => {
+    if (profileLoaded) {
+      setDisplayName(profileName || "");
+      setAvatarUrl(profileAvatar ?? null);
+    }
+  }, [profileLoaded, profileName, profileAvatar]);
 
   const goNext = () => {
     if (step < STEPS.length - 1) {
@@ -109,12 +131,12 @@ export default function Wizard() {
   };
 
   const complete = useCallback(() => {
-    localStorage.setItem(WIZARD_KEY, "true");
+    markCompleted();
     navigate("/dashboard", { replace: true });
-  }, [navigate]);
+  }, [navigate, markCompleted]);
 
   const skipWizard = () => {
-    localStorage.setItem(WIZARD_KEY, "true");
+    markCompleted();
     navigate("/dashboard", { replace: true });
   };
 
@@ -179,9 +201,9 @@ export default function Wizard() {
       <header className="flex items-center justify-between px-6 py-4 border-b">
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-md bg-primary flex items-center justify-center">
-            <span className="text-xs font-bold text-primary-foreground">M</span>
+            <span className="text-xs font-bold text-primary-foreground">{BRAND.name.charAt(0)}</span>
           </div>
-          <span className="text-sm font-semibold font-display text-foreground">Menerio</span>
+          <span className="text-sm font-semibold font-display text-foreground">{BRAND.name}</span>
         </div>
         <Button variant="ghost" size="sm" onClick={skipWizard} className="text-muted-foreground gap-1">
           <SkipForward className="h-3.5 w-3.5" /> Skip setup
@@ -242,7 +264,7 @@ export default function Wizard() {
                   <div>
                     <h2 className="text-3xl font-display font-bold">Welcome, {userName}!</h2>
                     <p className="text-muted-foreground mt-3 max-w-md mx-auto">
-                      Menerio helps you organize, create, and collaborate smarter with AI. Let's set up your workspace in under a minute.
+                      {BRAND.name} helps you organize, create, and collaborate smarter with AI. Let's set up your workspace in under a minute.
                     </p>
                   </div>
                   <Button size="lg" onClick={goNext} className="gap-2">
@@ -295,7 +317,7 @@ export default function Wizard() {
                 <div className="space-y-6">
                   <div className="text-center">
                     <h2 className="text-2xl font-display font-bold">Choose Your Focus</h2>
-                    <p className="text-sm text-muted-foreground mt-1">Select what you'll primarily use Menerio for. Pick as many as you like.</p>
+                    <p className="text-sm text-muted-foreground mt-1">Select what you'll primarily use {BRAND.name} for. Pick as many as you like.</p>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -339,7 +361,7 @@ export default function Wizard() {
                 <div className="space-y-6">
                   <div className="text-center">
                     <h2 className="text-2xl font-display font-bold">Quick Tour</h2>
-                    <p className="text-sm text-muted-foreground mt-1">Here's what you can do with Menerio.</p>
+                    <p className="text-sm text-muted-foreground mt-1">Here's what you can do with {BRAND.name}.</p>
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">

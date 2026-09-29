@@ -20,8 +20,11 @@ interface ProfileSuggestionsProps {
   categories: ProfileCategory[];
   factCount: number;
   noteCount: number;
-  /** Adds the fact (write_fact files it under the section slug). */
-  onAccept: (data: { category_slug: string; label: string; value: string }) => void;
+  /**
+   * Adds the fact (write_fact files it under the section slug). Resolves once
+   * it is saved and rejects when it was not (the caller reports why).
+   */
+  onAccept: (data: { category_slug: string; label: string; value: string }) => Promise<unknown>;
 }
 
 const STORAGE_KEY = "menerio-dismissed-profile-suggestions";
@@ -124,10 +127,16 @@ export function ProfileSuggestions({ categories, factCount, noteCount, onAccept 
     }
   }
 
-  function handleAccept(s: Suggestion) {
+  async function handleAccept(s: Suggestion) {
     // The section needs no row of its own: the fact is filed by slug and
     // shows under the taxonomy's section name until one exists.
-    onAccept({ category_slug: s.category_slug, label: s.label, value: s.value });
+    try {
+      await onAccept({ category_slug: s.category_slug, label: s.label, value: s.value });
+    } catch {
+      // Not saved (the hook said why): the suggestion stays, so it can be
+      // accepted again. It used to be dismissed for good either way.
+      return;
+    }
     handleDismiss(s);
   }
 

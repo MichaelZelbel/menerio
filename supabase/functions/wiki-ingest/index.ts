@@ -4,7 +4,7 @@ import { parseModelJson, runChat } from "../_shared/llm-router.ts";
 import { WIKI_INGEST_PROMPT } from "../_shared/llm-defaults.ts";
 import { softStructure } from "../_shared/wiki-structure.ts";
 import { createNoteAIJobs, classifyNoteAIError, NoteAIJobError } from "../_shared/note-ai-jobs.ts";
-import { runWikiStage, dispatchWikiRequest } from "../_shared/wiki-ingest-jobs.ts";
+import { runWikiStage, dispatchWikiRequest, wikiIngestErrorStatus } from "../_shared/wiki-ingest-jobs.ts";
 import { shouldExtractFacts } from "../_shared/mc-source.ts";
 import { sanitizePromptText, taggedPrompt } from "../_shared/prompt-safety.ts";
 
@@ -417,11 +417,16 @@ async function synthesizeGroupInsights(db: any, userId: string, note: any, noteI
   const people = extractPeopleFromMetadata(note.metadata);
   if (people.length === 0) return { actions: [], updated: 0, skipped: "no_people_metadata" };
 
+  // Their interaction summaries go into the prompt below, so only people an
+  // assistant may see: not merged away, not hidden from AI, not sensitive.
   const { data: contacts, error: contactsError } = await db
     .from("contacts")
     .select("id, name")
     .eq("user_id", userId)
-    .in("name", people);
+    .in("name", people)
+    .is("merged_into", null)
+    .eq("ai_visibility", "visible")
+    .or("is_sensitive.is.null,is_sensitive.eq.false");
   if (contactsError) throw contactsError;
   const personIds = [...new Set((contacts || []).map((contact: any) => contact.id))];
   if (personIds.length === 0) return { actions: [], updated: 0, skipped: "no_matching_contacts" };
@@ -843,7 +848,12 @@ serve(async (req) => {
     });
     return jsonResponse(result.body, result.status);
   } catch (error) {
-    console.error("wiki-ingest dispatch failed", error);
-    return jsonResponse({ error: "Lexicon ingest failed" }, 500);
+    // A classified failure is already recorded on the job (no_credit parks it,
+    // transient schedules a retry); tell the drain worker what happened rather
+    // than a 500 it reads as "uncertain" (wikiIngestErrorStatus).
+    const status = wikiIngestErrorStatus(error);
+    if (status === 500) console.error("wiki-ingest dispatch failed", error);
+    else console.warn(`[wiki-ingest] job ended: ${classifyNoteAIError(error)}`);
+    return jsonResponse({ error: "Lexicon ingest failed" }, status);
   }
 });

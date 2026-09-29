@@ -7,6 +7,7 @@
 // AI Chat) and MCP clients. This file kept its old name to avoid churn
 // inside menerio-mcp; the semantics are AI-wide.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { matchedContactIds } from "../_shared/mc-visibility.ts";
 
 const cache = new AsyncLocalStorage<{
   sensitivePersonIds?: Set<string>;
@@ -90,8 +91,10 @@ export async function filterVisibleNotes(rows: any[], supabase: any, userId: str
   if (ids.size === 0) return visible;
   return visible.filter((r) => {
     if (r.person_id && ids.has(r.person_id)) return false;
-    const matched = r?.metadata?.matched_people;
-    if (Array.isArray(matched) && matched.some((id: string) => ids.has(id))) return false;
+    // Entries are objects ({ name, contact_id, canonical_name }); compared as
+    // plain ids none ever matched, and a note about a sensitive person came
+    // back through every MCP note tool. matchedContactIds reads both shapes.
+    if (matchedContactIds(r?.metadata?.matched_people).some((id) => ids.has(id))) return false;
     return true;
   });
 }

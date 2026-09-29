@@ -12,8 +12,8 @@ export function RequiresOnline({ children }: { children: React.ReactNode }) {
       <WifiOff className="h-10 w-10 text-muted-foreground" />
       <h2 className="text-lg font-semibold">This page needs a connection</h2>
       <p className="max-w-sm text-sm text-muted-foreground">
-        You're offline right now. Your notes are still available — this page
-        will work again as soon as you're back online.
+        You're offline right now. Your notes are still available, and this
+        page will work again as soon as you're back online.
       </p>
     </div>
   );

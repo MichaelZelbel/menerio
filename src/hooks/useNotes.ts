@@ -3,6 +3,7 @@ import { useQuery as usePowerSyncQuery } from "@powersync/tanstack-react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { dbErrorMessage } from "@/lib/function-error";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 import { ilikeContains, escapeLike as escapeLikeFilter, pgOrValue, fetchAllPages } from "@/lib/postgrest";
 import { extractSearchTerms, rankNotesByTerms, trailingPrefix } from "@/lib/search-terms";
@@ -310,10 +311,11 @@ export function useUpdateNote() {
     // never run once the editor is gone). Without this a refused write left
     // the UI showing the change with nothing saved and no word about it.
     onError: (error: Error) => {
+      const reason = dbErrorMessage(error, "Please try again.");
       showToast.batched.error("note:update-failed", (n) =>
         n === 1
-          ? `Could not save the change to the note: ${error?.message || "unknown error"}`
-          : `Could not save ${n} note changes`,
+          ? `Could not save the change to the note. ${reason}`
+          : `Could not save ${n} note changes. ${reason}`,
       );
     },
     onSuccess: (note, variables) => {
@@ -445,10 +447,10 @@ export function useDuplicateNote() {
     mutationFn: async (sourceId: string): Promise<Note> => {
       if (isLocalFirstActive()) return duplicateNoteLocal(user!.id, sourceId);
 
-      // Fetch source
+      // Fetch source. NOTE_COLUMNS, not `*`, which carried the embedding.
       const { data: source, error: srcErr } = await supabase
         .from("notes" as any)
-        .select("*")
+        .select(NOTE_COLUMNS)
         .eq("id", sourceId)
         .single();
       if (srcErr) throw srcErr;

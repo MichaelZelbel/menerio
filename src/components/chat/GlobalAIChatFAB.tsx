@@ -9,13 +9,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
+import { summarizeChat } from "@/lib/chat-summary";
+import { functionErrorMessage, OUT_OF_CREDITS_MESSAGE } from "@/lib/function-error";
 import {
   loadChatState,
   saveChatState,
   clearChatState,
   buildApiMessages,
-  CHAT_WINDOW_SIZE,
-  SUMMARY_THRESHOLD,
+  withSummary,
   NOTE_MODIFYING_TOOLS,
   NOTE_CREATING_TOOLS,
   COLLECTION_MODIFYING_TOOLS,
@@ -202,31 +203,45 @@ export function GlobalAIChatFAB() {
     return () => cancelAnimationFrame(raf);
   }, [state.messages, isLoading, open, effectiveMode]);
 
-  const refreshSummaryIfNeeded = useCallback(
-    async (current: PersistedChatState): Promise<PersistedChatState> => {
-      const olderCount = current.messages.length - CHAT_WINDOW_SIZE;
-      if (olderCount < SUMMARY_THRESHOLD - CHAT_WINDOW_SIZE) return current;
-      if (current.summarizedUpTo >= current.messages.length - CHAT_WINDOW_SIZE) return current;
-      try {
-        const olderMessages = current.messages.slice(0, current.messages.length - CHAT_WINDOW_SIZE);
-        const transcript = olderMessages.map((m) => ({ role: m.role, content: m.content }));
-        const chatFn = collectionId ? "collection-chat" : "note-chat";
-        const { data } = await supabase.functions.invoke(chatFn, {
-          body: { mode: "summarize", messages: transcript },
-        });
-        if (data?.summary) {
-          return {
-            ...current,
-            summary: data.summary,
-            summarizedUpTo: current.messages.length - CHAT_WINDOW_SIZE,
-          };
-        }
-      } catch {
-        // ignore — summary is best-effort
-      }
-      return current;
+  // The conversation a reply belongs to. The panel stays open while the user
+  // moves between notes, and a reply takes 10 to 30 seconds: applying it to
+  // whatever conversation is open by then replaced that one's saved history
+  // with the other's, and the conversation that asked never got its answer.
+  const chatKey = `${user?.id ?? "anon"}|${contextKey}`;
+  const chatKeyRef = useRef(chatKey);
+  useEffect(() => {
+    chatKeyRef.current = chatKey;
+  }, [chatKey]);
+  const summarizingRef = useRef(false);
+
+  /** Put a finished turn where it belongs: on screen if its conversation is open, else into its saved history. */
+  const deliver = useCallback(
+    (key: string, userId: string | undefined, ctx: string, next: PersistedChatState) => {
+      if (chatKeyRef.current === key) setState(next);
+      else saveChatState(userId, ctx, next);
     },
-    [collectionId],
+    [],
+  );
+
+  /** Fold older turns into the summary after the reply is shown, without holding it back. */
+  const summarizeLater = useCallback(
+    (chatFn: "note-chat" | "collection-chat", key: string, userId: string | undefined, ctx: string, from: PersistedChatState) => {
+      if (summarizingRef.current) return;
+      summarizingRef.current = true;
+      void summarizeChat(chatFn, from)
+        .then((res) => {
+          if (!res) return;
+          if (chatKeyRef.current === key) {
+            setState((prev) => withSummary(prev, res.summary, res.upTo, res.messageCount));
+          } else {
+            saveChatState(userId, ctx, withSummary(loadChatState(userId, ctx), res.summary, res.upTo, res.messageCount));
+          }
+        })
+        .finally(() => {
+          summarizingRef.current = false;
+        });
+    },
+    [],
   );
 
   const sendMessage = useCallback(async () => {
@@ -234,6 +249,9 @@ export function GlobalAIChatFAB() {
     if (!text || isLoading || !session) return;
 
     setError(null);
+    const sentKey = chatKey;
+    const sentUserId = user?.id;
+    const sentContext = contextKey;
     const userMsg: ChatMessage = { role: "user", content: text };
     const nextState: PersistedChatState = {
       ...state,
@@ -274,21 +292,18 @@ export function GlobalAIChatFAB() {
         body: invokeBody,
       });
 
+      // A non-2xx answer (out of credits is a 402) arrives as fnErr with
+      // data null, so the reason is read from the answer itself.
       if (fnErr) {
-        const msg = fnErr.message || "Chat request failed";
-        if (msg.includes("Failed to send") || msg.includes("FunctionsFetchError")) {
-          throw new Error("Edge function call failed. Try publishing first.");
-        }
-        throw new Error(msg);
+        throw new Error(await functionErrorMessage(fnErr, "The assistant could not answer. Please try again."));
       }
 
       if (data?.error) {
-        if (data.error === "Insufficient AI credits") {
-          setError("You're out of AI credits for this period.");
-        } else {
-          throw new Error(data.error);
-        }
-        return;
+        throw new Error(
+          data.error === "Insufficient AI credits" || data.code === "INSUFFICIENT_CREDITS"
+            ? OUT_OF_CREDITS_MESSAGE
+            : "The assistant could not answer. Please try again.",
+        );
       }
 
       const notesCreated: ChatMessage["notesCreated"] = Array.isArray(data.notes_created)
@@ -300,7 +315,7 @@ export function GlobalAIChatFAB() {
         toolResults: data.tool_results,
         ...(notesCreated?.length ? { notesCreated } : {}),
       };
-      let updated: PersistedChatState = {
+      const updated: PersistedChatState = {
         ...nextState,
         messages: [...nextState.messages, assistantMsg],
       };
@@ -358,16 +373,17 @@ export function GlobalAIChatFAB() {
         );
       }
 
-      updated = await refreshSummaryIfNeeded(updated);
-      setState(updated);
+      deliver(sentKey, sentUserId, sentContext, updated);
+      summarizeLater(chatFn, sentKey, sentUserId, sentContext, updated);
 
       triggerCreditsRefresh();
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      // The error belongs to the conversation that asked; do not show it in another.
+      if (chatKeyRef.current === sentKey) setError(err.message || "Something went wrong");
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, session, state, noteId, personId, collectionId, collectionItemId, queryClient, refreshSummaryIfNeeded]);
+  }, [input, isLoading, session, state, noteId, personId, collectionId, collectionItemId, queryClient, chatKey, contextKey, user?.id, deliver, summarizeLater]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Enter sends; Shift+Enter inserts a newline. This matches the in-note and

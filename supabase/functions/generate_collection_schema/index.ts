@@ -18,7 +18,10 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // The key itself is read by _shared/llm-router.ts now, not here.
-const MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-4-20250514";
+// claude-sonnet-4-20250514 is deprecated; Sonnet 5 is its successor. Sonnet 5
+// refuses `temperature` (the router drops it) and thinks by default, and the
+// thinking counts against max_tokens, hence the larger cap below.
+const MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 
 // The output shape at the end is spelled out because validateAndNormalize
 // checks exact keys (collection.icon, field.label) and a fixed type list, and
@@ -210,7 +213,7 @@ async function callAnthropic(db: any, userId: string, userMessage: string) {
       model: MODEL,
       systemPrompt: SYSTEM_PROMPT,
       temperature: 0.2,
-      maxTokens: 2400,
+      maxTokens: 8000,
     },
   });
   const text = result.content;

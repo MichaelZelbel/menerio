@@ -15,6 +15,8 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Loader2, CheckCircle2, ExternalLink, Copy, Gamepad2, Unplug, Terminal } from "lucide-react";
+import { dbErrorMessage } from "@/lib/function-error";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 interface DiscordConnection {
   id: string;
@@ -43,13 +45,17 @@ export function DiscordIntegration() {
   const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID || "tjeapelvjlmbxafsmjef";
   const interactionsUrl = `https://${projectRef}.supabase.co/functions/v1/discord-capture`;
 
+  // Keyed on the id, not the user object: a new object for the same account
+  // (a token refresh on returning to the tab) must not reload the form over
+  // what the person has typed.
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     (async () => {
       const { data, error } = await supabase
         .from("discord_connections" as any)
         .select("id, user_id, discord_guild_id, discord_channel_id, application_id, public_key, is_active, created_at")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .maybeSingle();
       if (error) {
         // An empty form here would read as "not connected", and saving it would
@@ -65,7 +71,7 @@ export function DiscordIntegration() {
       }
       setLoading(false);
     })();
-  }, [user]);
+  }, [userId]);
 
   const handleSave = async () => {
     // bot_token is only required on first save; on update users can leave it blank to keep the existing token.
@@ -106,8 +112,8 @@ export function DiscordIntegration() {
       setBotToken("");
 
       showToast.success("Discord connection saved");
-    } catch (err: any) {
-      showToast.error(err.message || "Failed to save");
+    } catch (err) {
+      showToast.error(dbErrorMessage(err, "Could not save the Discord connection. Try again."));
     } finally {
       setSaving(false);
     }
@@ -255,9 +261,9 @@ export function DiscordIntegration() {
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 shrink-0"
-                      onClick={() => {
-                        navigator.clipboard.writeText(interactionsUrl);
-                        showToast.copied();
+                      onClick={async () => {
+                        if (await copyToClipboard(interactionsUrl)) showToast.copied();
+                        else showToast.error(COPY_FAILED_MESSAGE);
                       }}
                     >
                       <Copy className="h-3 w-3" />

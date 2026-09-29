@@ -26,6 +26,8 @@
  * the process-note pipeline, is injected by the caller as `onCreated`.
  */
 
+import { GODSPEED_FOLDER_ROOT, isGodspeedFolderPath } from "./mc-ranking.ts";
+
 /** Max notes one chat turn may create. */
 export const MAX_NOTES_PER_TURN = 3;
 
@@ -282,7 +284,9 @@ export async function executeNoteCreateTool(
   opts: NoteCreateOptions = {},
 ): Promise<string> {
   if (name === "list_note_folders") {
-    const folders = await loadExistingFolderPaths(db, userId);
+    // The mission control mirror's tree is hundreds of machine-made folders
+    // nothing may be filed in; MCP list_note_folders leaves it out the same way.
+    const folders = (await loadExistingFolderPaths(db, userId)).filter((p) => !isGodspeedFolderPath(p));
     return JSON.stringify({
       folders,
       count: folders.length,
@@ -305,6 +309,17 @@ export async function executeNoteCreateTool(
       duplicate_call: true,
       message:
         "This exact note was already created in this turn, and was NOT created a second time. The work is done, so do not retry it.",
+    });
+  }
+
+  // ---- The mirror's folder tree -----------------------------------------
+  // MCP capture_note and update_note refuse it: the tree mirrors the user's
+  // mission control files and is rewritten by that sync. The chat agents
+  // filed notes there on request (or on a page's instruction).
+  if (isGodspeedFolderPath(normalizeFolderPath(args.folder))) {
+    return JSON.stringify({
+      error: "folder_refused",
+      message: `The "${GODSPEED_FOLDER_ROOT}" folder tree is a mirror of the user's mission control files and is rewritten by its sync, so notes cannot be created in or under it. Nothing was created. Call list_note_folders and use one of the user's own folders, or omit the folder for the top level.`,
     });
   }
 

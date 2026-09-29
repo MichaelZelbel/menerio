@@ -4,6 +4,9 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
+
+const FAILED = "The graph could not be rebuilt. Try again.";
 
 /**
  * Re-syncs person profile note metadata (so person nodes get linked to every
@@ -18,7 +21,10 @@ export function RebuildGraphButton() {
     setLoading(true);
     try {
       const backfill = await supabase.functions.invoke("backfill-person-metadata", { body: {} });
-      if (backfill.error) throw backfill.error;
+      if (backfill.error) {
+        toast.error("Failed to rebuild graph", { description: await functionErrorMessage(backfill.error, FAILED) });
+        return;
+      }
       const updated = (backfill.data as { updated?: number })?.updated ?? 0;
 
       const { data: notes, error: notesErr } = await supabase
@@ -26,7 +32,10 @@ export function RebuildGraphButton() {
         .select("id")
         .eq("is_trashed", false)
         .limit(1000);
-      if (notesErr) throw notesErr;
+      if (notesErr) {
+        toast.error("Failed to rebuild graph", { description: dbErrorMessage(notesErr, FAILED) });
+        return;
+      }
 
       let processed = 0;
       for (const n of notes || []) {
@@ -39,11 +48,10 @@ export function RebuildGraphButton() {
       });
       qc.invalidateQueries({ queryKey: ["graph-data"] });
       qc.invalidateQueries({ queryKey: ["note-connections"] });
+      qc.invalidateQueries({ queryKey: ["orphan-notes"] });
     } catch (e) {
       console.error(e);
-      toast.error("Failed to rebuild graph", {
-        description: e instanceof Error ? e.message : "Unknown error",
-      });
+      toast.error("Failed to rebuild graph", { description: await functionErrorMessage(e, FAILED) });
     } finally {
       setLoading(false);
     }

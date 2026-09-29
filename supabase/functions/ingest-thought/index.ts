@@ -3,7 +3,7 @@ import {
   checkBalance,
   getEmbeddingWithCredits,
 } from "../_shared/llm-credits.ts";
-import { runChat, sourceLanguageRule } from "../_shared/llm-router.ts";
+import { parseModelJson, runChat, sourceIsDataRule, sourceLanguageRule } from "../_shared/llm-router.ts";
 import { INGEST_THOUGHT_METADATA_PROMPT } from "../_shared/llm-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -14,6 +14,12 @@ const SLACK_CAPTURE_CHANNEL = Deno.env.get("SLACK_CAPTURE_CHANNEL")!;
 const BRAIN_OWNER_USER_ID = Deno.env.get("BRAIN_OWNER_USER_ID")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+/**
+ * The most message text the metadata call reads, process-note's budget for
+ * the same call. The note itself is stored whole.
+ */
+const MAX_AI_INPUT_CHARS = 24_000;
 
 /**
  * Verify a Slack request signature (https://api.slack.com/authentication/verifying-requests-from-slack).
@@ -113,12 +119,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!messageText || messageText.trim() === "") return new Response("ok", { status: 200 });
 
     // Slack wants a 2xx within three seconds and re-sends the event up to
-    // three times otherwise. The embedding and the metadata call below take
-    // longer than that on a slow day, and the first delivery keeps running
-    // after Slack gives up on it, so a retry used to mean two to four copies of
-    // the note, each charged. A retry is answered at once, and a message whose
-    // ts is already on a note is not captured a second time.
-    if (req.headers.get("X-Slack-Retry-Num")) return new Response("ok", { status: 200 });
+    // three times otherwise, saying why in X-Slack-Retry-Reason.
+    //
+    // Every retry used to be answered at once and dropped, on the theory that
+    // the first delivery was still running. That holds only for a timeout.
+    // When the first delivery never ran (the function failed to boot or hit a
+    // worker limit, so the gateway answered 5xx), the retry was the only copy
+    // left and the thought was gone without a word in the channel. Now only a
+    // timeout retry is dropped; any other retry goes through, and the slack_ts
+    // check below stops a second copy, because the note is saved before the
+    // slow AI step rather than after it.
+    const retryNum = Number(req.headers.get("X-Slack-Retry-Num") || "0");
+    if (retryNum > 0 && req.headers.get("X-Slack-Retry-Reason") === "http_timeout") {
+      return new Response("ok", { status: 200 });
+    }
     if (messageTs) {
       const { data: already } = await supabase
         .from("notes")
@@ -129,97 +143,95 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (already && already.length > 0) return new Response("ok", { status: 200 });
     }
 
-    // Check credit balance for the brain owner
-    const balance = await checkBalance(supabase, BRAIN_OWNER_USER_ID);
-    if (!balance.allowed) {
-      // Still save the note without AI processing. The reply used to go out
-      // before the insert and the insert's error was never read, so a failed
-      // save was reported in the channel as saved.
-      const firstLine = messageText.split("\n")[0];
-      const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
-      const { error: saveErr } = await supabase.from("notes").insert({
+    // Save the message first, before any AI call. The embedding and the
+    // metadata call can each take up to the provider timeout; a worker that
+    // died in them used to take the unsaved thought with it.
+    const firstLine = messageText.split("\n")[0];
+    const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
+    const { data: saved, error: saveErr } = await supabase
+      .from("notes")
+      .insert({
         user_id: BRAIN_OWNER_USER_ID,
         content: messageText,
         title,
         metadata: { source: "slack", slack_ts: messageTs },
         tags: [],
-      });
-      if (saveErr) {
-        console.error("Supabase insert error:", saveErr);
+      })
+      .select("id")
+      .single();
+    if (saveErr || !saved) {
+      console.error("Supabase insert error:", saveErr);
+      // Slack re-sends a failed event three times (after about 0, 1 and 5
+      // minutes) and the retry saves it, so the channel only hears about a
+      // failure that no retry is left to repair.
+      if (retryNum >= 3) {
         await replyInSlack(channel, messageTs, "❌ Could not save this note. Please send it again.");
-        return new Response("error", { status: 500 });
       }
+      return new Response("error", { status: 500 });
+    }
+
+    // Check credit balance for the brain owner
+    const balance = await checkBalance(supabase, BRAIN_OWNER_USER_ID);
+    if (!balance.allowed) {
       await replyInSlack(channel, messageTs, "⚠️ AI credits exhausted. Note saved without AI processing.");
       return new Response("ok", { status: 200 });
     }
 
     // Generate embedding and extract metadata with credit deduction
     let embedding: number[] | null = null;
-    let metadata: Record<string, unknown> = {};
+    let metadata: Record<string, unknown> = { topics: ["uncategorized"], type: "observation" };
 
     try {
       const [embResult, chatResult] = await Promise.all([
-        getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, BRAIN_OWNER_USER_ID, "ingest-thought", messageText),
+        // A failed embedding no longer throws away the metadata answer that
+        // was already paid for (and the other way round is caught below).
+        getEmbeddingWithCredits(supabase, OPENROUTER_API_KEY, BRAIN_OWNER_USER_ID, "ingest-thought", messageText)
+          .catch(() => null),
         runChat({
           db: supabase,
           userId: BRAIN_OWNER_USER_ID,
           callSite: "ingest-thought.metadata",
-          messages: [{ role: "user", content: messageText }],
+          messages: [{ role: "user", content: messageText.slice(0, MAX_AI_INPUT_CHARS) }],
           defaults: {
             provider: "openrouter",
             model: "deepseek/deepseek-v4-flash",
             systemPrompt: INGEST_THOUGHT_METADATA_PROMPT,
           },
-          systemSuffix: sourceLanguageRule(),
+          systemSuffix: [sourceLanguageRule(), sourceIsDataRule()].join("\n\n"),
           callOptions: { response_format: { type: "json_object" } },
         }),
       ]);
 
-      embedding = embResult.embedding;
-      try {
-        metadata = JSON.parse(chatResult.content);
-      } catch {
-        metadata = { topics: ["uncategorized"], type: "observation" };
-      }
+      if (embResult) embedding = embResult.embedding;
+      // JSON.parse("null") is null, and reading `.topics` of it threw outside
+      // this try: the thought was answered 500 and, with the retry dropped,
+      // lost. parseModelJson also reads a ```json fenced reply.
+      const parsed = parseModelJson<Record<string, unknown>>(chatResult.content);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed;
     } catch (err: any) {
-      // Any failure here (no credits, a provider timeout, a 5xx) used to be
-      // rethrown for everything but credits, before the note existed: the
-      // message was answered 500, Slack's retry is short-circuited above, and
-      // the thought was simply gone with no reply in the channel. Save it with
-      // default metadata instead; the note_ai_jobs trigger re-extracts later.
+      // Any failure here (no credits, a provider timeout, a 5xx) keeps the
+      // note that is already saved, with default metadata; the note_ai_jobs
+      // trigger re-extracts later.
       if (err?.message !== "INSUFFICIENT_CREDITS") {
         console.error("[ingest-thought] AI enrichment failed, saving without it:", err);
       }
-      embedding = null;
-      metadata = { topics: ["uncategorized"], type: "observation" };
     }
 
-    // Extract title from first line
-    const firstLine = messageText.split("\n")[0];
-    const title = firstLine.length > 80 ? firstLine.substring(0, 77) + "..." : firstLine;
-
-    // Insert into notes table
-    const insertPayload: Record<string, unknown> = {
-      user_id: BRAIN_OWNER_USER_ID,
-      content: messageText,
-      title,
+    const updatePayload: Record<string, unknown> = {
       metadata: { ...metadata, source: "slack", slack_ts: messageTs },
-      tags: Array.isArray((metadata as any).topics) ? (metadata as any).topics : [],
+      tags: Array.isArray(metadata.topics) ? metadata.topics : [],
     };
-    if (embedding) insertPayload.embedding = embedding;
+    if (embedding) updatePayload.embedding = embedding;
 
-    const { error } = await supabase.from("notes").insert(insertPayload);
-
+    const { error } = await supabase.from("notes").update(updatePayload).eq("id", saved.id);
     if (error) {
-      console.error("Supabase insert error:", error);
-      // A database error string means nothing in a Slack thread, and Slack's
-      // retry of this event is dropped above, so the user must resend.
-      await replyInSlack(channel, messageTs, "❌ Could not save this note. Please send it again.");
-      return new Response("error", { status: 500 });
+      // The note itself is saved; only its tags and metadata are missing, and
+      // the analysis job adds those later.
+      console.error("Supabase update error (note saved):", error);
     }
 
     // Build confirmation reply
-    const meta = metadata as Record<string, unknown>;
+    const meta = metadata;
     let confirmation = `Captured as *${meta.type || "note"}*`;
     if (Array.isArray(meta.topics) && meta.topics.length > 0)
       confirmation += ` - ${meta.topics.join(", ")}`;

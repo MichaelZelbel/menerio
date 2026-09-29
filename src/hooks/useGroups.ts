@@ -4,6 +4,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { getTemplateById, instantiateTemplate } from "@/lib/group-templates";
 import { useAuth } from "@/contexts/AuthContext";
 import { showToast } from "@/lib/toast";
+import { dbErrorMessage } from "@/lib/function-error";
 import { usePeopleSync } from "@/hooks/usePeopleSync";
 
 export type ContactGroupRow = Database["public"]["Tables"]["contact_groups"]["Row"];
@@ -76,10 +77,13 @@ export function useGroup(idOrSlug: string | null | undefined) {
     queryKey: ["contact_group", idOrSlug],
     enabled: !!user && !!idOrSlug,
     queryFn: async () => {
+      // A trashed group is not found. It used to open as if live, with its
+      // pipeline, goals and members editable.
       const query = supabase
         .from("contact_groups")
         .select("*")
-        .eq("user_id", user!.id);
+        .eq("user_id", user!.id)
+        .eq("is_trashed", false);
 
       const { data, error } = isUuid(idOrSlug!)
         ? await query.eq("id", idOrSlug!).maybeSingle()
@@ -171,7 +175,7 @@ export function useCreateGroup() {
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
       triggerPeopleSync();
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not create the group.")),
   });
 }
 
@@ -192,13 +196,20 @@ export function useUpdateGroup() {
       return data as ContactGroupRow;
     },
     onSuccess: (group) => {
+      // The saved row goes into the open group's cache before the mutation
+      // reports done, so a screen that computes the next value from `group`
+      // (the goal +1 / -1 buttons) never counts from the pre-save row while
+      // the refetch below is still on its way.
+      for (const key of [["contact_group", group.id], ["contact_group", group.slug]]) {
+        if (qc.getQueryData(key) !== undefined) qc.setQueryData(key, group);
+      }
       qc.invalidateQueries({ queryKey: ["contact_groups"] });
       qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
       triggerPeopleSync();
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not save the group.")),
   });
 }
 
@@ -223,11 +234,13 @@ export function useTrashGroup() {
       qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
+      // A person's Groups tab lists memberships of live groups only.
+      qc.invalidateQueries({ queryKey: ["person_groups"] });
       // Trash retires the group's vault file via the sweep's retire pass.
       triggerPeopleSync();
     },
     // Callers pass only onSuccess; a refused write said nothing at all.
-    onError: (error: Error) => showToast.error(`Could not move the group to trash: ${error.message}`),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not move the group to trash.")),
   });
 }
 
@@ -255,7 +268,7 @@ export function useArchiveGroup() {
       triggerPeopleSync();
     },
     // Callers pass only onSuccess; a refused write said nothing at all.
-    onError: (error: Error) => showToast.error(`Could not archive the group: ${error.message}`),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not archive the group.")),
   });
 }
 
@@ -280,9 +293,11 @@ export function useRestoreGroup() {
       qc.invalidateQueries({ queryKey: ["group-pulse"] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.id] });
       qc.invalidateQueries({ queryKey: ["contact_group", group.slug] });
+      // Restoring from trash brings the group back onto its members' Groups tabs.
+      qc.invalidateQueries({ queryKey: ["person_groups"] });
       triggerPeopleSync();
     },
     // Callers pass only onSuccess; a refused write said nothing at all.
-    onError: (error: Error) => showToast.error(`Could not restore the group: ${error.message}`),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not restore the group.")),
   });
 }

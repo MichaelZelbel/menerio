@@ -62,20 +62,29 @@ export function ActivityFeed({ limit = 5, showViewAll = true }: ActivityFeedProp
   const navigate = useNavigate();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed read used to show "No recent activity."
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!user) return;
+    let cancelled = false;
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("activity_events" as any)
         .select("*")
         .eq("actor_id", user.id)
         .order("created_at", { ascending: false })
         .limit(limit);
-      setEvents(data || []);
+      if (cancelled) return;
+      setFailed(!!error);
+      if (!error) setEvents(data || []);
       setLoading(false);
     })();
-  }, [user, limit]);
+    return () => {
+      cancelled = true;
+    };
+  }, [user, limit, attempt]);
 
   if (loading) {
     return (
@@ -106,7 +115,12 @@ export function ActivityFeed({ limit = 5, showViewAll = true }: ActivityFeedProp
         )}
       </CardHeader>
       <CardContent>
-        {events.length === 0 ? (
+        {failed ? (
+          <div role="alert" className="text-center py-6 space-y-2">
+            <p className="text-sm text-muted-foreground">Recent activity could not be loaded.</p>
+            <Button variant="outline" size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>
+          </div>
+        ) : events.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-6">No recent activity.</p>
         ) : (
           <ul className="space-y-3">

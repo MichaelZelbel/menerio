@@ -4,6 +4,7 @@ import { parseModelJson, resolveSystemPrompt } from "../_shared/llm-router.ts";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { WIKI_CLEANUP_PROMPT } from "../_shared/llm-defaults.ts";
 import { sanitizePromptText } from "../_shared/prompt-safety.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -101,9 +102,12 @@ serve(async (req) => {
 
     // ========== STRIP DEAD LINKS (bulk) ==========
     if (mode === "strip_dead_links") {
-      const { data: pages, error: pErr } = await db
-        .from("wiki_pages").select("id, slug, content").eq("user_id", userId);
-      if (pErr) throw pErr;
+      // Paged: past the server's 1000-row cap the slugs of the remaining pages
+      // were missing from the set, so every link to them counted as dead and
+      // was stripped from the page text.
+      const pages = await selectAllRows<{ id: string; slug: string; content: string | null }>((from, to) => db
+        .from("wiki_pages").select("id, slug, content").eq("user_id", userId)
+        .order("id", { ascending: true }).range(from, to));
 
       const slugSet = new Set((pages || []).map((p: any) => p.slug));
       let pagesChanged = 0;
@@ -151,7 +155,7 @@ serve(async (req) => {
 
       const { data: sources, error: sErr } = await db
         .from("wiki_page_sources")
-        .select("note_id, notes:note_id(id, title, content, ai_visibility)")
+        .select("note_id, notes:note_id(id, title, content, ai_visibility, is_trashed)")
         .eq("wiki_page_id", pageId).eq("user_id", userId);
       if (sErr) throw sErr;
 
@@ -159,7 +163,8 @@ serve(async (req) => {
       // overwrites the page. Each note goes in its own tagged block, sanitised so
       // it cannot close the block, and the prompt says the blocks are data.
       const noteBlocks = (sources || [])
-        .map((s: any) => (s.notes && s.notes.ai_visibility !== "hidden")
+        // A note in the bin is out of every AI surface, like a hidden one.
+        .map((s: any) => (s.notes && s.notes.ai_visibility !== "hidden" && s.notes.is_trashed !== true)
           ? `<source_note title="${sanitizePromptText(s.notes.title || "Untitled", 200).replace(/["\s]+/g, " ").trim()}">\n${sanitizePromptText(noteContentToText(s.notes.content), 4000)}\n</source_note>`
           : "")
         .filter(Boolean).join("\n\n");
@@ -171,9 +176,9 @@ serve(async (req) => {
       // The prompt allows [[slug]] links but never saw which slugs exist, so a
       // rebuild could only guess them, and every guess was a dead link. Give it
       // the list, and strip any link outside it after the call.
-      const { data: slugRows, error: slugErr } = await db
-        .from("wiki_pages").select("slug").eq("user_id", userId);
-      if (slugErr) throw slugErr;
+      const slugRows = await selectAllRows<{ slug: string }>((from, to) => db
+        .from("wiki_pages").select("id, slug").eq("user_id", userId)
+        .order("id", { ascending: true }).range(from, to));
       const existingSlugs = new Set<string>((slugRows || []).map((r: any) => String(r.slug)));
       const linkableSlugs = [...existingSlugs].filter((s) => s !== page.slug).slice(0, 400);
 
@@ -230,18 +235,20 @@ serve(async (req) => {
     // ========== EXISTING: dry_run / delete (low-quality candidates) ==========
     const explicitIds: string[] | null = Array.isArray(body.page_ids) ? body.page_ids : null;
 
-    const { data: pages, error: pagesError } = await db
+    // Paged, pages and links both: a link table past the 1000-row cap counted
+    // pages that do have backlinks as having none, and "delete" without
+    // page_ids removes every candidate.
+    const pageList = await selectAllRows<any>((from, to) => db
       .from("wiki_pages")
       .select("id, slug, title, page_type, content, source_count, updated_at")
-      .eq("user_id", userId);
-    if (pagesError) throw pagesError;
-
-    const pageList = pages || [];
+      .eq("user_id", userId)
+      .order("id", { ascending: true })
+      .range(from, to));
     if (pageList.length === 0) return jsonResponse({ ok: true, mode, candidates: [], deleted: 0 });
 
-    const { data: links, error: linksError } = await db
-      .from("wiki_links").select("source_page_id, target_page_id").eq("user_id", userId);
-    if (linksError) throw linksError;
+    const links = await selectAllRows<{ source_page_id: string; target_page_id: string | null }>((from, to) => db
+      .from("wiki_links").select("id, source_page_id, target_page_id").eq("user_id", userId)
+      .order("id", { ascending: true }).range(from, to));
 
     const inboundCounts = new Map<string, number>();
     for (const link of links || []) {

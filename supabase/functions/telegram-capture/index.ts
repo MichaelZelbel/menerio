@@ -11,6 +11,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Telegram sends the webhook's secret_token in this header on every delivery.
+ * The secret used to travel only in the webhook URL's query string, where it
+ * lands in every request log; the header keeps it out of them. Telegram allows
+ * 1-256 characters of A-Z, a-z, 0-9, _ and - (the default secret is hex).
+ */
+const TELEGRAM_SECRET_HEADER = "x-telegram-bot-api-secret-token";
+const SECRET_TOKEN_RE = /^[A-Za-z0-9_-]{1,256}$/;
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -81,13 +90,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       if (!conn) return json({ error: "No telegram connection found" }, 404);
 
-      const webhookUrl = `${SUPABASE_URL}/functions/v1/telegram-capture?secret=${conn.webhook_secret}`;
+      // The secret goes in Telegram's secret_token (sent back as a header), not
+      // in the URL. A secret Telegram would refuse there (one written straight
+      // to the table) keeps the old URL form, which the handler still accepts.
+      const headerForm = SECRET_TOKEN_RE.test(String(conn.webhook_secret ?? ""));
+      const webhookUrl = headerForm
+        ? `${SUPABASE_URL}/functions/v1/telegram-capture`
+        : `${SUPABASE_URL}/functions/v1/telegram-capture?secret=${encodeURIComponent(conn.webhook_secret)}`;
       const res = await fetch(
         `https://api.telegram.org/bot${conn.bot_token}/setWebhook`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: webhookUrl }),
+          body: JSON.stringify({ url: webhookUrl, ...(headerForm ? { secret_token: conn.webhook_secret } : {}) }),
+          signal: AbortSignal.timeout(10000),
         }
       );
       const data = await res.json();
@@ -137,8 +153,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // ── Webhook handler (POST from Telegram) ──
-  const secret = url.searchParams.get("secret");
-  if (!secret) return json({ error: "missing secret" }, 400);
+  // The header first; the ?secret= URL form stays for webhooks registered
+  // before the header existed (re-connecting in Settings moves them over).
+  const secret = req.headers.get(TELEGRAM_SECRET_HEADER) || url.searchParams.get("secret");
+  if (!secret) return json({ error: "missing secret" }, 401);
 
   try {
     // Look up connection by webhook secret

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveTargets } from "@/components/profile/ProfileSections";
+import { customSectionSlug, moveTargets } from "@/components/profile/ProfileSections";
 
 describe("moveTargets", () => {
   it("offers the taxonomy, the subject's own sections and Other", () => {
@@ -15,5 +15,19 @@ describe("moveTargets", () => {
     const slugs = moveTargets([{ slug: "relationships", name: "Family" }], ["relationships"]).map((o) => o.slug);
     expect(slugs).not.toContain("relationships");
     expect(slugs).toContain("identity");
+  });
+});
+
+describe("customSectionSlug", () => {
+  it("keeps a readable slug and folds accents", () => {
+    expect(customSectionSlug("My Stuff", [])).toBe("my-stuff");
+    expect(customSectionSlug("Über mich", [])).toBe("uber-mich");
+  });
+
+  // "健康" used to become "-", and the next non-Latin name collided with it on the unique index.
+  it("never produces an empty or taken slug", () => {
+    expect(customSectionSlug("健康", [])).toBe("section");
+    expect(customSectionSlug("Здоровье", ["section"])).toBe("section-2");
+    expect(customSectionSlug("Health", ["health", "health-2"])).toBe("health-3");
   });
 });

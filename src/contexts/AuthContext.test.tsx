@@ -130,4 +130,25 @@ describe("AuthProvider account changes", () => {
     await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1));
     expect(screen.getByText(/A-group/)).toBeTruthy();
   });
+
+  it("keeps the same user object when the same account is announced again, so forms keyed on it do not reload", async () => {
+    const seen: unknown[] = [];
+    function Watch() {
+      const { user } = useAuth();
+      if (user && seen[seen.length - 1] !== user) seen.push(user);
+      return <div>{user?.id ?? "anonymous"}</div>;
+    }
+    render(<AuthProvider><Watch /></AuthProvider>);
+    await screen.findByText("anonymous");
+    await login("A");
+    await screen.findByText("A");
+    // supabase-js builds a new User object for every refresh and tab return.
+    await login("A", "TOKEN_REFRESHED");
+    await login("A", "SIGNED_IN");
+    expect(seen).toHaveLength(1);
+    // A real change (e.g. new e-mail after USER_UPDATED) still comes through.
+    await act(async () => { mocks.callback!("USER_UPDATED", { user: { id: "A", email: "new@example.com" } }); });
+    expect(seen).toHaveLength(2);
+    expect((seen[1] as { email?: string }).email).toBe("new@example.com");
+  });
 });

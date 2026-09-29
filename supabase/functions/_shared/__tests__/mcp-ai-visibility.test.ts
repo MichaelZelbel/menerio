@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { applyVisibility, enterVisibilityScope, getSensitivePersonIds } from "../../menerio-mcp/_ai_visibility";
+import { applyVisibility, enterVisibilityScope, filterVisibleNotes, getSensitivePersonIds } from "../../menerio-mcp/_ai_visibility";
 import type { Row } from "./memory-db";
 
 /**
@@ -59,5 +59,21 @@ describe("applyVisibility", () => {
     await expect(
       enterVisibilityScope(() => applyVisibility(q, "moments", settingsClient(true), USER)),
     ).rejects.toThrow();
+  });
+});
+
+// Review 2026-09-29: matched_people entries are objects in the live data
+// ({ name, contact_id, canonical_name }), and filterVisibleNotes compared them
+// as plain ids, so a note about a sensitive person reached every MCP note tool.
+describe("filterVisibleNotes", () => {
+  it("leaves out a note whose matched people include a sensitive person, in the stored shape", async () => {
+    const notes = [
+      { id: "about-sam", ai_visibility: "visible", metadata: { matched_people: [{ name: "Me", is_self: true }, { name: "Sam", contact_id: SENSITIVE, canonical_name: "Sam" }] } },
+      { id: "plain-id", ai_visibility: "visible", metadata: { matched_people: [SENSITIVE] } },
+      { id: "about-anna", ai_visibility: "visible", metadata: { matched_people: [{ name: "Anna", contact_id: "anna", canonical_name: "Anna" }] } },
+      { id: "hidden", ai_visibility: "hidden", metadata: {} },
+    ];
+    const kept = await enterVisibilityScope(() => filterVisibleNotes(notes, settingsClient(), USER));
+    expect(kept.map((n: Row) => n.id)).toEqual(["about-anna"]);
   });
 });

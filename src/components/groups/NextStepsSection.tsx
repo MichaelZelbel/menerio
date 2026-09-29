@@ -17,6 +17,7 @@ import type { GroupMembershipWithPerson } from "@/hooks/useGroupMemberships";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
+import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 import { localDateISO, parseDateOnly } from "@/lib/local-date";
 import { triggerCreditsRefresh } from "@/lib/credits-events";
 
@@ -77,13 +78,13 @@ export function NextStepsSection({ group, membership }: { group: ContactGroup; m
       setDueDate(undefined);
       setOpen(false);
     },
-    onError: (error: Error) => showToast.error(error.message),
+    onError: (error: Error) => showToast.error(dbErrorMessage(error, "Could not add the next step.")),
   });
 
   const suggestNextStep = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke<NextStepSuggestion>("suggest-group-next-step", { body: { membership_id: membership.id } });
-      if (error) throw error;
+      if (error) throw new Error(await functionErrorMessage(error, "Could not suggest a next step."));
       return data!;
     },
     onSuccess: (suggestion) => {

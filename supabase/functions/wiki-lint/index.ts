@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveSystemPrompt } from "../_shared/llm-router.ts";
 import { openRouterWithCredits } from "../_shared/llm-credits.ts";
 import { WIKI_LINT_PROMPT } from "../_shared/llm-defaults.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -128,14 +129,16 @@ serve(async (req) => {
       });
     }
 
-    const { data: pages, error: pagesError } = await db
+    // Paged: an unbounded select stops at the server's 1000-row cap, and the
+    // orphan and unresolved-link counts are wrong the moment a Lexicon (or its
+    // link table, which is always larger) outgrows it.
+    const allPages = await selectAllRows<WikiPage>((from, to) => db
       .from("wiki_pages")
       .select("id, slug, title, page_type, content, updated_at")
       .eq("user_id", userId)
-      .order("updated_at", { ascending: false });
-    if (pagesError) throw pagesError;
-
-    const allPages = (pages || []) as WikiPage[];
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to));
     const pageById = new Map(allPages.map((page) => [page.id, page]));
 
     if (allPages.length === 0) {
@@ -162,11 +165,12 @@ serve(async (req) => {
       return jsonResponse({ ok: true, findings: emptyResult, counts });
     }
 
-    const { data: links, error: linksError } = await db
+    const links = await selectAllRows<{ source_page_id: string; target_slug: string; target_page_id: string | null }>((from, to) => db
       .from("wiki_links")
-      .select("source_page_id, target_slug, target_page_id")
-      .eq("user_id", userId);
-    if (linksError) throw linksError;
+      .select("id, source_page_id, target_slug, target_page_id")
+      .eq("user_id", userId)
+      .order("id", { ascending: true })
+      .range(from, to));
 
     const unresolvedWikilinks = (links || [])
       .filter((link: any) => link.target_page_id === null)
@@ -270,11 +274,19 @@ serve(async (req) => {
   } catch (error) {
     console.error("wiki-lint failed", error);
     if (db && userId) {
-      await db.from("wiki_log").insert({
-        user_id: userId,
-        operation: "lint_failed",
-        details: { error: error instanceof Error ? error.message : String(error), duration_ms: Date.now() - startedAt },
-      }).catch((logError: unknown) => console.error("failed to log wiki lint failure", logError));
+      // A PostgREST builder is only thenable: it has no .catch(). Calling one
+      // threw a TypeError here, so the failure was never logged and the caller
+      // got the runtime's bare 500 without CORS headers instead of this reply.
+      try {
+        const { error: logError } = await db.from("wiki_log").insert({
+          user_id: userId,
+          operation: "lint_failed",
+          details: { error: error instanceof Error ? error.message : String(error), duration_ms: Date.now() - startedAt },
+        });
+        if (logError) console.error("failed to log wiki lint failure", logError);
+      } catch (logError) {
+        console.error("failed to log wiki lint failure", logError);
+      }
     }
     return jsonResponse({ error: "Lexicon health check failed" }, 500);
   }

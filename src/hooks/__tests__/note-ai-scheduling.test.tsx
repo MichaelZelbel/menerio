@@ -54,7 +54,14 @@ vi.mock("@/components/notes/SuggestedLinksPanel", () => ({ SuggestedLinksPanel: 
 vi.mock("@/components/notes/MediaAnalysisOverlay", () => ({ MediaAnalysisOverlay: () => null }));
 vi.mock("@/components/notes/NoteAttachmentsPanel", () => ({ NoteAttachmentsPanel: () => null }));
 vi.mock("@/components/notes/LocalGraphPanel", () => ({ LocalGraphPanel: () => null }));
-vi.mock("@/components/notes/NoteMetadataEditor", () => ({ NoteMetadataEditor: () => null }));
+vi.mock("@/components/notes/NoteMetadataEditor", () => ({
+  NoteMetadataEditor: ({ onRemoveTag }: { onRemoveTag: (tag: string) => void }) => (
+    <>
+      <button onClick={() => onRemoveTag("work")}>remove work</button>
+      <button onClick={() => onRemoveTag("home")}>remove home</button>
+    </>
+  ),
+}));
 vi.mock("@/components/notes/LinkToNoteDialog", () => ({ LinkToNoteDialog: () => null }));
 vi.mock("@/components/notes/NoteChatPanel", () => ({ NoteChatPanel: () => null }));
 vi.mock("@/components/notes/EditorToolbar", () => ({ EditorToolbar: ({ noteActions }: { noteActions: ReactNode }) => <>{noteActions}</> }));
@@ -125,6 +132,35 @@ describe("browser note scheduling", () => {
     expect(localStorage.getItem("menerio:lexicon-enrollment:other-user:other-note")).toBe("other-note");
     expect(localStorage.getItem("menerio:lexicon-enrollment:user-1:own-note")).toBeNull();
   });
+  it("keeps both removals when two tags are removed before the first save returns", async () => {
+    const view = render(<NoteEditor note={{ ...editorNote, tags: ["Work", "home", "keep"] }} />, { wrapper });
+    await act(async () => {
+      fireEvent.click(view.getByText("remove work"));
+      fireEvent.click(view.getByText("remove home"));
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    // The second write builds on the first, and the stored "Work" matches "work".
+    expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ["keep"] }));
+  });
+
+  it("says Saved, not Saving, after a tab switch flushed the last keystrokes", async () => {
+    const view = render(<NoteEditor note={editorNote} />, { wrapper });
+    typeContent("typed right before switching tabs");
+    expect(view.getAllByText("Saving…").length).toBeGreaterThan(0);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+        await vi.advanceTimersByTimeAsync(1);
+      });
+    } finally {
+      visibility.mockRestore();
+    }
+    expect(state.save).toHaveBeenCalledWith(expect.objectContaining({ id: "note-1", content: "typed right before switching tabs" }));
+    expect(view.queryByText("Saving…")).toBeNull();
+    expect(view.getByText(/^Saved ·/)).toBeInTheDocument();
+  });
+
   it("does not request manual work when the final save fails", async () => {
     state.save.mockResolvedValueOnce({ error: new Error("save failed") });
     const view = render(<NoteEditor note={editorNote} />, { wrapper });
@@ -134,7 +170,9 @@ describe("browser note scheduling", () => {
     // The failure is reported even though the editor's own callbacks handle it.
     expect(state.batchedError).toHaveBeenCalledWith("note:update-failed", expect.any(Function));
     const format = state.batchedError.mock.calls[0][1] as (n: number) => string;
-    expect(format(1)).toContain("save failed");
+    // Said in plain words; the database's own text is for developers.
+    expect(format(1)).toContain("Could not save the change to the note");
+    expect(format(1)).not.toContain("save failed");
     view.unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(state.save).toHaveBeenCalledTimes(2);

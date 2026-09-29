@@ -8,6 +8,8 @@ import { Separator } from "@/components/ui/separator";
 import { Globe, Copy, Check, ExternalLink, Info } from "lucide-react";
 import { showToast } from "@/lib/toast";
 import { Link } from "react-router-dom";
+import { BRAND } from "@/lib/brand";
+import { copyToClipboard, COPY_FAILED_MESSAGE } from "@/lib/clipboard";
 
 const ENDPOINT_URL = "https://clip.menerio.com";
 
@@ -20,7 +22,10 @@ interface CopyableProps {
 function Copyable({ label, value, multiline }: CopyableProps) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(value);
+    if (!(await copyToClipboard(value))) {
+      showToast.error(COPY_FAILED_MESSAGE);
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -68,7 +73,7 @@ export function SingleFileIntegration() {
             >
               SingleFile extension <ExternalLink className="h-3 w-3" />
             </a>{" "}
-            and save them as searchable Menerio notes.
+            and save them as searchable {BRAND.name} notes.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -113,7 +118,7 @@ export function SingleFileIntegration() {
             <div className="space-y-1.5">
               <Copyable label="URL" value={ENDPOINT_URL} />
               <p className="text-xs text-muted-foreground">
-                The Menerio endpoint that receives your captured pages.
+                The {BRAND.name} endpoint that receives your captured pages.
               </p>
             </div>
 
@@ -144,7 +149,7 @@ export function SingleFileIntegration() {
                 <Copyable label="archive URL field name" value="url" />
                 <p className="text-xs text-muted-foreground">
                   Form field that carries the original page URL. Must be{" "}
-                  <code className="bg-muted px-1 rounded">url</code> so Menerio
+                  <code className="bg-muted px-1 rounded">url</code> so {BRAND.name}{" "}
                   can record the source.
                 </p>
               </div>
@@ -153,7 +158,7 @@ export function SingleFileIntegration() {
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">secret key</Label>
               <p className="text-xs text-muted-foreground">
-                Leave empty. Menerio doesn't use SingleFile's shared-secret
+                Leave empty. {BRAND.name} doesn't use SingleFile's shared-secret
                 signing — your API key in the authorization token already
                 authenticates requests.
               </p>
@@ -177,7 +182,7 @@ export function SingleFileIntegration() {
           </div>
 
           <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-            <strong className="text-foreground">What gets saved:</strong> Menerio
+            <strong className="text-foreground">What gets saved:</strong> {BRAND.name}{" "}
             extracts the page title, description and readable text into a Markdown
             note, and stores the original SingleFile HTML snapshot as a wikilinked
             attachment. The source URL is preserved in the note metadata and shown

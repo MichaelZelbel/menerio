@@ -107,7 +107,9 @@ export function useGitHubVersionHistory(noteId: string | null) {
       const { data, error } = await supabase.functions.invoke("github-proxy", {
         body: { action: "version_history", note_id: noteId },
       });
-      if (error) return [];
+      // Thrown, not []: an expired GitHub token or an offline device used to
+      // read as "No version history yet".
+      if (error) throw error;
       return (data as any)?.commits || [];
     },
     staleTime: 30_000,
@@ -122,7 +124,7 @@ export function useGitHubFileAtCommit() {
       });
       if (error) throw error;
       const content = (data as any)?.content;
-      if (typeof content !== "string") throw new Error("Failed to fetch file");
+      if (typeof content !== "string") throw new Error("GitHub returned no content for this version");
       return content;
     },
   });

@@ -10,11 +10,11 @@ import {
   ChevronRight,
   Menu,
   X,
-  ThumbsUp,
-  ThumbsDown,
   BookOpen,
+  Mail,
 } from "lucide-react";
 import { allDocs, docCategories, getDoc, getAdjacentDocs } from "@/content/docs/registry";
+import { BRAND } from "@/lib/brand";
 
 export default function Docs() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,9 +22,10 @@ export default function Docs() {
   const doc = getDoc(currentSlug);
   const { prev, next } = getAdjacentDocs(currentSlug);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  // ?q= starts a search: the 404 page sends its search box here with it,
+  // and this page used to ignore it.
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "");
   const [activeHeading, setActiveHeading] = useState("");
-  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
 
   // Search results
   const searchResults = useMemo(() => {
@@ -55,9 +56,8 @@ export default function Docs() {
     return () => observer.disconnect();
   }, [doc]);
 
-  // Reset feedback on page change
+  // Close the menu and go to the top on page change
   useEffect(() => {
-    setFeedback(null);
     setMobileNavOpen(false);
     window.scrollTo(0, 0);
   }, [currentSlug]);
@@ -65,6 +65,8 @@ export default function Docs() {
   const navigateTo = (slug: string) => {
     setSearchParams({ page: slug });
     setSearchQuery("");
+    // Also when the page tapped is the one already open (no slug change).
+    setMobileNavOpen(false);
   };
 
   if (!doc) {
@@ -131,6 +133,11 @@ export default function Docs() {
               ))}
             </div>
           )}
+          {searchResults.length === 0 && searchQuery.trim() && (
+            <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-lg">
+              No documentation page matches “{searchQuery.trim()}”.
+            </div>
+          )}
         </div>
       </div>
 
@@ -144,6 +151,20 @@ export default function Docs() {
               : "hidden lg:block"
           )}
         >
+          {/* On a phone the open menu covers the whole screen, including the
+              toggle above it, so it carries its own way out. */}
+          {mobileNavOpen && (
+            <div className="mb-4 flex justify-end lg:hidden">
+              <Button
+                aria-label="Close navigation"
+                variant="ghost"
+                size="icon"
+                onClick={() => setMobileNavOpen(false)}
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          )}
           <nav className="sticky top-24 space-y-6">
             {docCategories.map((cat) => (
               <div key={cat.slug}>
@@ -184,28 +205,20 @@ export default function Docs() {
             {doc.content()}
           </div>
 
-          {/* Feedback */}
-          <div className="mt-12 flex items-center gap-4 rounded-lg border p-4">
-            <p className="text-sm text-muted-foreground">Was this page helpful?</p>
-            <div className="flex gap-2">
-              <Button
-                variant={feedback === "up" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFeedback("up")}
+          {/* Feedback. The old "Was this page helpful?" buttons thanked the
+              reader for feedback that was never stored anywhere. */}
+          <div className="mt-12 flex items-center gap-3 rounded-lg border p-4">
+            <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              Something missing or unclear on this page? Write to{" "}
+              <a
+                href={`mailto:${BRAND.supportEmail}?subject=${encodeURIComponent(`Documentation: ${doc.title}`)}`}
+                className="text-primary hover:underline"
               >
-                <ThumbsUp className="h-3.5 w-3.5 mr-1.5" /> Yes
-              </Button>
-              <Button
-                variant={feedback === "down" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFeedback("down")}
-              >
-                <ThumbsDown className="h-3.5 w-3.5 mr-1.5" /> No
-              </Button>
-            </div>
-            {feedback && (
-              <p className="text-xs text-muted-foreground animate-fade-in">Thanks for the feedback!</p>
-            )}
+                {BRAND.supportEmail}
+              </a>
+              .
+            </p>
           </div>
 
           {/* Prev / Next */}

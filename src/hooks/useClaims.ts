@@ -137,7 +137,7 @@ export function useEndClaim() {
     },
     onSuccess: () => {
       invalidateClaimViews(qc);
-      showToast.success("Marked as no longer true — kept in history");
+      showToast.success("Marked as no longer true and kept in history");
     },
     onError: (e: any) => showToast.error(e.message ?? "Could not update the fact"),
   });

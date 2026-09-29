@@ -79,6 +79,8 @@ export interface FactQuery {
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const CHUNK = 200;
+/** PostgREST's row cap per response on Supabase. */
+const SERVER_ROW_CAP = 1000;
 
 /** Read facts. Throws when the read fails: a reader that swallowed the error would answer "nothing recorded". */
 export async function readFacts(db: any, userId: string, q: FactQuery = {}): Promise<FactRow[]> {
@@ -105,10 +107,24 @@ export async function readFacts(db: any, userId: string, q: FactQuery = {}): Pro
   };
 
   const run = async (ids?: string[]): Promise<FactRow[]> => {
-    if (q.limit) {
+    if (q.limit && q.limit <= SERVER_ROW_CAP) {
       const { data, error } = await build(ids).limit(q.limit);
       if (error) throw new Error(`Could not read facts: ${error.message ?? "error"}`);
       return (data ?? []) as FactRow[];
+    }
+    if (q.limit) {
+      // A cap above the server's own (search_contacts asks for 2,000) was cut
+      // to 1,000 without a word: read it page by page instead.
+      const out: FactRow[] = [];
+      while (out.length < q.limit) {
+        const want = Math.min(SERVER_ROW_CAP, q.limit - out.length);
+        const { data, error } = await build(ids).range(out.length, out.length + want - 1);
+        if (error) throw new Error(`Could not read facts: ${error.message ?? "error"}`);
+        const rows = (data ?? []) as FactRow[];
+        if (rows.length === 0) break;
+        out.push(...rows);
+      }
+      return out;
     }
     try {
       return await selectAllRows<FactRow>((from, to) => build(ids).range(from, to));

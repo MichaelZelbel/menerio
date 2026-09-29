@@ -85,9 +85,13 @@ async function embedForUser(admin: any, userId: string, limit: number, dryRun: b
         .eq("value", c.value)
         .is("embedding", null);
       if (error) { failures++; inARow++; } else { updated++; inARow = 0; }
-    } catch (_e) {
+    } catch (e) {
       failures++;
       inARow++;
+      // An exhausted allowance refuses every claim the same way, before any
+      // provider call; trying two more only logged two more refusals per run
+      // (387 warnings a day for one account on 2026-09-29).
+      if ((e as Error | null)?.message === "INSUFFICIENT_CREDITS") break;
     }
     if (inARow >= MAX_FAILURES_IN_A_ROW) break;
   }

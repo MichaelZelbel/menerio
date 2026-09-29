@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { runChat } from "../_shared/llm-router.ts";
 import { AI_MODERATE_CONTENT_PROMPT } from "../_shared/llm-defaults.ts";
+import { secretEquals } from "../_shared/secret-equals.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
     // classifier, unshare notes and hand out strikes.
     const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     if (!bearer) return ok({ error: "Unauthorized" }, 401);
-    if (bearer !== serviceKey) {
+    if (!(await secretEquals(bearer, serviceKey))) {
       const authClient = createClient(supabaseUrl, serviceKey);
       const { data: { user }, error: authErr } = await authClient.auth.getUser(bearer);
       if (authErr || !user) return ok({ error: "Unauthorized" }, 401);
@@ -102,7 +103,8 @@ Deno.serve(async (req) => {
           await admin
             .from("moderation_review_queue")
             .update({ retry_count: item.retry_count + 1, ...(item.retry_count + 1 >= MAX_RETRIES ? { status: "error" } : {}) })
-            .eq("id", item.id);
+            .eq("id", item.id)
+            .eq("status", "pending");
           results.push({ id: item.id, status: item.retry_count + 1 >= MAX_RETRIES ? "error" : "retry" });
           continue;
         }
@@ -110,6 +112,30 @@ Deno.serve(async (req) => {
         const isViolation = classification.is_violation && classification.confidence >= CONFIDENCE_THRESHOLD;
 
         if (isViolation) {
+          // Claim the item before acting on it. Two runs at once (two admins,
+          // two tabs) read the same pending rows, and each used to unshare,
+          // strike and email for the same finding: the doubled strikes brought
+          // the automatic suspension forward. Only the run whose update moves
+          // the row off "pending" goes on.
+          const { data: claimed, error: claimErr } = await admin
+            .from("moderation_review_queue")
+            .update({
+              status: "violation",
+              ai_category: classification.category,
+              ai_confidence: classification.confidence,
+              ai_reason: classification.reason,
+              reviewed_at: new Date().toISOString(),
+            })
+            .eq("id", item.id)
+            .eq("status", "pending")
+            .select("id")
+            .maybeSingle();
+          if (claimErr) throw claimErr;
+          if (!claimed) {
+            results.push({ id: item.id, status: "already_reviewed" });
+            continue;
+          }
+
           // 1. Revoke share link
           // Only the queued user's own share: item_id came from the client.
           await admin
@@ -139,18 +165,6 @@ Deno.serve(async (req) => {
           const categoryLabel = classification.category || "policy violation";
           await sendViolationEmail(admin, item.user_id, noteTitle, categoryLabel, lovableKey, resendKey);
 
-          // 5. Mark as violation
-          await admin
-            .from("moderation_review_queue")
-            .update({
-              status: "violation",
-              ai_category: classification.category,
-              ai_confidence: classification.confidence,
-              ai_reason: classification.reason,
-              reviewed_at: new Date().toISOString(),
-            })
-            .eq("id", item.id);
-
           results.push({ id: item.id, status: "violation" });
         } else {
           // Mark as reviewed, no action
@@ -163,7 +177,9 @@ Deno.serve(async (req) => {
               ai_reason: classification.reason,
               reviewed_at: new Date().toISOString(),
             })
-            .eq("id", item.id);
+            .eq("id", item.id)
+            // Never over a verdict another run has already written.
+            .eq("status", "pending");
 
           results.push({ id: item.id, status: "reviewed" });
         }
@@ -172,7 +188,8 @@ Deno.serve(async (req) => {
         await admin
           .from("moderation_review_queue")
           .update({ retry_count: item.retry_count + 1, ...(item.retry_count + 1 >= MAX_RETRIES ? { status: "error" } : {}) })
-          .eq("id", item.id);
+          .eq("id", item.id)
+          .eq("status", "pending");
         results.push({ id: item.id, status: "retry_error" });
       }
     }

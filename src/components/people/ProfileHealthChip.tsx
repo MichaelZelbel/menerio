@@ -53,7 +53,9 @@ export function ProfileHealthChip({ contactId }: { contactId: string }) {
             <ShieldCheck className="h-3 w-3" /> Looks clean
           </Badge>
         ) : (
-          <Link to="/dashboard/review">
+          // The review queue. "/dashboard/review" is the Weekly Review page,
+          // where none of these items are.
+          <Link to="/dashboard/review-queue">
             <Badge variant="outline" className="text-[10px] gap-1 cursor-pointer">
               <ShieldAlert className="h-3 w-3" /> {total} to review
             </Badge>

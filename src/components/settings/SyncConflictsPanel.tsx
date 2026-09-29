@@ -5,7 +5,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   AlertTriangle,
@@ -189,7 +188,10 @@ export function SyncConflictsPanel() {
           </>
         )}
 
-        <ScrollArea className="max-h-[400px]">
+        {/* A plain scrolling box: ScrollArea's viewport is h-full of a root
+            that only had max-h, so it never scrolled and every conflict past
+            the first few was cut off and out of reach. */}
+        <div className="max-h-[400px] overflow-y-auto pr-1">
           <div className="space-y-3">
             {conflicts.map((conflict) => (
               <div key={conflict.id} className="border rounded-lg p-3 space-y-2">
@@ -277,7 +279,7 @@ export function SyncConflictsPanel() {
               </div>
             ))}
           </div>
-        </ScrollArea>
+        </div>
       </CardContent>
     </Card>
   );

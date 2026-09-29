@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { factWritesPaused, planFacts, suppressionKey, writeFact, type ExistingClaim, type FactInput, type PlanContext } from "../fact-store.ts";
+import { factWritesPaused, planFacts, suggestionAlreadyKnown, suppressionKey, writeFact, type ExistingClaim, type FactInput, type PlanContext } from "../fact-store.ts";
 import { factDb } from "./fact-db.ts";
 
 const self = { type: "self" as const, id: null };
@@ -39,6 +39,41 @@ describe("planFacts", () => {
     const later = claim({ id: "later", value: "Rome", valid_from: "2026-12-01" });
     const [p] = inserts(planFacts(machine({ validFrom: "2026-10-01" }), ctx({ claims: [later] })));
     expect(p.close).toEqual([]);
+  });
+
+  // Review 2026-09-29: an old note read again put its value in as current
+  // beside the later one: two answers, and the caller was told nothing.
+  it("a backdated machine value ends where the later value on file starts, as history", () => {
+    const berlin = claim({ id: "berlin", value: "Berlin", valid_from: "2021-04-01" });
+    const [p] = inserts(planFacts(machine({ value: "London", validFrom: "2019-05-01" }), ctx({ claims: [berlin] })));
+    expect(p.endsOn).toBe("2021-04-01");
+    expect(p.close).toEqual([]);
+    expect(p.conflict).toBe(false);
+  });
+
+  it("the earliest later start wins, history included", () => {
+    const rome = claim({ id: "rome", value: "Rome", valid_from: "2020-01-01", valid_to: "2021-04-01" });
+    const berlin = claim({ id: "berlin", value: "Berlin", valid_from: "2021-04-01" });
+    const [p] = inserts(planFacts(machine({ value: "London", validFrom: "2019-05-01" }), ctx({ claims: [berlin, rome] })));
+    expect(p.endsOn).toBe("2020-01-01");
+  });
+
+  it("a value planned for a future day ends today's new value on that day", () => {
+    const planned = claim({ id: "paris", value: "Paris", valid_from: "2026-12-01" });
+    const [p] = inserts(planFacts(human({ value: "Munich" }), ctx({ isHuman: true, claims: [claim({}), planned] })));
+    expect(p.close).toEqual(["c1"]);
+    expect(p.endsOn).toBe("2026-12-01");
+  });
+
+  it("an open-ended value stays open-ended when nothing later is on file", () => {
+    const [p] = inserts(planFacts(machine(), ctx({ claims: [claim({})] })));
+    expect(p.endsOn).toBeNull();
+  });
+
+  it("a many-valued attribute is never ended by another value", () => {
+    const [p] = inserts(planFacts(machine({ label: "Hobbies", value: "Chess", categorySlug: "hobbies", evidenceQuote: "He plays chess on Sundays.", validFrom: "2019-01-01" }),
+      ctx({ rules: { hobbies: "many" }, claims: [claim({ attribute: "hobbies", value: "Running", valid_from: "2022-01-01" })] })));
+    expect(p.endsOn).toBeNull();
   });
 
   it("a machine never closes a human's value: it adds alongside, as two answers", () => {
@@ -127,6 +162,31 @@ describe("planFacts", () => {
   });
 });
 
+// Review 2026-09-29: generate-profile-suggestions showed the model agent_facts
+// only, so it suggested a private fact again, into a public section.
+describe("suggestionAlreadyKnown", () => {
+  const known = [
+    { attribute: "health-conditions", value: "ADHD", visibility_scope: "private" },
+    { attribute: "current-city", value: "Berlin", visibility_scope: "all" },
+  ];
+  const none = new Set<string>();
+
+  it("a private value is known under any label", () => {
+    expect(suggestionAlreadyKnown(self, { label: "Diagnosis", value: " adhd " }, known, none)).toBe(true);
+  });
+
+  it("a shown value is known under its own attribute only", () => {
+    expect(suggestionAlreadyKnown(self, { label: "Current city", value: "berlin" }, known, none)).toBe(true);
+    expect(suggestionAlreadyKnown(self, { label: "Hometown", value: "Berlin" }, known, none)).toBe(false);
+  });
+
+  it("a value the user called wrong is known", () => {
+    const wrong = new Set([suppressionKey(self, "hometown", "Paris")]);
+    expect(suggestionAlreadyKnown(self, { label: "Hometown", value: "Paris" }, known, wrong)).toBe(true);
+    expect(suggestionAlreadyKnown(self, { label: "Hometown", value: "Lyon" }, known, wrong)).toBe(false);
+  });
+});
+
 describe("writeFact against the database (review 2026-09-29)", () => {
   const U = "u1";
 
@@ -205,6 +265,27 @@ describe("writeFact against the database (review 2026-09-29)", () => {
     const rpc = (error: unknown) => ({ rpc: async () => ({ data: null, error }) });
     expect(await factWritesPaused(rpc({ code: "57014", message: "timeout" }))).toBe(true);
     expect(await factWritesPaused(rpc({ code: "PGRST202", message: "not found" }))).toBe(false);
+  });
+
+  it("a backdated machine value goes in as history: one current value, and the caller is told", async () => {
+    const db = factDb({ facts: [cityFact({ value: "Berlin", valid_from: "2021-04-01", rank: "preferred", origin: "user_manual" })] });
+    const r = await writeFact(db, U, machine({ value: "London", validFrom: "2019-05-01", evidenceQuote: "Back in 2019 I moved to London." }), { isHuman: false });
+    expect(r.facts[0]).toMatchObject({ outcome: "inserted", validTo: "2021-04-01", conflict: false });
+    const london = db.tables.claims.find((c) => c.value === "London");
+    expect(london).toMatchObject({ valid_from: "2019-05-01", valid_to: "2021-04-01" });
+    const { data } = await db.from("agent_facts").select("*").eq("user_id", U).eq("is_current", true);
+    expect((data as Array<{ value: string }>).map((f) => f.value)).toEqual(["Berlin"]);
+  });
+
+  it("a value the user called wrong is refused even past the server's 1,000-row cap", async () => {
+    const filler = Array.from({ length: 1200 }, (_, i) => ({
+      user_id: U, suggestion_type: "claim", suppression_key: suppressionKey(self, "current-city", `aaa ${String(i).padStart(4, "0")}`),
+    }));
+    const wrong = { user_id: U, suggestion_type: "claim", suppression_key: suppressionKey(self, "current-city", "London") };
+    const db = factDb({ maxRows: 1000, facts: [cityFact()], tables: { ai_suggestion_suppressions: [...filler, wrong] } });
+    const r = await writeFact(db, U, machine(), { isHuman: false });
+    expect(r.facts[0].outcome).toBe("suppressed");
+    expect(db.tables.claims.some((c) => c.value === "London")).toBe(false);
   });
 
   it("a source quote is counted in characters, as the database counts it", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionIsVisible,
   loadMcVisibility,
+  matchedContactIds,
   noteIsVisible,
   redactContact,
   sensitiveContactExclusion,
@@ -17,6 +18,26 @@ describe("mc-visibility", () => {
     expect(noteIsVisible({ ai_visibility: "visible", metadata: { matched_people: ["s1"] } }, on)).toBe(false);
     expect(noteIsVisible({ ai_visibility: "visible", metadata: { matched_people: ["s1"] } }, off)).toBe(true);
     expect(noteIsVisible({ ai_visibility: "visible", metadata: null }, on)).toBe(true);
+  });
+
+  it("reads matched_people in the shape process-note writes: objects carrying contact_id", () => {
+    const aboutS = { ai_visibility: "visible", metadata: { matched_people: [
+      { name: "Me", is_self: true, canonical_name: "Me" },
+      { name: "S", contact_id: "s1", canonical_name: "S" },
+    ] } };
+    expect(noteIsVisible(aboutS, on)).toBe(false);
+    expect(noteIsVisible(aboutS, off)).toBe(true);
+    expect(noteIsVisible({ ai_visibility: "visible", metadata: { matched_people: [{ name: "T", contact_id: "t1" }] } }, on)).toBe(true);
+    expect(matchedContactIds([{ name: "Me", is_self: true }, { contact_id: "c1" }, "c2", null, 7, { contact_id: 3 }])).toEqual(["c1", "c2"]);
+    expect(matchedContactIds(null)).toEqual([]);
+  });
+
+  it("keeps a mirrored mission control file that names a sensitive person, unless the note itself is hidden", () => {
+    const mirror = { ai_visibility: "visible", source_app: "godspeed", metadata: { matched_people: [{ name: "S", contact_id: "s1" }] } };
+    expect(noteIsVisible(mirror, on)).toBe(true);
+    expect(noteIsVisible({ ...mirror, source_app: " GodSpeed " }, on)).toBe(true);
+    expect(noteIsVisible({ ...mirror, ai_visibility: "hidden" }, on)).toBe(false);
+    expect(noteIsVisible({ ...mirror, source_app: "telegram" }, on)).toBe(false);
   });
 
   it("hides action items that are hidden or about a sensitive person", () => {

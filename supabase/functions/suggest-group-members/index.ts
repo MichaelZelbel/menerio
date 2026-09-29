@@ -104,8 +104,9 @@ serve(async (req) => {
 
     const [{ data: memberships }, { data: contacts }, { data: notes }] = await Promise.all([
       admin.from("contact_group_memberships").select("contact_id, contacts:contact_id(name)").eq("group_id", group_id).eq("user_id", userId).is("archived_at", null),
-      admin.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", userId).is("merged_into", null).order("name"),
-      admin.from("notes").select("id, title, content, metadata, created_at").eq("user_id", userId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
+      // Candidates go into the prompt whole (notes, metadata): none hidden from AI.
+      admin.from("contacts").select("id, name, company, role, tags, notes, metadata").eq("user_id", userId).is("merged_into", null).neq("ai_visibility", "hidden").order("name"),
+      admin.from("notes").select("id, title, content, metadata, created_at, ai_visibility").eq("user_id", userId).eq("is_trashed", false).order("created_at", { ascending: false }).limit(100),
     ]);
 
     const structuredImport = await importGroupMembersFromNotes(admin, userId, group, notes || []);
@@ -119,7 +120,9 @@ serve(async (req) => {
 
     const result = await callJson(admin, userId, "group-ai.suggest_members", [
       { role: "system", content: "" },
-      { role: "user", content: taggedPrompt({ group, members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, notes: (notes || []).map(noteText) }) },
+      // The structured import above reads every note; a note hidden from AI never
+      // reaches the model.
+      { role: "user", content: taggedPrompt({ group, members: (memberships || []).map((m: any) => m.contacts?.name).filter(Boolean), candidates, notes: (notes || []).filter((n: any) => n.ai_visibility !== "hidden").map(noteText) }) },
     ]);
     const suggestions = Array.isArray(result.suggestions) ? result.suggestions : [];
     const candidateIds = new Set(candidates.map((contact: any) => contact.id));

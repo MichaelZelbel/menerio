@@ -6,6 +6,13 @@ DO $$BEGIN
  IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
  IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
 END$$;
+-- Roles belong to the whole cluster, not to this database. In CI an earlier
+-- step (test-github-sync-lease.sql) already created service_role without
+-- BYPASSRLS, so the line above did nothing and godspeed_api_keys' row-level
+-- security hid every key from the service role: lookupGodspeedKey found no row
+-- and the test failed at "approve and collect" on every run since it was added.
+-- Supabase's service_role bypasses RLS; make this one do so whoever made it.
+ALTER ROLE service_role BYPASSRLS;
 
 -- What Supabase does to every new table and function in public: all three API
 -- roles get everything unless a migration takes it away. Without this the

@@ -25,8 +25,11 @@ export function ProfileRow({
         <span className="text-xs text-muted-foreground shrink-0">{label}:</span>
         {children}
       </div>
+      {/* Shown on hover, but also while a control inside has keyboard focus or
+          its menu is open, and always on touch screens, which have no hover:
+          hidden there, a phone showed no way to edit or remove a fact. */}
       {actions && (
-        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/entry:opacity-100 transition-opacity">
+        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/entry:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
           {actions}
         </div>
       )}

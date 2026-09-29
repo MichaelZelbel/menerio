@@ -82,7 +82,11 @@ const buildLineDiff = (before: string | null, after: string) => {
 
 export default function ReviewQueue() {
   const { user } = useAuth();
-  const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue();
+  // ?contact_id=<id> comes from a person's "N pending profile suggestions"
+  // badge. It used to be ignored, so the person landed in the whole queue.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const contactFilter = searchParams.get("contact_id");
+  const { items, wikiRevisions, isLoading, updateStatus } = useReviewQueue(contactFilter);
   const queryClient = useQueryClient();
   const [selectedWikiRevision, setSelectedWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
   const [rollbackWikiRevision, setRollbackWikiRevision] = useState<WikiRevisionReviewItem | null>(null);
@@ -873,13 +877,13 @@ export default function ReviewQueue() {
         const summary = [
           applied > 0 ? `${applied.toLocaleString()} changes applied` : "",
           alreadyPresent > 0 ? `${alreadyPresent.toLocaleString()} ${alreadyPresent === 1 ? "was" : "were"} already in the profile` : "",
-          skipped > 0 ? `${skipped.toLocaleString()} skipped${skippedPart?.includes("(") ? ` — ${skippedPart.slice(skippedPart.indexOf("(") + 1, -1)}` : ""}` : "",
+          skipped > 0 ? `${skipped.toLocaleString()} skipped${skippedPart?.includes("(") ? ` (${skippedPart.slice(skippedPart.indexOf("(") + 1, -1)})` : ""}` : "",
         ].filter(Boolean).join(" · ");
         if (skipped > 0) showToast.info(summary); else showToast.success(summary);
       } else if (failCount === 0) {
         showToast.success(`${okCount.toLocaleString()} changes ${verb}`);
       } else {
-        showToast.error(`Bulk action failed before all changes could be processed${j.last_error ? ` — ${j.last_error}` : ""}`);
+        showToast.error(`Bulk action failed before all changes could be processed${j.last_error ? `: ${j.last_error}` : ""}`);
       }
 
     }
@@ -918,11 +922,7 @@ export default function ReviewQueue() {
 
 
 
-  const hasReviewItems = items.length + wikiRevisions.length > 0;
-  // ?contact_id=<id> comes from a person's "N pending profile suggestions"
-  // badge. It used to be ignored, so the person landed in the whole queue.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const contactFilter = searchParams.get("contact_id");
+  const hasReviewItems = items.length + (contactFilter ? 0 : wikiRevisions.length) > 0;
   const clearContactFilter = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("contact_id");
@@ -943,8 +943,10 @@ export default function ReviewQueue() {
   const PAGE_SIZE = 50;
   const [page, setPage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(combinedReviewItems.length / PAGE_SIZE));
+  // After the last item of the last page is handled, go back one page, not to
+  // the start of the queue.
   useEffect(() => {
-    if (page > pageCount - 1) setPage(0);
+    if (page > pageCount - 1) setPage(pageCount - 1);
   }, [page, pageCount]);
   const pageItems = useMemo(
     () => combinedReviewItems.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
@@ -1178,7 +1180,7 @@ export default function ReviewQueue() {
                           <span className="text-sm font-semibold text-foreground">
                             {p?.canonical_label || p?.label || "Unknown field"}
                           </span>
-                          <Badge variant="secondary" className="text-[10px]">{p?.category_slug || "—"}</Badge>
+                          <Badge variant="secondary" className="text-[10px]">{p?.category_slug || "no section"}</Badge>
                         </div>
                         <p className="text-sm text-foreground">{p?.value || item.description}</p>
                         <p className="text-xs text-muted-foreground">
@@ -1220,7 +1222,7 @@ export default function ReviewQueue() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleResolveConflict(item, option.id)}
-                            disabled={updateStatus.isPending}
+                            disabled={updateStatus.isPending || isBulkRunning}
                           >
                             Keep “{option.custom_label || option.label}”
                           </Button>
@@ -1275,7 +1277,7 @@ export default function ReviewQueue() {
                         variant="ghost"
                         className="text-destructive hover:text-destructive"
                         onClick={() => handleBlock(item)}
-                        disabled={updateStatus.isPending || inFlight.has(item.id) || !!revertBlocked}
+                        disabled={updateStatus.isPending || isBulkRunning || inFlight.has(item.id) || !!revertBlocked}
                         title={revertBlocked || undefined}
                       >
                         <X className="h-4 w-4 mr-1" />
@@ -1285,7 +1287,7 @@ export default function ReviewQueue() {
                         size="sm"
                         variant="ghost"
                         onClick={() => handleRemove(item)}
-                        disabled={updateStatus.isPending || inFlight.has(item.id) || !!revertBlocked}
+                        disabled={updateStatus.isPending || isBulkRunning || inFlight.has(item.id) || !!revertBlocked}
                         title={revertBlocked || undefined}
                       >
                         <RotateCcw className="h-4 w-4 mr-1" />
@@ -1294,7 +1296,7 @@ export default function ReviewQueue() {
                       <Button
                         size="sm"
                         onClick={() => handleKeep(item)}
-                        disabled={updateStatus.isPending || inFlight.has(item.id)}
+                        disabled={updateStatus.isPending || isBulkRunning || inFlight.has(item.id)}
                       >
                         <Check className="h-4 w-4 mr-1" />
                         Keep
@@ -1376,7 +1378,7 @@ export default function ReviewQueue() {
           <AlertDialogHeader>
             <AlertDialogTitle>{bulkConfirm?.label} {bulkConfirm?.total.toLocaleString()} changes?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will process every visible item in the review queue. Large queues can take a while — you'll see a progress indicator while it runs.
+              This will process every visible item in the review queue. Large queues can take a while; you'll see a progress indicator while it runs.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

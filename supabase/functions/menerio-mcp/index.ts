@@ -21,7 +21,9 @@ import {
   contactProfileText,
   entityFacts,
   getClaims,
+  entityForAgent,
   resolveEntityByName,
+  sharedInstructions,
   userProfileFacts,
 } from "./fact-tools.ts";
 import { lookupGodspeedKey } from "../_shared/mc-auth.ts";
@@ -445,11 +447,18 @@ type ContactRow = { id: string; name: string; [column: string]: unknown };
  * exact name (case-insensitive) wins; otherwise a single partial match is
  * used; more than one is refused with the candidates and their ids, so the
  * caller can retry with contact_id. `%` and `_` in the name are literal.
+ *
+ * Only people assistants may see are candidates. A person hidden from AI was
+ * named, with their id, in every "matches more than one person" refusal, and
+ * an exact name answered "hidden from AI" where a stranger answers "no
+ * person": both told the assistant who the owner had hidden. Every caller
+ * refused a hidden person anyway (assertWritable, agent_facts).
  */
 async function resolveContactByName(name: string, columns = "*"): Promise<ContactRow> {
   const needle = name.trim();
   if (!needle) throw new Error("contact_name is empty. Pass the person's name or their contact_id.");
-  const base = () => supabase.from("contacts").select(columns).eq("user_id", getCurrentUserId()).is("merged_into", null);
+  const base = () => supabase.from("contacts").select(columns).eq("user_id", getCurrentUserId()).is("merged_into", null)
+    .eq("ai_visibility", "visible");
   const { data: exactRows, error: exactErr } = await base().ilike("name", escapeLike(needle)).limit(2);
   if (exactErr) throw new Error(`Could not load person: ${exactErr.message}`);
   const exact = (exactRows ?? []) as unknown as ContactRow[];
@@ -1006,12 +1015,13 @@ async function searchClaims(
     const contactIds = [...new Set((data as any[]).filter((r) => r.subject_type === "contact" && r.subject_id).map((r) => r.subject_id))];
     const entityIds = [...new Set((data as any[]).filter((r) => r.subject_type === "entity" && r.subject_id).map((r) => r.subject_id))];
     const names = new Map<string, string>();
+    // This user's rows only: the service role reads every account.
     if (contactIds.length) {
-      const { data: cs } = await supabase.from("contacts").select("id, name").in("id", contactIds);
+      const { data: cs } = await supabase.from("contacts").select("id, name").eq("user_id", getCurrentUserId()).in("id", contactIds);
       for (const c of cs || []) names.set(c.id, c.name);
     }
     if (entityIds.length) {
-      const { data: es } = await supabase.from("entities").select("id, name").in("id", entityIds);
+      const { data: es } = await supabase.from("entities").select("id, name").eq("user_id", getCurrentUserId()).in("id", entityIds);
       for (const e of es || []) names.set(e.id, e.name);
     }
 
@@ -2783,13 +2793,10 @@ server.registerTool(
           .order("sort_order");
 
         const { data: insts } = await instQuery;
-        const filtered = (insts || []).filter((i: any) => {
-          if (scope) return i.applies_to === "all" || i.applies_to === scope;
-          return i.applies_to !== "private";
-        });
-
-        if (filtered.length > 0) {
-          (result.profile as any).agent_instructions = filtered.map((i: any) => i.instruction);
+        // "Private (never shared)" never leaves, whatever scope is asked for.
+        const shared = sharedInstructions(insts || [], scope);
+        if (shared.length > 0) {
+          (result.profile as any).agent_instructions = shared;
         }
       }
 
@@ -3620,13 +3627,23 @@ async function resolveOrCreateEntitiesByName(names: string[]): Promise<any[]> {
   return out;
 }
 
-async function findEntity(idOrName: string, exactOnly = false): Promise<any | null> {
+/**
+ * `visibleOnly`: only entities assistants may see are candidates, so a hidden
+ * one is "not found" like a missing one, and a fragment that also matches a
+ * hidden entity cannot land on it instead of the visible one. create_entity
+ * passes false: it must still see a hidden name to avoid a duplicate.
+ */
+async function findEntity(idOrName: string, exactOnly = false, visibleOnly = false): Promise<any | null> {
   const userId = getCurrentUserId();
+  const base = () => {
+    const q = supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", userId);
+    return visibleOnly ? visibleEntities(q) : q;
+  };
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrName)) {
-    const { data } = await supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", userId).eq("id", idOrName).maybeSingle();
+    const { data } = await base().eq("id", idOrName).maybeSingle();
     if (data) return data;
   }
-  const { data: rows } = await supabase.from("entities").select(ENTITY_FIELDS).eq("user_id", userId);
+  const { data: rows } = await base();
   const needle = idOrName.trim().toLowerCase();
   return (
     (rows || []).find(
@@ -3657,7 +3674,11 @@ server.registerTool(
     // lookups refused "Berlin" because "Berlin Office" existed, answering
     // that it "already exists" and handing back the wrong entity.
     const existing = await findEntity(name, true);
-    if (existing) return jsonTool({ tool: "create_entity", created: false, note: "An entity with that name or alias already exists.", entity: existing });
+    if (existing) {
+      // A hidden entity is not handed back, a sensitive one only by name.
+      const shown = entityForAgent(existing);
+      return jsonTool({ tool: "create_entity", created: false, note: "An entity with that name or alias already exists.", ...(shown ? { entity: shown } : {}) });
+    }
     const { data, error } = await supabase
       .from("entities")
       .insert({
@@ -3695,14 +3716,18 @@ server.registerTool(
     let rows = data || [];
     if (query?.trim()) {
       const needle = query.trim().toLowerCase();
+      // A sensitive entity matches on its name only: a hit on its description
+      // or an alias would say what the redacted row below leaves out.
       rows = rows.filter(
         (e: any) =>
           String(e.name).toLowerCase().includes(needle) ||
-          String(e.description || "").toLowerCase().includes(needle) ||
-          (Array.isArray(e.aliases) && e.aliases.some((a: string) => String(a).toLowerCase().includes(needle))),
+          (e.is_sensitive !== true && (
+            String(e.description || "").toLowerCase().includes(needle) ||
+            (Array.isArray(e.aliases) && e.aliases.some((a: string) => String(a).toLowerCase().includes(needle))))),
       ).slice(0, max);
     }
-    return jsonTool({ tool: "search_entities", count: rows.length, entities: rows });
+    const entities = rows.map((e: any) => entityForAgent(e)).filter(Boolean);
+    return jsonTool({ tool: "search_entities", count: entities.length, entities });
   },
 );
 
@@ -3714,9 +3739,10 @@ server.registerTool(
     inputSchema: { id_or_name: z.string(), include_history: z.boolean().optional().default(false) },
   },
   async ({ id_or_name, include_history }) => {
-    const entity = await findEntity(id_or_name);
+    // Visible entities only: a hidden one answers like a missing one, instead
+    // of "hidden from AI", which confirmed the name the owner had hidden.
+    const entity = await findEntity(id_or_name, false, true);
     if (!entity) return jsonTool({ error: `No entity found matching "${id_or_name}".` });
-    if (entity.ai_visibility === "hidden") return jsonTool({ error: "This entity is hidden from AI in Menerio." });
     // agent_facts leaves out a sensitive entity's facts; its moments and the
     // notes naming it would still say what the facts say, so the whole
     // entity stays out, like a sensitive person.
@@ -3811,7 +3837,9 @@ server.registerTool(
           }
         }
         if (!resolvedId) return jsonTool({ error: "subject_name or subject_id is required for a contact claim." });
-        await assertWritable(supabase, userId, "contact", resolvedId);
+        // No assertWritable here: its "hidden from AI" refusal came before
+        // addClaim's one answer for hidden, sensitive, merged away and missing,
+        // and so told a guessed id's hidden person apart from a missing one.
       } else if (subject_type === "entity") {
         if (subject_id) {
           if (!looksLikeUuid(subject_id)) return jsonTool({ error: `subject_id is not an entity id: ${subject_id}` });

@@ -230,7 +230,14 @@ Deno.serve(async (req) => {
     // ── Action: import ──
     if (action === "import") {
       const files = await listVaultFiles(ghToken, owner, repo, branch, vaultPath, path_filter);
-      const mdFiles = files.filter((f: any) => f.path.endsWith(".md"));
+      // Folders the import dialog unticked, matched the way it groups files:
+      // by the file's own directory.
+      const excluded = new Set<string>(
+        Array.isArray(body.exclude_folders) ? body.exclude_folders.filter((f: unknown) => typeof f === "string") : [],
+      );
+      const mdFiles = files.filter((f: any) =>
+        f.path.endsWith(".md") && !excluded.has(f.path.split("/").slice(0, -1).join("/"))
+      );
 
       // Fetch full repo tree (incl. binaries) for attachment resolution
       const blobs = await fetchAllBlobs(ghToken, owner, repo, branch);
@@ -320,6 +327,11 @@ Deno.serve(async (req) => {
             user_id: userId,
             title,
             content: noteContent,
+            // The vault folder, as the pull sets it. Without it every imported
+            // note sat at the top level, and the first export after an edit
+            // wrote its file to the vault root and deleted the original, so
+            // editing in Menerio emptied the user's Obsidian folders.
+            folder_path: filePathToFolderPath(file.path, vaultBasePath(vaultPath)),
             metadata,
             tags: [...new Set(tags)],
             source_app: "obsidian",
@@ -332,6 +344,7 @@ Deno.serve(async (req) => {
           if (fm.pinned === true) noteData.is_pinned = true;
 
           let noteId: string;
+          let insertedNew = false;
 
           // Update existing or insert new
           // An update's error used to go unread, so a refused write was
@@ -368,13 +381,15 @@ Deno.serve(async (req) => {
               continue;
             }
             noteId = inserted.id;
+            insertedNew = true;
             results.push({ path: file.path, status: "imported", noteId });
           }
 
-          importedTitleToId.set(title, noteId);
-
-          // Create sync log entry
-          await serviceClient.from("github_sync_log").upsert(
+          // Create sync log entry. It is what marks this path as known: without
+          // it the next pull imports the same file again as another note, so a
+          // failed write is an error for this file, and a note inserted just
+          // now is taken back out (the same rule as the pull's own import).
+          const { error: logErr } = await serviceClient.from("github_sync_log").upsert(
             {
               user_id: userId,
               note_id: noteId,
@@ -388,6 +403,15 @@ Deno.serve(async (req) => {
             },
             { onConflict: "user_id,note_id" }
           );
+          if (logErr) {
+            console.error("github-import-vault: sync log write failed for", file.path, logErr.message);
+            if (insertedNew) await serviceClient.from("notes").delete().eq("id", noteId).eq("user_id", userId);
+            results.pop();
+            results.push({ path: file.path, status: "error", error: `Sync log write failed: ${logErr.message}` });
+            continue;
+          }
+
+          importedTitleToId.set(title, noteId);
 
           // Phase D: resolve & import attachments referenced by this note
           try {
@@ -501,8 +525,11 @@ async function listVaultFiles(
 
   if (!res.ok) throw new Error(`Failed to list repo tree: ${res.status}`);
   const data = await res.json();
+  // GitHub cuts a recursive tree past its size limit and says so only in this
+  // flag; the import then reported success for a vault it had half read.
+  if (data.truncated) throw new Error("GitHub returned an incomplete file list; the repository is too large to import in one pass");
 
-  const basePath = vaultPath === "/" ? "" : vaultPath.replace(/^\/|\/$/g, "");
+  const basePath = vaultBasePath(vaultPath);
   const filterPath = pathFilter ? pathFilter.replace(/^\/|\/$/g, "") : null;
 
   return (data.tree || [])
@@ -555,6 +582,19 @@ async function githubGetFileContent(
 
   // GitHub returns base64
   return decodeURIComponent(escape(atob(data.content.replace(/\n/g, ""))));
+}
+
+function vaultBasePath(vaultPath: string): string {
+  return vaultPath === "/" ? "" : vaultPath.replace(/^\/|\/$/g, "");
+}
+
+/** The note folder for a vault file: its directory below the vault root (same as _shared/github-pull.ts). */
+function filePathToFolderPath(filePath: string, basePath: string): string {
+  let relative = filePath;
+  if (basePath && relative.startsWith(basePath + "/")) relative = relative.slice(basePath.length + 1);
+  const parts = relative.split("/");
+  parts.pop();
+  return parts.join("/");
 }
 
 function filePathToNoteTitle(filePath: string): string {

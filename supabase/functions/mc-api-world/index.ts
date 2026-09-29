@@ -6,11 +6,11 @@ import {
   parseLimit,
   parseUpdatedSince,
   readWindow,
-  relationshipExclusionFilter,
   toWorldClaim,
   toWorldEntity,
   toWorldEvent,
 } from "../_shared/world-records.ts";
+import { selectAllRows } from "../_shared/paged-select.ts";
 
 /**
  * The World, read only, for Mission Control's `world/` folder.
@@ -30,8 +30,6 @@ const ACCEPTED_SCOPES = ["world", "contacts"];
 interface Gate {
   sensitiveIds: string[];
   hideSensitive: boolean;
-  /** Every contact assistants may not see: sensitive or not 'visible', whatever the setting says. */
-  unshownContactIds: string[];
 }
 
 /**
@@ -41,25 +39,20 @@ interface Gate {
  * repository, so a redacted row is still a row somebody can read forever.
  */
 async function loadGate(supabase: any, userId: string): Promise<Gate> {
-  const [
-    { data: prefs, error: prefsError },
-    { data: sensitive, error: sensitiveError },
-    { data: unshown, error: unshownError },
-  ] = await Promise.all([
-    supabase.from("mcp_preferences").select("hide_sensitive_from_ai").eq("user_id", userId).maybeSingle(),
-    supabase.from("contacts").select("id").eq("user_id", userId).eq("is_sensitive", true).is("merged_into", null),
-    // The same people agent_facts leaves out (plan 3.3), for the relationship
-    // arm of world_claims, which does not read agent_facts.
-    supabase.from("contacts").select("id").eq("user_id", userId).or("is_sensitive.eq.true,ai_visibility.neq.visible,ai_visibility.is.null"),
-  ]);
   // Fail closed. An unread error left the sensitive list empty, and every
   // sensitive person, with the facts and moments about them, went out to be
-  // written into a git repository.
-  if (prefsError || sensitiveError || unshownError) throw (prefsError ?? sensitiveError ?? unshownError);
+  // written into a git repository. Paged: an unpaged read stops at 1,000 rows
+  // without a word, and the people past it were not filtered at all.
+  const [{ data: prefs, error: prefsError }, sensitive] = await Promise.all([
+    supabase.from("mcp_preferences").select("hide_sensitive_from_ai").eq("user_id", userId).maybeSingle(),
+    selectAllRows<{ id: string }>((from, to) =>
+      supabase.from("contacts").select("id").eq("user_id", userId).eq("is_sensitive", true).is("merged_into", null)
+        .order("id").range(from, to)),
+  ]);
+  if (prefsError) throw prefsError;
   return {
     hideSensitive: prefs?.hide_sensitive_from_ai ?? true,
-    sensitiveIds: (sensitive ?? []).map((r: any) => r.id),
-    unshownContactIds: (unshown ?? []).map((r: any) => r.id),
+    sensitiveIds: sensitive.map((r) => r.id),
   };
 }
 
@@ -124,7 +117,11 @@ Deno.serve(async (req) => {
           .order("id", { ascending: true })
           .range(from, to);
         if (since.value) q = q.gte("updated_at", since.value);
-        if (hideIds.length > 0) q = q.not("id", "in", notInList(hideIds));
+        // By the row's own flag, not an id list: world_entities carries
+        // is_sensitive for people and entities alike. The id list named
+        // sensitive people only, so a sensitive entity (name, aliases,
+        // description) went into the mirror whole.
+        if (gate.hideSensitive) q = q.or("is_sensitive.is.null,is_sensitive.eq.false");
         return q;
       }, offset, limit);
       return rows.map(toWorldEntity);
@@ -149,24 +146,22 @@ Deno.serve(async (req) => {
       return rows.map(toWorldEvent);
     };
 
-    // world_claims is agent_facts plus relationships (plan 3.4): its claim arm
-    // already leaves out private sections and hidden or sensitive subjects,
-    // whatever hide_sensitive_from_ai says. The relationship arm does not, so
-    // a relationship from or to such a person is filtered here, in the
-    // database: filtering in memory after .range() made short pages, and a
-    // client paging until a short page stopped early.
-    const exclusion = relationshipExclusionFilter([...gate.unshownContactIds, ...hideIds]);
+    // agent_world_claims is world_claims (agent_facts plus relationships, plan
+    // 3.4) with a relationship from or to a hidden, sensitive or merged-away
+    // person left out in the database, whatever hide_sensitive_from_ai says
+    // (migration 20260929200000). Filtering in memory after .range() made short
+    // pages; the id list this replaced made the URL too long past a few
+    // hundred such people, and the whole endpoint answered 500.
     const fetchClaims = async () => {
       const rows = await readWindow<any>((from, to) => {
         let q = supabase
-          .from("world_claims")
+          .from("agent_world_claims")
           .select("*")
           .eq("user_id", userId)
           .order("updated_at", { ascending: false })
           .order("id", { ascending: true })
           .range(from, to);
         if (since.value) q = q.gte("updated_at", since.value);
-        if (exclusion) q = q.or(exclusion);
         return q;
       }, offset, limit);
       return rows.map(toWorldClaim);

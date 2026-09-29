@@ -4,6 +4,7 @@ import { checkRateLimit } from "../_shared/mc-rate-limit.ts";
 import { getEmbeddingWithCredits } from "../_shared/llm-credits.ts";
 import { combinedNoteSearch } from "../_shared/note-search.ts";
 import { loadMcVisibility, noteIsVisible, notHidden } from "../_shared/mc-visibility.ts";
+import type { DbClient } from "../_shared/db-client.ts";
 import {
   corsHeaders,
   json,
@@ -31,6 +32,33 @@ import {
 function normalizeFolderPath(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/").trim();
+}
+
+/**
+ * Null when this key may change the note, else the 404 to answer.
+ *
+ * A note the key may not read (hidden from AI, or about a person marked
+ * sensitive) is not its to change either, the same rule as MCP's update_note
+ * and trash_note. PUT and DELETE used to write without looking: a blind PUT
+ * answered with the hidden note's title, overwrote its body, and a PUT of
+ * `metadata: {}` dropped matched_people so a sensitive note became readable.
+ */
+async function refuseUnseenNote(supabase: DbClient, userId: string, id: string, liveOnly: boolean): Promise<Response | null> {
+  let query = supabase
+    .from("notes")
+    .select("id, ai_visibility, source_app, matched_people:metadata->matched_people")
+    .eq("id", id)
+    .eq("user_id", userId);
+  if (liveOnly) query = query.eq("is_trashed", false);
+  const { data, error } = await query.maybeSingle();
+  if (error) return dbErrorResponse(error);
+  const row = data as { ai_visibility?: string | null; source_app?: string | null; matched_people?: unknown } | null;
+  if (!row) return errorJson("NOT_FOUND", "Note not found", 404);
+  const visible = noteIsVisible(
+    { ai_visibility: row.ai_visibility, source_app: row.source_app, metadata: { matched_people: row.matched_people } },
+    await loadMcVisibility(supabase, userId),
+  );
+  return visible ? null : errorJson("NOT_FOUND", "Note not found", 404);
 }
 
 Deno.serve(async (req) => {
@@ -166,7 +194,10 @@ Deno.serve(async (req) => {
       // expressed on the jsonb list in the query, so total can be the higher
       // of the two by exactly those notes.
       const rows = ((data || []) as Record<string, unknown>[])
-        .filter((r) => noteIsVisible({ metadata: { matched_people: r.matched_people } }, visibility))
+        .filter((r) => noteIsVisible(
+          { source_app: r.source_app as string | null, metadata: { matched_people: r.matched_people } },
+          visibility,
+        ))
         .map(({ matched_people: _mp, ...rest }) => rest);
       return json({ data: rows, meta: { total: count || 0, offset, limit } });
     }
@@ -284,6 +315,9 @@ Deno.serve(async (req) => {
         return errorJson("BAD_REQUEST", "No valid fields to update", 400);
       }
 
+      const unseen = await refuseUnseenNote(supabase, userId, action, true);
+      if (unseen) return unseen;
+
       // Trashed notes are invisible to every GET here, so a PUT must not be
       // able to edit (and re-bill processing for) one either.
       const { data, error } = await supabase
@@ -314,6 +348,8 @@ Deno.serve(async (req) => {
     // DELETE /mc-api-notes/{id} — Soft delete
     if (req.method === "DELETE" && action) {
       if (!isUuid(action)) return errorJson("NOT_FOUND", "Note not found", 404);
+      const unseen = await refuseUnseenNote(supabase, userId, action, false);
+      if (unseen) return unseen;
       // Answering success for an id that is not one of this user's notes told
       // the caller a note was gone that never went anywhere.
       const { data, error } = await supabase

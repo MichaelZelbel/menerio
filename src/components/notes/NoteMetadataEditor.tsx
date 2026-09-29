@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useStickyPanelPreference } from "@/hooks/useStickyPanelPreference";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,27 @@ const SENTIMENT_EMOJI: Record<string, string> = {
   mixed: "🤔",
 };
 
+/** JSON with object keys sorted, so a value that went through jsonb (which reorders keys) still compares equal. */
+function stableJson(value: unknown): string {
+  return (
+    JSON.stringify(value, (_key, v) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? Object.fromEntries(
+            Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+          )
+        : v,
+    ) ?? ""
+  );
+}
+
+type Metadata = Record<string, unknown>;
+type MetadataPatch = Metadata | ((current: Metadata) => Metadata);
+
+interface PendingEdits {
+  noteId: string;
+  fields: Metadata;
+}
+
 interface NoteMetadataEditorProps {
   noteId: string;
   metadata: Record<string, unknown> | null;
@@ -47,15 +68,48 @@ interface NoteMetadataEditorProps {
   showTagInput?: boolean;
 }
 
-export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
+export function NoteMetadataEditor({ noteId, metadata: savedMetadata, onUpdate, tags = [], onAddTag, onRemoveTag, showTagInput }: NoteMetadataEditorProps) {
   const [topicInput, setTopicInput] = useState("");
   const [personInput, setPersonInput] = useState("");
   // Sticky global preference: remembers the user's expand/collapse choice
   // across notes and reloads. Defaults to collapsed until the user opens it.
   const [isOpen, setIsOpen] = useStickyPanelPreference("note-metadata");
 
+  // Edits sent but not yet echoed back in `savedMetadata`, per field. The
+  // saved metadata only changes after the save round trip, so merging each
+  // edit onto it made the second of two quick edits (removing two topics)
+  // resend the field without the first, and the first came back. Each edit
+  // now merges onto these (the ref is read synchronously, so edits in a row
+  // accumulate); a field leaves once the saved note carries the same value.
+  const [pending, setPending] = useState<PendingEdits>({ noteId, fields: {} });
+  const pendingRef = useRef<PendingEdits>(pending);
+  const setPendingEdits = useCallback((next: PendingEdits) => {
+    pendingRef.current = next;
+    setPending(next);
+  }, []);
 
-  const navigate = useNavigate();
+  useEffect(() => {
+    const current = pendingRef.current;
+    if (current.noteId !== noteId) {
+      // Another note is open: nothing carries over.
+      setPendingEdits({ noteId, fields: {} });
+      return;
+    }
+    const remaining: Metadata = {};
+    let acknowledged = false;
+    for (const [key, value] of Object.entries(current.fields)) {
+      if (stableJson(savedMetadata?.[key]) === stableJson(value)) acknowledged = true;
+      else remaining[key] = value;
+    }
+    if (acknowledged) setPendingEdits({ noteId, fields: remaining });
+  }, [savedMetadata, noteId, setPendingEdits]);
+
+  // What the panel shows and edits: the saved metadata with unsaved edits on top.
+  const metadata = useMemo<Metadata | null>(() => {
+    const own = pending.noteId === noteId ? pending.fields : {};
+    return Object.keys(own).length > 0 ? { ...(savedMetadata || {}), ...own } : savedMetadata;
+  }, [savedMetadata, pending, noteId]);
+
   const topicInputRef = useCallback((node: HTMLInputElement | null) => {
     if (node && showTagInput) node.focus();
   }, [showTagInput]);
@@ -72,7 +126,8 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
     return map;
   }, [metadata?.matched_people]);
 
-  const metaTopics = Array.isArray(metadata?.topics) ? (metadata.topics as string[]) : [];
+  const rawTopics = metadata?.topics;
+  const metaTopics = useMemo(() => (Array.isArray(rawTopics) ? (rawTopics as string[]) : []), [rawTopics]);
   // Deduplicated union of metadata.topics + note.tags
   const allTopics = useMemo(() => {
     const set = new Set<string>();
@@ -93,11 +148,17 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
   const hasMetadata = !!(type || allTopics.length || people.length || summary || actionItems.length || showTagInput);
 
   const update = useCallback(
-    (patch: Record<string, unknown>) => {
-      onUpdate({ ...(metadata || {}), ...patch });
+    (patch: MetadataPatch) => {
+      const prev = pendingRef.current.noteId === noteId ? pendingRef.current.fields : {};
+      const base = { ...(savedMetadata || {}), ...prev };
+      const delta = typeof patch === "function" ? patch(base) : patch;
+      setPendingEdits({ noteId, fields: { ...prev, ...delta } });
+      onUpdate({ ...base, ...delta });
     },
-    [metadata, onUpdate]
+    [savedMetadata, noteId, onUpdate, setPendingEdits]
   );
+
+  const listOf = (value: unknown): string[] => (Array.isArray(value) ? (value as string[]) : []);
 
   const addTopic = () => {
     const t = topicInput.trim().toLowerCase();
@@ -106,15 +167,18 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
       return;
     }
     // Add to both metadata.topics and note.tags
-    update({ topics: [...metaTopics, t] });
+    update((cur) => ({ topics: [...listOf(cur.topics), t] }));
     onAddTag?.(t);
     setTopicInput("");
   };
 
   const removeTopic = (topic: string) => {
     // Remove from both metadata.topics and note.tags
-    update({ topics: metaTopics.filter((t) => t.toLowerCase() !== topic.toLowerCase()) });
-    onRemoveTag?.(topic);
+    update((cur) => ({ topics: listOf(cur.topics).filter((t) => t.toLowerCase() !== topic.toLowerCase()) }));
+    // The chip shows the topic lowercased, but the tag is removed by exact
+    // match, so pass it as stored ("Work", not "work").
+    const storedTag = tags.find((t) => t.toLowerCase() === topic.toLowerCase());
+    if (storedTag !== undefined) onRemoveTag?.(storedTag);
   };
 
   const addPerson = () => {
@@ -123,12 +187,12 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
       setPersonInput("");
       return;
     }
-    update({ people: [...people, p] });
+    update((cur) => ({ people: [...listOf(cur.people), p] }));
     setPersonInput("");
   };
 
   const removePerson = (person: string) => {
-    update({ people: people.filter((p) => p !== person) });
+    update((cur) => ({ people: listOf(cur.people).filter((p) => p !== person) }));
   };
 
   if (!hasMetadata) return null;
@@ -242,12 +306,20 @@ export function NoteMetadataEditor({ noteId, metadata, onUpdate, tags = [], onAd
                   variant="outline"
                   className={cn(
                     "text-[10px] gap-0.5 pr-0.5 h-5 bg-primary/5 border-primary/20",
-                    matched && "cursor-pointer hover:bg-primary/15"
+                    matched && "hover:bg-primary/15"
                   )}
-                  onClick={matched ? () => navigate("/dashboard/people") : undefined}
-                  title={matched ? `Linked to ${matched.canonical_name} — click to view` : undefined}
                 >
-                  @{matched ? matched.canonical_name : person}
+                  {matched ? (
+                    <Link
+                      to={`/dashboard/people/${matched.contact_id}`}
+                      title={`Linked to ${matched.canonical_name}. Open their page.`}
+                      className="rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      @{matched.canonical_name}
+                    </Link>
+                  ) : (
+                    <>@{person}</>
+                  )}
                   <button aria-label={`Remove ${person}`}
                     onClick={(e) => { e.stopPropagation(); removePerson(person); }}
                     className="hover:text-destructive ml-0.5"
