@@ -3989,7 +3989,7 @@ app.all("*", async (c) => {
       version: "1.0.0",
       // Bumped by hand whenever this function is deployed, so anyone can tell
       // which build is live without opening a dashboard.
-      build: "2026-09-24-second-audit",
+      build: "2026-09-30-audit",
       transport: "streamable-http",
       auth: "Authorization: Bearer mnr_<api key>",
       accepts_api_keys: true,
