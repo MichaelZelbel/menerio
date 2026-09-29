@@ -62,6 +62,11 @@ const brand = brandForId(process.env.VITE_BRAND);
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // When this build was made, shown in the sidebar footer, so a person can see
+  // whether their window runs the current version or a stale cached one.
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   server: {
     host: "::",
     port: 8080,

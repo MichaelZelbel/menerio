@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
+/** ISO time of the build (vite.config.ts `define`); absent under vitest. */
+declare const __BUILD_TIME__: string | undefined;
+
 declare module "canvas-confetti" {
   interface Options {
     particleCount?: number;

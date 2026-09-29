@@ -50,6 +50,16 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
+// When the running build was made, in local time. A window still running an
+// old cached build shows an older time than a fresh load does.
+const BUILD_LABEL = (() => {
+  const iso = typeof __BUILD_TIME__ === "string" ? __BUILD_TIME__ : "";
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+})();
+
 export function DashboardSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
@@ -208,7 +218,10 @@ export function DashboardSidebar() {
           {!collapsed && <span className="ml-2">Sign Out</span>}
         </Button>
         {!collapsed && (
-          <p className="px-2 text-[10px] text-muted-foreground">© {new Date().getFullYear()} {BRAND.name}</p>
+          <p className="px-2 text-[10px] text-muted-foreground">
+            © {new Date().getFullYear()} {BRAND.name}
+            {BUILD_LABEL && <span title="When this version of the app was built"> · Version {BUILD_LABEL}</span>}
+          </p>
         )}
       </SidebarFooter>
     </Sidebar>

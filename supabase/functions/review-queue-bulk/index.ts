@@ -817,6 +817,9 @@ async function revertOne(db: SupabaseClient, userId: string, r: ReviewRow): Prom
 async function revertFact(db: SupabaseClient, userId: string, r: ReviewRow): Promise<RevertOutcome> {
   const p = (r.payload || {}) as any;
   if (!r.target_entity_id) return "reverted"; // nothing was written
+  // A new profile field waiting for Keep points at the person it is about
+  // (target 'self' or 'contact'), not at a written claim: nothing to undo.
+  if (r.target_entity_type !== "claim" && !r.applied_at) return "reverted";
   const switchInfo = p.fact_store_switch || {};
   if (switchInfo.revertible === false || switchInfo.entry_missing === true) return "not_revertible";
   if (r.target_entity_type !== "claim") return "not_revertible";

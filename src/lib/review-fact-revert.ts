@@ -13,14 +13,26 @@ import { factSuppressionKey } from "@/hooks/useFacts";
  * Not revertible, and left in the queue:
  * - items the fact-store switch marked so (their entry was folded into
  *   another claim, or no longer existed);
- * - items that still point at something other than a claim;
+ * - applied items that still point at something other than a claim;
  * - claims a human has made their own since (rank 'preferred').
+ *
+ * A suggestion still waiting for Keep wrote nothing, so there is nothing to
+ * roll back. A new profile field waiting for Keep points at the person it is
+ * about (target 'self' or 'contact'), not at a claim; taking that pointer for
+ * a written fact refused Roll Back and Never Again on it (2026-09-29).
  */
 
 export interface RevertableItem {
   target_entity_id: string | null;
   target_entity_type: string | null;
+  applied_at?: string | null;
   payload: Record<string, any> | null;
+}
+
+/** Whether the item wrote a fact that a rollback would have to delete. */
+export function itemWroteFact(item: RevertableItem): boolean {
+  if (!item.target_entity_id) return false;
+  return item.target_entity_type === "claim" || !!item.applied_at;
 }
 
 export class FactNotRevertible extends Error {}
@@ -48,7 +60,7 @@ export function itemClaimIds(item: RevertableItem): string[] {
  * Throws FactNotRevertible when the rules above forbid it.
  */
 export async function revertFactItem(item: RevertableItem): Promise<void> {
-  if (!item.target_entity_id) return; // nothing was written
+  if (!itemWroteFact(item)) return; // nothing was written
   const blocked = factRevertBlockReason(item);
   if (blocked) throw new FactNotRevertible(blocked);
 

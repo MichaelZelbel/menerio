@@ -55,10 +55,18 @@ describe("review queue: rolling back an applied profile fact", () => {
     expect(fake.current!.queries).toEqual([]);
   });
 
-  it("refuses an item that does not point at a claim", async () => {
+  it("refuses an applied item that does not point at a claim", async () => {
     await expect(
-      revertFactItem({ target_entity_id: "e1", target_entity_type: "profile_entry", payload: {} }),
+      revertFactItem({ target_entity_id: "e1", target_entity_type: "profile_entry", applied_at: "2026-09-20T10:00:00Z", payload: {} }),
     ).rejects.toBeInstanceOf(FactNotRevertible);
+  });
+
+  it("does nothing for a new profile field still waiting for Keep", async () => {
+    // Its target is the person it is about, not a written claim.
+    for (const target_entity_type of ["self", "contact"]) {
+      await revertFactItem({ target_entity_id: "person-1", target_entity_type, applied_at: null, payload: { label: "Body fat percentage" } });
+    }
+    expect(fake.current!.queries).toEqual([]);
   });
 
   it("refuses when the user has made one of the claims their own (rank preferred)", async () => {
