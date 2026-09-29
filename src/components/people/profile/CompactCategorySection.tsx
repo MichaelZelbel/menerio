@@ -52,6 +52,7 @@ import { CATEGORY_SUGGESTED_LABELS } from "@/lib/profile-suggestions";
 import { highlightSegments, type FieldMatch } from "@/lib/profile-field-filter";
 import { formatValidityRange } from "@/lib/claims";
 import { cn } from "@/lib/utils";
+import { BRAND } from "@/lib/brand";
 import type { ProfileCategory } from "@/hooks/useProfile";
 import { OTHER_SECTION, type FactActions, type FactSection, type FactSlot, type ProfileFact } from "@/hooks/useFacts";
 
@@ -603,7 +604,7 @@ function SlotRow({
               "{slot.label}: {pendingRetract?.value}" was wrong?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              It is deleted with no history kept, and Menerio will not suggest it again. If it was true once and has
+              It is deleted with no history kept, and {BRAND.name} will not suggest it again. If it was true once and has
               changed, use "No longer true" instead.
             </AlertDialogDescription>
           </AlertDialogHeader>

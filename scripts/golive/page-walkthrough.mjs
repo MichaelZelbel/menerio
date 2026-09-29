@@ -128,8 +128,14 @@ try {
     if (sup.error) throw sup.error;
     const del = await user.from("claims").delete().eq("id", food.claimId);
     if (del.error) throw del.error;
+    const { count: left } = await user.from("claims").select("id", { count: "exact", head: true }).eq("id", food.claimId);
+    assert.equal(left, 0, "the wrong fact was not deleted");
+    const { count: kept } = await user.from("ai_suggestion_suppressions").select("id", { count: "exact", head: true }).eq("suppression_key", key);
+    assert.equal(kept, 1, "no suppression row");
+    // "Do not suggest again" binds machines only (tenth review, item 6): the
+    // person typing the value again is not a suggestion and is accepted.
     const again = await writeFact(user, { contact_id: contact, label: "Favourite food", value: "Pasta", category_slug: "food" });
-    assert.equal(again.facts[0].outcome, "suppressed");
+    assert.equal(again.facts[0].outcome, "inserted");
   });
 
   await check("same_value_is_a_no_op", async () => {

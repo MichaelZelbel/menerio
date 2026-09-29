@@ -7,6 +7,7 @@ import { usePeopleSync } from "@/hooks/usePeopleSync";
 import { todayISO } from "@/lib/claims";
 import { taxonomyBySlug, taxonomyOrder } from "@/lib/profile-taxonomy";
 import type { ProfileCategory } from "@/hooks/useProfile";
+import { BRAND } from "@/lib/brand";
 
 /**
  * Facts on a person page (docs/plans/one-fact-store.md, 3.5 and 3.7).
@@ -259,7 +260,7 @@ async function readInvokeFailure(error: unknown): Promise<{ status: number | nul
   return { status, body };
 }
 
-export const PAUSED_MESSAGE = "Menerio is updating, try again in a few minutes.";
+export const PAUSED_MESSAGE = `${BRAND.name} is updating, try again in a few minutes.`;
 
 /** Turns a refusal reason from writeFact into a sentence the user can act on. */
 export function describeFactRefusal(reason: string | null | undefined): string {

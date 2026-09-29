@@ -143,7 +143,7 @@ describe("groupSlots / groupFacts", () => {
 });
 
 describe("invokeWriteFact", () => {
-  it("tells the user Menerio is updating when writes are paused (503)", async () => {
+  it("tells the user the app is updating when writes are paused (503)", async () => {
     fake.current!.setInvokeResult(async () => ({
       data: null,
       error: Object.assign(new Error("Edge Function returned a non-2xx status code"), {

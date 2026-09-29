@@ -83,6 +83,7 @@ const CRON_GATED_FLOOR = [
   "profile-reconcile",
   "wiki-restructure",
   "powersync-keepalive",
+  "backfill-claim-embeddings",
 ];
 
 function scheduledFunctionNames() {
