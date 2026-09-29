@@ -1,6 +1,6 @@
 # One fact store: plan
 
-Status: 2026-09-29. **Built and ready for an unattended go-live.** Everything in Part A is done on branch `claude/wonderful-keller-sashcq`: both migrations with Michael's two rules, the rollback, the pause flag, the bag split, all application code moved to the one fact store (no code touches `profile_entries`), the Godspeed changes (engine and `godspeed` on branch `claude/one-fact-store`, the kit as a patch). Checks: 1,222 unit tests, type check, build, live-schema harness 48/48 (after the eleventh review's fixes, section 8, commit `d58485e8`), A6 on production matched every prediction. The switch changed in the tenth and eleventh reviews (no count changes from the eleventh), so the go-live's A6 re-run is required, as the prompt already says. Next: paste `docs/plans/one-fact-store-golive-prompt.md` into Claude Code on X30 or the VPS (section 10).
+Status: **live** (2026-09-29). Parts B and C ran unattended on X30 on 2026-09-28/29 (B1 at 23:24 UTC, Part C green at 00:04 UTC); every gate passed, no rollback. The code is merged into `main` (`435c414b`), menerio.com serves it, the Godspeed branches are merged. Counts: `docs/plans/one-fact-store-baseline.md`, "Go-live". What the go-live found and fixed: section 8, "Go-live". From here this plan fixes forward (5.4). Left to do: drop `fact_backup` on or after 2026-10-13 (14 days after Part C); the archive table stays until Q10.
 
 **This file on `main` is the only copy of this plan.** Every session reads it from `main` and commits its changes back to `main` in the same session. No other branch holds a version of it (section 9).
 Scope: Menerio (this repo) and the Godspeed `world/` mirror.
@@ -550,7 +550,7 @@ Why this is safe without staged holds:
   - `scripts/check-no-prod-data.mjs` scans every staged commit for secrets (`x-cron-key`, `eyJ`, `sb_secret`) as a backstop. It is a backstop only; the rule above is what prevents it.
 - **Migrations.** One file per change in `supabase/migrations/`, each with `supabase/rollback/<name>_rollback.sql`. They are applied through the Supabase management API and recorded by hand in `supabase_migrations.schema_migrations`. Never `supabase db push`. Every function a migration redefines is written from its **live** text (A1 dump), not from the repo's oldest version. For example, `match_claims` starts from `20260923150000:221-340`, which carries the cross-account check.
 - **Edge functions** are deployed with a script that deploys the listed functions one after another and stops at the first failure.
-- **Frontend.** Pushing to `main` publishes the site (Michael, 2026-09-29). No Lovable coding agent and no browser are used.
+- **Frontend.** Pushing to `main` puts the build into the Lovable project; it reaches menerio.com only when that build is published (`mcp__lovable__deploy_project`, project `d90589e3-…`). The go-live found this out (section 8, "Go-live", item 1). No Lovable coding agent and no browser are used.
 - **Counts are assertions.** Every equality in B5 is checked inside the transaction (`IF … THEN RAISE EXCEPTION`), not read afterwards by eye.
 - **Approval.** Michael approves once, before Part B starts. Part B then runs without stopping for approval between steps.
 
@@ -1103,6 +1103,24 @@ Same method as the tenth: a local copy of the live structure rebuilt from produc
 - `mc-api-world` puts every hidden person's id in the relationship filter URL; with a few hundred it fails closed (a 500).
 - `conversation-chat` still sends a sensitive contact's notes to the model (older than this change).
 - The test double for the database inserts rows without `valid_to` and `rank`, so tests that write and then read through it undercount current rows.
+
+### Go-live (2026-09-28/29): unattended, on X30, no rollback
+
+The go-live prompt was followed step by step: preflight, B0 to B6, C1 to C8. Every gate passed. Counts are in `docs/plans/one-fact-store-baseline.md`, "Go-live". Production was only ever read as counts and ids; the C2 checks compared the assistants' answers with `agent_facts` inside a script and printed counts.
+
+**What the run found, and what was done about it:**
+
+1. **A push to `main` does not publish menerio.com.** Lovable took the merge commit within seconds, but nine minutes later the site still served `account-v3`. The build was published through `mcp__lovable__deploy_project`, and `account-v4` was live 25 seconds later (B4 gate passed at 9.5 minutes). The statement in 5.1 and in the go-live prompt came from the eleventh review, which saw menerio.com serving `main`'s commit of the day before and took that as proof; someone had published it. 5.1 now says it.
+2. **The walk-through's "Was wrong" check was stale.** It expected a person re-typing a value they had called wrong to be refused. The tenth review (item 6) made that suppression bind machines only, so the code answered `inserted` and the check failed. The check now asserts what the rule says: the fact is deleted, the suppression row exists, and the person's own re-typing is accepted (the machine side is the unit test "a suppressed value is refused"). Nine of nine then passed on production.
+3. **CI's brand-string check failed on the merge**: three strings on the branch named the brand directly ("Menerio is updating…", "Menerio will not suggest it again"), which Cherishly users would have seen. They now use `BRAND.name`. (CI's `database-permissions` job fails on `main` since before this change, in `test-godspeed-connect.mjs`; not touched.)
+4. **The deployed `build-fact-label-map` was older than the branch** (deployed for A6 at 20:54 UTC; its shared modules changed at 21:37). It was redeployed before the preflight's A6 re-run, so the trial ran the code the switch would use.
+5. **The A6 re-run moved where the rules moved, nowhere else.** Every count the tenth and eleventh reviews did not change matched exactly. The garbage rule deleted 74 unshown claims (so 454 → 380 claims, 451 → 377 agent facts, Godspeed removals 101 → 175), two answers were resolved (25 slots → 0), and "many-valued entries whose words differ" went 2 → 11 because the schema migration now registers 34 list-valued attributes as "many". The B5 switch report was identical to the re-run.
+6. **The A6 Godspeed removal count covers all three accounts.** Michael's own mirror lost 37 files: 30 facts the switch or the bag split removed, and 7 old "profile entry" mirror rows whose facts are claims now. Their content is in `world/removed/2026-09-29-removed.md` in the godspeed repo.
+7. **The kit's hourly pull is off on X30** (`device.env` has no mirror opt-in), so Michael's mirror is kept by the engine's pull; the kit's pull was run by hand for C6. The kit repository is now `MichaelZelbel/godspeed-mission-control` (renamed); the patch applied cleanly there.
+8. **Tooling that had changed underneath the prompt:** the management API's `logs.all` endpoint is gone (now `/analytics/endpoints/logs`, ClickHouse SQL on one `logs` table: `source`, `severity_text`, `log_attributes['function_id']`); and the read-only role cannot read `profile_facts` or `agent_facts` (no execute on `fact_today`), so read-only checks of the views run through `prod-apply.sh` inside `SET TRANSACTION READ ONLY`.
+9. **Not caused by the go-live, seen in the logs:** one account (not Michael's) has no AI allowance left since 21:10 UTC, so its notes, wiki and embeddings are refused for credit (74 of its 145 claims have no embedding). Godspeed's own hand-kept files still hold 11 facts with two live answers; that is Godspeed's side, outside Menerio.
+
+**Also done:** `backfill-claim-embeddings` is cron job 20 (every 10 minutes) and in `CRON_GATED_FLOOR`; the one-off functions `build-fact-label-map` and `split-legacy-bags` are deleted in production and from the repo; crons 4, 15, 16 and the functions `promote-profile-entries`, `profile-audit`, `admin-normalize` were deleted after Part C; `docs/CRON_JOBS.md` is reconciled with the live `cron.job`. The throwaway test accounts were deleted, with every row.
 
 ## 9. Running this plan
 

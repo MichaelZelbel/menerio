@@ -3,7 +3,7 @@
 Every timer in Menerio is a pg_cron job in the live database that calls an edge
 function over HTTP. This file is the inventory, the auth model, and the runbook.
 The `cron.job` table in the database is the source of truth for what actually
-runs; this file was last reconciled against it on 2026-08-26.
+runs; this file was last reconciled against it on 2026-09-29 (fact store go-live).
 
 ## The auth model
 
@@ -19,7 +19,7 @@ knows the URL. The proof is a shared secret:
 - Functions verify the header through `supabase/functions/_shared/cron-auth.ts`,
   which reads the expected value via the service-role-only RPC
   `public.get_cron_secret()` and fails closed on any error.
-- Body markers such as `{"cron": "profile-audit"}` still exist, but they are
+- Body markers such as `{"cron": "profile-reconcile"}` still exist, but they are
   routing information only. They grant nothing.
 
 `scripts/check-edge-functions.mjs` (runs in CI and as part of `npm test`) fails
@@ -29,23 +29,21 @@ list, plus any function a migration schedules) stops calling
 `x-cron-key` against its env secret, or if a hardcoded JWT literal reappears in
 function code.
 
-## Inventory (live `cron.job`, 2026-08-26)
+## Inventory (live `cron.job`, 2026-09-29)
 
 | jobid | jobname | schedule | function | auth |
 |---|---|---|---|---|
-| 4 | menerio-profile-normalize-jobs-6h | 22 */6 * * * | admin-normalize | x-cron-key via call_edge |
 | 6 | wiki-restructure-sweep | 22 */6 * * * | wiki-restructure | x-cron-key via call_edge |
 | 9 | gdrive-sync-backstop | */2 * * * * | gdrive-sync | x-cron-key (own env key, predates call_edge) |
 | 10 | gdrive-watch-maintenance | 0 * * * * | gdrive-watch-maintenance | x-cron-key (own env key, predates call_edge) |
 | 11 | profile-lint-nightly | 20 3 * * * | profile-lint | x-cron-key (own env key, predates call_edge) |
 | 12 | profile-reconcile-sweep | 17 */2 * * * | profile-reconcile | x-cron-key via call_edge |
-| 16 | profile-audit-sweep | 50 */6 * * * | profile-audit | x-cron-key via call_edge (was job 13 at */15; retimed 2026-09-03) |
 | 14 | powersync-keepalive | 17 */6 * * * | powersync-keepalive | x-cron-key via call_edge; **inactive since 2026-09-07**, see runbook |
-| 15 | profile-explode-bags-nightly | 40 3 * * * | normalize-profile (explode_bags) | x-cron-key (own env key, predates call_edge) |
 | 18 | drain-note-ai-jobs | * * * * * | drain-note-ai-jobs | x-cron-key via call_edge; installed inactive by migration `20260907130000`, activated 2026-09-07 (see runbook) |
 | 19 | delete-job-run-details | 0 12 * * * | (SQL only) prunes `cron.job_run_details` to the last 7 days | none; added 2026-09-11, see migration `20260911140000` |
+| 20 | backfill-claim-embeddings | */10 * * * * | backfill-claim-embeddings | x-cron-key via call_edge; added 2026-09-29 by the fact store go-live (embeds only what `agent_facts` shows) |
 
-The four "own env key" jobs (the two gdrive jobs, profile-lint, explode-bags) use secrets
+The three "own env key" jobs (the two gdrive jobs, profile-lint) use secrets
 stored as edge function environment variables plus a literal in the job
 command. They work and stay as they are; migrating them onto `call_edge` is
 optional cleanup, not a security fix.
@@ -94,8 +92,7 @@ Functions cache the old value for at most 60 seconds.
 **Trigger a job manually** (returns a pg_net request id):
 
 ```sql
-SELECT internal.call_edge('profile-audit',
-  jsonb_build_object('cron', 'profile-audit', 'limit', 25));
+SELECT internal.call_edge('profile-reconcile', '{}'::jsonb);
 ```
 
 **Check whether runs actually succeed.** `cron.job_run_details` only says the

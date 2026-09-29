@@ -2,6 +2,8 @@
 
 Status: final (2026-09-29, revised after the reviews in plan section 8, "Tenth review" and "Eleventh review"). The code it deploys is on `claude/wonderful-keller-sashcq` (at least commit `d58485e8`) and passes: 1,222 unit tests, type check, build, and the live-schema switch harness (48/48).
 
+**Used 2026-09-28/29; the go-live is done (plan status "live").** One correction for anyone reading it again: B4's push does not publish menerio.com by itself; the Lovable build must be published (plan 5.1 and section 8, "Go-live").
+
 Paste everything below the line into Claude Code on Michael's machine (X30) or the VPS, in the `menerio` checkout. That session has production access; nothing else is needed from Michael. It runs Parts B and C of `docs/plans/one-fact-store.md` unattended, rolls back by itself if any check fails, and ends with one short message.
 
 ---
