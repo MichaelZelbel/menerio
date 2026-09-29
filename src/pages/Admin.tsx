@@ -730,8 +730,15 @@ function UsageLogTable() {
     // If user search, find matching profile IDs first
     let matchedUserIds: string[] | null = null;
     if (userSearch.trim()) {
-      const { rows } = await fetchUserDirectory({ search: userSearch, page: 0, pageSize: 100 });
-      matchedUserIds = rows.map((r) => r.id);
+      try {
+        const { rows } = await fetchUserDirectory({ search: userSearch, page: 0, pageSize: 100 });
+        matchedUserIds = rows.map((r) => r.id);
+      } catch {
+        setEvents([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
       if (matchedUserIds.length === 0) {
         setEvents([]);
         setTotal(0);
