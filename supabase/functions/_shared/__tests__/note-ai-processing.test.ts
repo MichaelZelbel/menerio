@@ -94,7 +94,7 @@ function fixture(internal=false) {
  const calls:string[]=[];
  return {calls, deps:{isService:()=>internal,authenticate:async()=> 'u',findNote:async()=>owned,
  jobs:{claimExecution:async()=>true,enqueue:async(...args:any[])=>{calls.push(`enqueue:${args[3]}`);return {id:'j',state:'pending'}},getLease:async()=>({id:'j',note_id:'n',user_id:'u',pipeline:'analysis'}),},
- execute:async()=>{calls.push('execute')},}};
+ execute:async()=>{calls.push('execute')},recordStaffAccess:async()=>{},}};
 }
 describe('analysis request compatibility',()=>{
  it('requires verified administrator identity for deliberate reanalysis',async()=>{
@@ -102,6 +102,26 @@ describe('analysis request compatibility',()=>{
   expect((await handleNoteAIRequest({note_id:'n',reason:'admin_reanalysis'},'Bearer user',deps as any)).status).toBe(403);expect(calls).toEqual([]);
   (deps as any).isAdmin=async()=>true;
   expect((await handleNoteAIRequest({note_id:'n',reason:'admin_reanalysis'},'Bearer user',deps as any)).status).toBe(202);expect(calls).toEqual(['reanalyze']);
+ });
+ it('records an admin re-analysis in the owner staff log before queueing it',async()=>{
+  const {deps,calls}=fixture();
+  const logged:any[]=[];
+  (deps as any).findNote=async()=>({id:'n',user_id:'owner'});
+  (deps as any).isAdmin=async()=>true;
+  (deps.jobs as any).reanalyze=async()=>{calls.push('reanalyze');return {id:'j',state:'pending'}};
+  (deps as any).recordStaffAccess=async(e:any)=>{logged.push(e);calls.push('log');};
+  expect((await handleNoteAIRequest({note_id:'n',reason:'admin_reanalysis'},'Bearer user',deps as any)).status).toBe(202);
+  expect(calls).toEqual(['log','reanalyze']);
+  expect(logged).toEqual([{subjectUserId:'owner',actorUserId:'u',actorKind:'admin',action:'reanalyze_note',noteId:'n'}]);
+ });
+ it('does not re-analyse when the staff log cannot be written',async()=>{
+  const {deps,calls}=fixture();
+  (deps as any).findNote=async()=>({id:'n',user_id:'owner'});
+  (deps as any).isAdmin=async()=>true;
+  (deps.jobs as any).reanalyze=async()=>{calls.push('reanalyze');return {id:'j',state:'pending'}};
+  (deps as any).recordStaffAccess=async()=>{throw new Error('staff access not recorded: down')};
+  expect((await handleNoteAIRequest({note_id:'n',reason:'admin_reanalysis'},'Bearer user',deps as any)).status).toBe(503);
+  expect(calls).toEqual([]);
  });
  it('admits only one concurrent execution of the same valid lease',async()=>{
   const {deps,calls}=fixture(true);let admitted=false;

@@ -1,4 +1,5 @@
 import type { NoteAILease, createNoteAIJobs } from './note-ai-jobs.ts';
+import type { StaffAccessEntry } from './staff-access.ts';
 export function changedProfileSubjects(suggestions: Array<{suggestion_type:string;status:string;target_entity_id?:string|null;payload?:Record<string,unknown>}>): Array<string|null> {
  return [...new Set(suggestions.filter(s=>s.suggestion_type==='add_profile_entry' && s.status==='auto_applied_unreviewed' && s.target_entity_id).map(s=>typeof s.payload?.contact_id==='string'?s.payload.contact_id:null))];
 }
@@ -10,6 +11,7 @@ interface Dependencies {
  jobs: Pick<ReturnType<typeof createNoteAIJobs>, 'enqueue' | 'getLease' | 'claimExecution' | 'reanalyze'>;
  isAdmin: (userId:string) => Promise<boolean>;
  execute: (lease: NoteAILease) => Promise<void>;
+ recordStaffAccess: (e: StaffAccessEntry) => Promise<void>;
 }
 export async function handleNoteAIRequest(body: Record<string, any>, authorization: string, deps: Dependencies) {
  const reply = (status:number, body:Record<string,unknown>)=>({status,body});
@@ -32,7 +34,12 @@ export async function handleNoteAIRequest(body: Record<string, any>, authorizati
  if(deliberate && !admin)return reply(403,{error:'Verified administrator required'});
  const note=await deps.findNote(body.note_id);
  if (!note || (!internal && !admin && note.user_id !== userId)) return reply(403,{error:'Forbidden'});
- if(admin){const job=await deps.jobs.reanalyze(note.user_id,body.note_id,'analysis');return reply(202,{ok:true,queued:true,processing:false,job_id:job?.id,state:job?.state});}
+ if(admin){
+  // Staff action on someone's note: in their log first, or not at all.
+  try{await deps.recordStaffAccess({subjectUserId:note.user_id,actorUserId:userId,actorKind:'admin',action:'reanalyze_note',noteId:body.note_id});}
+  catch{return reply(503,{error:'Staff access log unavailable'});}
+  const job=await deps.jobs.reanalyze(note.user_id,body.note_id,'analysis');return reply(202,{ok:true,queued:true,processing:false,job_id:job?.id,state:job?.state});
+ }
  const job=await deps.jobs.enqueue(note.user_id,body.note_id,'analysis',body.reason==='manual'?'manual':'automatic');
  return reply(202,{ok:true,queued:true,processing:false,job_id:job?.id,state:job?.state ?? 'pending'});
 }

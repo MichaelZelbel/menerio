@@ -118,6 +118,7 @@ describe("account deletion", () => {
       tables: accountTables(),
       user: { id: OTHER, email: "admin@example.test" },
       deleteUserError: { message: "Database error deleting user" },
+      rpcs: { record_staff_access: () => ({ data: "log-id", error: null }) },
     });
     const handler = await loadFunction("admin-delete-user", fake.client, ENV);
     const res = await handler(new Request("https://synthetic.invalid/admin-delete-user", {
@@ -126,6 +127,40 @@ describe("account deletion", () => {
     expect(res.status).toBe(500);
     expect(fake.tables.user_roles.find((r) => r.user_id === OWNER)?.role).toBe("premium");
     expect(fake.tables.profiles.some((p) => p.id === OWNER)).toBe(true);
+  });
+
+  it("admin-delete-user removes nothing when the staff log cannot be written", async () => {
+    const fake = fakeClient({
+      tables: accountTables(),
+      user: { id: OTHER, email: "admin@example.test" },
+      rpcs: { record_staff_access: () => ({ data: null, error: { message: "log store down" } }) },
+    });
+    const handler = await loadFunction("admin-delete-user", fake.client, ENV);
+    const res = await handler(new Request("https://synthetic.invalid/admin-delete-user", {
+      method: "POST", headers: { Authorization: "Bearer session" }, body: JSON.stringify({ target_user_id: OWNER }),
+    }));
+    expect(res.status).toBe(503);
+    expect(fake.tables.user_roles.find((r) => r.user_id === OWNER)?.role).toBe("premium");
+    expect(fake.tables.profiles.some((p) => p.id === OWNER)).toBe(true);
+    expect(fake.log).not.toContain(`auth.deleteUser ${OWNER}`);
+  });
+
+  it("admin-delete-user logs the staff access exactly once, before any delete", async () => {
+    const fake = fakeClient({
+      tables: accountTables(),
+      user: { id: OTHER, email: "admin@example.test" },
+      rpcs: { record_staff_access: () => ({ data: "log-id", error: null }) },
+    });
+    const handler = await loadFunction("admin-delete-user", fake.client, ENV);
+    const res = await handler(new Request("https://synthetic.invalid/admin-delete-user", {
+      method: "POST", headers: { Authorization: "Bearer session" }, body: JSON.stringify({ target_user_id: OWNER }),
+    }));
+    expect(res.status).toBe(200);
+    expect(fake.log.filter((l) => l === "rpc record_staff_access")).toHaveLength(1);
+    const logIndex = fake.log.indexOf("rpc record_staff_access");
+    const firstDeleteIndex = fake.log.findIndex((l) => l.startsWith("storage.list") || l.startsWith("auth.deleteUser") || l.startsWith("delete "));
+    expect(logIndex).toBeGreaterThan(-1);
+    expect(logIndex).toBeLessThan(firstDeleteIndex);
   });
 });
 
@@ -248,6 +283,7 @@ describe("ensure-token-allowance", () => {
     const res = await call(handler, "service-key", { user_id: OTHER });
     expect(res.status).toBe(200);
     expect(fake.tables.ai_allowance_periods.map((p) => p.user_id)).toEqual([OTHER]);
+    expect(fake.log).not.toContain("rpc record_staff_access");
   });
 
   it("treats a near-miss of the service key as a session, which may not act for another account", async () => {
@@ -256,5 +292,33 @@ describe("ensure-token-allowance", () => {
     const res = await call(handler, "service-kez", { user_id: OTHER });
     expect(res.status).toBe(403);
     expect(fake.tables.ai_allowance_periods).toHaveLength(0);
+  });
+
+  it("never logs a user's own request for their own allowance", async () => {
+    const fake = allowanceClient({ id: OWNER });
+    const handler = await loadFunction("ensure-token-allowance", fake.client, ENV);
+    const res = await call(handler, "session", { user_id: OWNER });
+    expect(res.status).toBe(200);
+    expect(fake.tables.ai_allowance_periods.map((p) => p.user_id)).toEqual([OWNER]);
+    expect(fake.log).not.toContain("rpc record_staff_access");
+  });
+
+  it("creates no allowance row for another account when the staff log cannot be written", async () => {
+    const withFailingLog = fakeClient({
+      tables: {
+        ai_allowance_periods: [],
+        ai_credit_settings: [{ key: "tokens_per_credit", value_int: 200 }, { key: "credits_free_per_month", value_int: 10 }],
+      },
+      user: { id: OWNER },
+      rpcs: {
+        get_user_role: () => ({ data: "free", error: null }),
+        is_admin: () => ({ data: true, error: null }),
+        record_staff_access: () => ({ data: null, error: { message: "log store down" } }),
+      },
+    });
+    const handler = await loadFunction("ensure-token-allowance", withFailingLog.client, ENV);
+    const res = await call(handler, "session", { user_id: OTHER });
+    expect(res.status).toBe(503);
+    expect(withFailingLog.tables.ai_allowance_periods).toHaveLength(0);
   });
 });

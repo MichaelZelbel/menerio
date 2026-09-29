@@ -10,6 +10,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { removeUserStorage } from "../_shared/delete-user-storage.ts";
+import { recordStaffAccess } from "../_shared/staff-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -64,6 +65,14 @@ serve(async (req) => {
     // certainly a mistake — route them to account settings instead.
     if (target_user_id === caller.id) {
       return json({ error: "Use account settings to delete your own account." }, 400);
+    }
+
+    // Recorded before anything is removed: a deletion that is not in the log did not happen.
+    try {
+      await recordStaffAccess(adminClient, { subjectUserId: target_user_id, actorUserId: caller.id, actorKind: "admin", action: "delete_account" });
+    } catch (e) {
+      console.error("[admin-delete-user] staff access not recorded:", e instanceof Error ? e.message : e);
+      return json({ error: "Staff access log unavailable" }, 503);
     }
 
     // Every file of theirs (avatars, note attachments), best-effort.
