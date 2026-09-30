@@ -17,6 +17,18 @@ const ENV = {
   LOVABLE_API_KEY: "lovable-key",
   RESEND_API_KEY: "resend-key",
 };
+// What the hosted edge runtime actually sets: SUPABASE_ANON_KEY (and the
+// plural SUPABASE_PUBLISHABLE_KEYS, irrelevant here), never the singular
+// SUPABASE_PUBLISHABLE_KEY. A function that reads only the singular throws
+// "supabaseKey is required" in production even though it passes locally
+// against ENV above.
+const HOSTED_ENV = {
+  SUPABASE_URL: "https://synthetic.invalid",
+  SUPABASE_SERVICE_ROLE_KEY: "service-key",
+  SUPABASE_ANON_KEY: "anon-key",
+  LOVABLE_API_KEY: "lovable-key",
+  RESEND_API_KEY: "resend-key",
+};
 const OWNER = "00000000-0000-4000-8000-00000000000a";
 const OTHER = "00000000-0000-4000-8000-00000000000b";
 
@@ -143,6 +155,30 @@ describe("account deletion", () => {
     expect(fake.tables.user_roles.find((r) => r.user_id === OWNER)?.role).toBe("premium");
     expect(fake.tables.profiles.some((p) => p.id === OWNER)).toBe(true);
     expect(fake.log).not.toContain(`auth.deleteUser ${OWNER}`);
+  });
+
+  it("delete-my-account works on the hosted runtime, which sets SUPABASE_ANON_KEY and not SUPABASE_PUBLISHABLE_KEY", async () => {
+    const fake = fakeClient({ tables: accountTables(), user: { id: OWNER, email: "owner@example.test", identities: [{ provider: "email" }] }, password: "correct-horse" });
+    const handler = await loadFunction("delete-my-account", fake.client, HOSTED_ENV);
+    const res = await handler(new Request("https://synthetic.invalid/delete-my-account", {
+      method: "POST", headers: { Authorization: "Bearer session" }, body: JSON.stringify({ password: "correct-horse" }),
+    }));
+    expect(res.status).toBe(200);
+    expect(fake.log).toContain(`auth.deleteUser ${OWNER}`);
+  });
+
+  it("admin-delete-user works on the hosted runtime, which sets SUPABASE_ANON_KEY and not SUPABASE_PUBLISHABLE_KEY", async () => {
+    const fake = fakeClient({
+      tables: accountTables(),
+      user: { id: OTHER, email: "admin@example.test" },
+      rpcs: { record_staff_access: () => ({ data: "log-id", error: null }) },
+    });
+    const handler = await loadFunction("admin-delete-user", fake.client, HOSTED_ENV);
+    const res = await handler(new Request("https://synthetic.invalid/admin-delete-user", {
+      method: "POST", headers: { Authorization: "Bearer session" }, body: JSON.stringify({ target_user_id: OWNER }),
+    }));
+    expect(res.status).toBe(200);
+    expect(fake.log).toContain(`auth.deleteUser ${OWNER}`);
   });
 
   it("admin-delete-user logs the staff access exactly once, before any delete", async () => {

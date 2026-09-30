@@ -35,8 +35,15 @@ serve(async (req) => {
     if (!authHeader) return json({ error: "Missing authorization" }, 401);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
+    // The hosted edge runtime sets SUPABASE_ANON_KEY (never the singular
+    // SUPABASE_PUBLISHABLE_KEY); a local .env may still only set the latter.
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    if (!supabaseAnonKey) {
+      console.error("[admin-delete-user] no anon key in the environment");
+      return json({ error: "Internal server error" }, 500);
+    }
 
     // Identify the caller from their JWT.
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
