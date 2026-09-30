@@ -1,5 +1,17 @@
 # Admin Privacy (Level 1) and Avatar Removal Implementation Plan
 
+**Status (2026-09-30): phases 1 and 2 are live; Task 8 waits for Michael's approval of the wording; Task 11 runs on or after 2026-10-07** (Godspeed obligation `menerio-privacy-phase-3`).
+
+- Tasks 1-7 merged in PR #3 (`06525a75`). Migrations 20261001100000, 100100, 100200, 100300 and 100400 are applied and recorded in `schema_migrations`, each in one transaction with its record. Frontend published through the Lovable deploy; the six functions are deployed.
+- Verified live: as the admin session, other users' note chunks, image text, profiles, agent instructions, profile views, categories, activity and notes all read 0 rows; `profile_entries_archive` refuses; the directory returns every account; the Admin page, the Staff access card, the moderation review (live read, logged, no reason text) and a throwaway sign-up and self-deletion all work. Avatars: 0 files, bucket private, no rules, sign-up copies no photo URL.
+- Corrections to this plan, made while executing it:
+  - The fact-store go-live renamed `profile_entries` to `profile_entries_archive` and the admin rule moved with it; migration D also drops it there.
+  - The frontend does not publish on a push to `main`: it reaches menerio.com only through `mcp__lovable__deploy_project` (see `docs/plans/one-fact-store.md`, section 8, "Go-live", item 1). Cherishly is the Vercel project.
+  - The Staff access card says "Every action {brand} staff take on your account, and every time our automatic check reads a note you shared publicly, is listed here." The drafted "anything staff or our systems do" overclaimed: scheduled service jobs act on every account and are not logged. The Task 8 draft needs the same correction, and its provider list must match what is configured live (OpenRouter and Mistral), not everything the router supports.
+  - `prod-apply.sh` / `prod-read.sh` now exit non-zero on a SQL error.
+  - Task 10 Step 7 found that `delete-my-account` and `admin-delete-user` read `SUPABASE_PUBLISHABLE_KEY`, which the hosted runtime does not set, so no account could be deleted. Fixed in PR #4 (`0aa6e46b`).
+  - Task 11: the read-only `prod-read.sh` connection may not run `private.assert_no_admin_content_reads()`; query `pg_policies` directly instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Menerio staff can no longer read any user's notes, people facts, image text or agent instructions through the app or the API. Every action staff take on an account is logged, and the user can see that log. The unused profile-picture feature and its public storage bucket are gone.
