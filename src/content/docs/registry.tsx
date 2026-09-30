@@ -648,7 +648,7 @@ const settingsAccount: DocPage = {
   content: () => (
     <>
       <h2 id="general">General Settings</h2>
-      <p>Update your display name in <strong>Settings → Account</strong> and your profile picture in <strong>Settings → Picture</strong>. Theme switching (light/dark mode) is available from the toggle in the header.</p>
+      <p>Update your display name in <strong>Settings → Account</strong>. Theme switching (light/dark mode) is available from the toggle in the header.</p>
 
       <h2 id="notifications">Notifications</h2>
       <p>Configure what notifications you receive:</p>
