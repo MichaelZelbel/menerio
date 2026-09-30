@@ -29,6 +29,8 @@ export interface FakeOptions {
   user?: FakeUser | null;
   password?: string;
   deleteUserError?: Row | null;
+  /** Make a plain select() against this table fail, e.g. a dropped connection. */
+  selectErrors?: Record<string, { message: string }>;
 }
 
 /** One `or()` condition in PostgREST grammar, the few forms the code uses. */
@@ -121,6 +123,9 @@ export function fakeClient(opts: FakeOptions) {
       maybeSingle: () => { one = "maybe"; return q; },
       then: (ok: (v: Answer) => unknown, fail?: (e: unknown) => unknown) =>
         Promise.resolve().then((): Answer => {
+          if (action === "select" && opts.selectErrors?.[table]) {
+            return { data: null, error: opts.selectErrors[table] };
+          }
           const match = (r: Row) => filters.every((f) => f(r));
           let rows: Row[];
           if (action === "insert" || action === "upsert") {

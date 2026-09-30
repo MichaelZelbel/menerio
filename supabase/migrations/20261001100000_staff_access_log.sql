@@ -14,6 +14,8 @@ CREATE TABLE private.staff_access_log (
 CREATE INDEX staff_access_log_subject_idx ON private.staff_access_log (subject_user_id, created_at DESC);
 REVOKE ALL ON private.staff_access_log FROM PUBLIC, anon, authenticated;
 
+-- Also used FOR EACH STATEMENT below (for TRUNCATE, which has no per-row
+-- form): it only ever raises, so the same function works both ways.
 CREATE FUNCTION private.staff_access_log_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -22,6 +24,11 @@ END $$;
 CREATE TRIGGER staff_access_log_append_only
   BEFORE UPDATE OR DELETE ON private.staff_access_log
   FOR EACH ROW EXECUTE FUNCTION private.staff_access_log_append_only();
+-- UPDATE and DELETE are blocked per row above; TRUNCATE bypasses row triggers
+-- entirely, so it needs its own statement-level trigger with the same function.
+CREATE TRIGGER staff_access_log_append_only_truncate
+  BEFORE TRUNCATE ON private.staff_access_log
+  FOR EACH STATEMENT EXECUTE FUNCTION private.staff_access_log_append_only();
 
 CREATE FUNCTION public.record_staff_access(
   p_subject uuid, p_actor uuid, p_actor_kind text, p_action text, p_note_id uuid DEFAULT NULL

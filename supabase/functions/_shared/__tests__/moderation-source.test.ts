@@ -2,17 +2,20 @@ import { describe, expect, it } from "vitest";
 import { blockedModerationEvent, loadSharedNoteForReview, reviewQueueItem } from "../moderation-source.ts";
 
 type Row = Record<string, unknown>;
-function fakeDb(tables: Record<string, Row[]>) {
+function fakeDb(tables: Record<string, Row[]>, errors: Record<string, { message: string }> = {}) {
   return {
     from(table: string) {
       const filters: Array<[string, unknown]> = [];
       const q = {
         select: () => q,
         eq: (col: string, val: unknown) => { filters.push([col, val]); return q; },
-        maybeSingle: async () => ({
-          data: (tables[table] ?? []).find((r) => filters.every(([c, v]) => r[c] === v)) ?? null,
-          error: null,
-        }),
+        maybeSingle: async () => {
+          if (errors[table]) return { data: null, error: errors[table] };
+          return {
+            data: (tables[table] ?? []).find((r) => filters.every(([c, v]) => r[c] === v)) ?? null,
+            error: null,
+          };
+        },
       };
       return q;
     },
@@ -43,6 +46,17 @@ describe("loadSharedNoteForReview", () => {
   });
   it("returns null without a note id", async () => {
     expect(await loadSharedNoteForReview(db, null, "u1")).toBeNull();
+  });
+  it("throws, rather than treating it as unshared, when the shared_notes read errors", async () => {
+    const brokenDb = fakeDb({ notes: [] }, { shared_notes: { message: "connection reset" } });
+    await expect(loadSharedNoteForReview(brokenDb, "n1", "u1")).rejects.toThrow(/shared_notes/);
+  });
+  it("throws, rather than treating it as deleted, when the notes read errors", async () => {
+    const brokenDb = fakeDb(
+      { shared_notes: [{ note_id: "n1", user_id: "u1", is_active: true }] },
+      { notes: { message: "connection reset" } },
+    );
+    await expect(loadSharedNoteForReview(brokenDb, "n1", "u1")).rejects.toThrow(/could not read note/);
   });
 });
 

@@ -63,11 +63,15 @@ DO $$BEGIN
  IF (SELECT count(*) FROM private.staff_access_log WHERE subject_user_id='a0000000-0000-0000-0000-000000000001') <> 0 THEN RAISE EXCEPTION 'own write logged'; END IF;
 END $$;
 
--- 4. Append-only, even for the table owner's roles.
+-- 4. Append-only: UPDATE, DELETE and TRUNCATE raise, for every role that is
+-- not the table owner acting on the trigger itself (disabling the trigger as
+-- the owner is still possible, same as for any trigger).
 DO $$BEGIN
  BEGIN UPDATE private.staff_access_log SET action='edited'; RAISE EXCEPTION 'log editable';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM <> 'staff_access_log is append-only' THEN RAISE; END IF; END;
  BEGIN DELETE FROM private.staff_access_log; RAISE EXCEPTION 'log deletable';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM <> 'staff_access_log is append-only' THEN RAISE; END IF; END;
+ BEGIN TRUNCATE private.staff_access_log; RAISE EXCEPTION 'log truncatable';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM <> 'staff_access_log is append-only' THEN RAISE; END IF; END;
 END $$;
 \echo 'staff access log: all assertions passed'

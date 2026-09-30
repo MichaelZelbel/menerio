@@ -160,26 +160,33 @@ function OverviewTab() {
     totalTokensUsed: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [counts, tokensRes] = await Promise.all([
-        fetchAccountCounts(),
-        // Ask the database for the sum. Fetching every `total_tokens` row and
-        // adding it up here read low by 23x: PostgREST caps a response at
-        // max_rows (1000 on this project) and the ledger holds 20,297 rows.
-        supabase.from("llm_usage_totals" as any).select("total_tokens").maybeSingle(),
-      ]);
+      setLoadError(false);
+      try {
+        const [counts, tokensRes] = await Promise.all([
+          fetchAccountCounts(),
+          // Ask the database for the sum. Fetching every `total_tokens` row and
+          // adding it up here read low by 23x: PostgREST caps a response at
+          // max_rows (1000 on this project) and the ledger holds 20,297 rows.
+          supabase.from("llm_usage_totals" as any).select("total_tokens").maybeSingle(),
+        ]);
 
-      const totalTokens = Number((tokensRes.data as any)?.total_tokens ?? 0);
+        const totalTokens = Number((tokensRes.data as any)?.total_tokens ?? 0);
 
-      setStats({
-        totalUsers: counts.totalUsers,
-        premiumUsers: counts.paidUsers,
-        newThisWeek: counts.newUsers7d,
-        totalTokensUsed: totalTokens,
-      });
-      setLoading(false);
+        setStats({
+          totalUsers: counts.totalUsers,
+          premiumUsers: counts.paidUsers,
+          newThisWeek: counts.newUsers7d,
+          totalTokensUsed: totalTokens,
+        });
+      } catch {
+        setLoadError(true);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -191,6 +198,10 @@ function OverviewTab() {
         ))}
       </div>
     );
+  }
+
+  if (loadError || !stats) {
+    return <p className="text-sm text-muted-foreground">The account statistics could not be loaded.</p>;
   }
 
   const cards = [
@@ -239,6 +250,7 @@ function UsersTab() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<Record<string, AppRole>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
@@ -258,6 +270,7 @@ function UsersTab() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const { rows, total } = await fetchUserDirectory({
         search,
@@ -273,6 +286,7 @@ function UsersTab() {
     } catch {
       setUsers([]);
       setTotal(0);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -403,7 +417,9 @@ function UsersTab() {
                 ))
               ) : users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No users found.</TableCell>
+                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                    {loadError ? "The user list could not be loaded." : "No users found."}
+                  </TableCell>
                 </TableRow>
               ) : (
                 users.map((u) => {

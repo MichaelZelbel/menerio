@@ -39,7 +39,7 @@ export function StaffAccessCard() {
       <CardHeader>
         <CardTitle>Staff access</CardTitle>
         <CardDescription>
-          Menerio staff cannot open your notes, people or moments. Every action staff take on your account, and every time our automatic check reads a note you shared publicly, is listed here.
+          Every action Menerio staff take on your account, and every time our automatic check reads a note you shared publicly, is listed here.
         </CardDescription>
       </CardHeader>
       <CardContent>

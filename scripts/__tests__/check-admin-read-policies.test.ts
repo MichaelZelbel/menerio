@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ALLOWED, checkMigrations } from "../check-admin-read-policies.mjs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { ALLOWED, checkMigrations, MODULE_URL, sameModulePath } from "../check-admin-read-policies.mjs";
 
 type Migration = { name: string; sql: string };
 
@@ -99,5 +101,32 @@ describe("check-admin-read-policies", () => {
   it("keeps the allowlist scoped to account, billing and moderation-metadata tables", () => {
     expect(ALLOWED.has("moderation_events")).toBe(true);
     expect(ALLOWED.has("profiles")).toBe(false);
+  });
+});
+
+describe("sameModulePath (the CLI-detection compare)", () => {
+  const modulePath = join(__dirname, "..", "check-admin-read-policies.mjs");
+
+  it("matches the exact same file:// URL on every platform", () => {
+    const url = "file:///C:/repo/check-admin-read-policies.mjs";
+    expect(sameModulePath(url, url)).toBe(true);
+  });
+
+  it("matches a different drive-letter case only on win32 (a real Windows quirk: argv[1] and import.meta.url do not always agree on casing)", () => {
+    const lower = "file:///c:/repo/check-admin-read-policies.mjs";
+    const upper = "file:///C:/REPO/check-admin-read-policies.mjs";
+    expect(sameModulePath(lower, upper)).toBe(process.platform === "win32");
+  });
+
+  it("still rejects a genuinely different file", () => {
+    const a = "file:///C:/repo/check-admin-read-policies.mjs";
+    const b = "file:///C:/repo/check-edge-functions.mjs";
+    expect(sameModulePath(a, b)).toBe(false);
+  });
+
+  it("end to end: the real path this test resolved to matches the module's own import.meta.url", () => {
+    // Mirrors what main()'s guard does with realpathSync(process.argv[1]),
+    // without mutating argv or re-running main() as a side effect of import.
+    expect(sameModulePath(pathToFileURL(modulePath).href, MODULE_URL)).toBe(true);
   });
 });

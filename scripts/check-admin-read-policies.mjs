@@ -16,9 +16,13 @@
  * run conditionally by other means, which is why the migration's own drops
  * must be written out literally.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+// Exposed only so the CLI-detection test can compare against this module's
+// own import.meta.url without re-deriving it by hand.
+export const MODULE_URL = import.meta.url;
 
 export const ALLOWED = new Set([
   "user_roles", "ai_allowance_periods", "user_suspensions", "llm_usage_events",
@@ -130,4 +134,28 @@ function main() {
   console.log(`admin read policies: ok (${count} policies replayed)`);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
+/** Case-insensitive on win32, where the same file can be spelled two ways
+ * (a different drive-letter case, a symlink resolved to another case). */
+export function sameModulePath(invokedHref, hereHref) {
+  return process.platform === "win32" ? invokedHref.toLowerCase() === hereHref.toLowerCase() : invokedHref === hereHref;
+}
+
+/**
+ * A straight string compare between `process.argv[1]` and `import.meta.url`
+ * (as a path) missed a symlink or a differently-cased drive letter on
+ * Windows, so `node scripts/check-admin-read-policies.mjs` could silently
+ * skip main() and exit 0 without ever running the check. Resolve argv[1] to
+ * its real path before comparing.
+ */
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  let invoked;
+  try {
+    invoked = pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+  return sameModulePath(invoked, import.meta.url);
+}
+
+if (isMainModule()) main();

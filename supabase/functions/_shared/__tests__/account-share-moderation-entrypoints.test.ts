@@ -253,6 +253,27 @@ describe("ai-moderate-content", () => {
     expect(fake.tables.moderation_review_queue[0].retry_count).toBe(1);
   });
 
+  it("when the shared-note read errors, the item stays pending with retry_count incremented, not skipped", async () => {
+    const fake = fakeClient({
+      tables: {
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: true }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
+      },
+      selectErrors: { shared_notes: { message: "connection reset" } },
+    });
+    let classifierCalled = false;
+    const run = await loadFunction("ai-moderate-content", fake.client, ENV, {
+      globals: { testRunChat: async () => { classifierCalled = true; return null; } },
+      stubs: [{ filter: /llm-router\.ts$/, contents: "export const runChat = (...a) => globalThis.testRunChat(...a)" }],
+    });
+    const res = await run(new Request("https://synthetic.invalid/ai-moderate-content", { method: "POST", headers: { Authorization: "Bearer service-key" } }));
+    expect(res.status).toBe(200);
+    expect(classifierCalled).toBe(false);
+    expect(fake.tables.moderation_review_queue[0].status).toBe("pending");
+    expect(fake.tables.moderation_review_queue[0].retry_count).toBe(1);
+  });
+
   it("still refuses a caller that is neither the service key nor an admin", async () => {
     const fake = fakeClient({ tables: { user_roles: [{ user_id: OWNER, role: "premium" }] }, user: { id: OWNER } });
     const run = await loadFunction("ai-moderate-content", fake.client, ENV, {
@@ -301,6 +322,29 @@ describe("ensure-token-allowance", () => {
     expect(res.status).toBe(200);
     expect(fake.tables.ai_allowance_periods.map((p) => p.user_id)).toEqual([OWNER]);
     expect(fake.log).not.toContain("rpc record_staff_access");
+  });
+
+  it("logs the staff access with the right arguments when an admin acts on another account", async () => {
+    let staffAccessArgs: Row | null = null;
+    const fake = fakeClient({
+      tables: {
+        ai_allowance_periods: [],
+        ai_credit_settings: [{ key: "tokens_per_credit", value_int: 200 }, { key: "credits_free_per_month", value_int: 10 }],
+      },
+      user: { id: OTHER },
+      rpcs: {
+        get_user_role: () => ({ data: "free", error: null }),
+        is_admin: () => ({ data: true, error: null }),
+        record_staff_access: (args) => { staffAccessArgs = args; return { data: "log-id", error: null }; },
+      },
+    });
+    const handler = await loadFunction("ensure-token-allowance", fake.client, ENV);
+    const res = await call(handler, "session", { user_id: OWNER });
+    expect(res.status).toBe(200);
+    expect(fake.log.filter((l) => l === "rpc record_staff_access")).toHaveLength(1);
+    expect(staffAccessArgs).toEqual({
+      p_subject: OWNER, p_actor: OTHER, p_actor_kind: "admin", p_action: "ensure_allowance", p_note_id: null,
+    });
   });
 
   it("creates no allowance row for another account when the staff log cannot be written", async () => {

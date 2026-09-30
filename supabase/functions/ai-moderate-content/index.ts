@@ -103,7 +103,9 @@ Deno.serve(async (req) => {
           // Unshared or deleted before review: nothing public left to check.
           await admin.from("moderation_review_queue")
             .update({ status: "skipped", reviewed_at: new Date().toISOString() })
-            .eq("id", item.id);
+            .eq("id", item.id)
+            // Never over a verdict another run has already written.
+            .eq("status", "pending");
           results.push({ id: item.id, status: "skipped" });
           continue;
         }
