@@ -101,7 +101,7 @@ serve(async (req) => {
     // Use service role client for deletion
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Every file of theirs: avatars and note attachments (clips, scans, uploads).
+    // Every file of theirs: note attachments (clips, scans, uploads).
     const storage = await removeUserStorage(adminClient, user.id);
     for (const err of storage.errors) console.error("[DELETE-ACCOUNT] storage cleanup:", err);
 

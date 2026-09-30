@@ -59,7 +59,6 @@ export type AppRole = "free" | "premium" | "premium_gift" | "admin";
 export interface Profile {
   id: string;
   display_name: string | null;
-  avatar_url: string | null;
 }
 
 interface AuthContextType {
@@ -105,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = useCallback(async (userId: string, epoch = generation.current) => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, display_name, avatar_url, timezone")
+      .select("id, display_name, timezone")
       .eq("id", userId)
       .single();
     if (error || !data || epoch !== generation.current || owner.current !== userId) return;

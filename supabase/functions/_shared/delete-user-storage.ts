@@ -1,8 +1,8 @@
 /**
  * Remove everything a user has in storage before their account row goes.
  *
- * Both deletion paths (delete-my-account, admin-delete-user) used to clear the
- * `avatars` bucket and nothing else. Every clip, scan and attachment lives
+ * Profile pictures (the old `avatars` bucket) were removed on 2026-10;
+ * attachments are the only per-user files. Every clip, scan and attachment lives
  * under `note-attachments/<user_id>/`, uploaded by the service role with no
  * owner column, so no cascade and no policy ever removed them: a deleted
  * account left up to 20 MB per file behind, forever.
@@ -25,7 +25,7 @@ interface StorageLike {
   };
 }
 
-export const USER_STORAGE_BUCKETS = ["avatars", "note-attachments"] as const;
+export const USER_STORAGE_BUCKETS = ["note-attachments"] as const;
 
 const PAGE = 1000;
 

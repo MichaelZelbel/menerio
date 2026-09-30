@@ -75,7 +75,7 @@ serve(async (req) => {
       return json({ error: "Staff access log unavailable" }, 503);
     }
 
-    // Every file of theirs (avatars, note attachments), best-effort.
+    // Every file of theirs (note attachments), best-effort.
     const storage = await removeUserStorage(adminClient, target_user_id);
     for (const err of storage.errors) console.error("[admin-delete-user] storage cleanup:", err);
 
