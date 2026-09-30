@@ -13,6 +13,8 @@ export default defineConfig({
       // Edge function helpers that are pure TypeScript, with no Deno APIs in
       // them, so this Node test runner can import them directly.
       "supabase/functions/**/__tests__/*.{test,spec}.ts",
+      // Plain-Node build/CI scripts (no DOM, no Deno).
+      "scripts/**/__tests__/*.{test,spec}.{ts,mjs}",
     ],
   },
   resolve: {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchUserNames } from "@/lib/adminDirectory";
 import { showToast } from "@/lib/toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -42,12 +43,7 @@ const REVIEW_QUEUE_LIMIT = 50;
 type ProfileMap = Record<string, string>;
 
 async function fetchProfileNames(userIds: string[]): Promise<ProfileMap> {
-  if (userIds.length === 0) return {};
-  const unique = [...new Set(userIds)];
-  const { data } = await supabase.from("profiles").select("id, display_name").in("id", unique);
-  const map: ProfileMap = {};
-  (data || []).forEach((p: any) => { map[p.id] = p.display_name || "Unknown"; });
-  return map;
+  return fetchUserNames(userIds).catch(() => ({}));
 }
 
 function UserName({ userId, profiles }: { userId: string; profiles: ProfileMap }) {
@@ -211,6 +207,7 @@ function AIReviewQueueTab() {
       case "pending": return "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/30";
       case "reviewed": return "bg-success/10 text-success border-success/30";
       case "violation": return "bg-destructive/10 text-destructive border-destructive/30";
+      case "skipped": return "bg-muted text-muted-foreground border-border";
       default: return "bg-muted text-muted-foreground";
     }
   };
@@ -235,7 +232,6 @@ function AIReviewQueueTab() {
                 <TableHead>Type</TableHead>
                 <TableHead>AI Category</TableHead>
                 <TableHead>Confidence</TableHead>
-                <TableHead>AI Reason</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead></TableHead>
@@ -244,10 +240,10 @@ function AIReviewQueueTab() {
             <TableBody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>{Array.from({ length: 8 }).map((_, j) => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}</TableRow>
+                  <TableRow key={i}>{Array.from({ length: 7 }).map((_, j) => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}</TableRow>
                 ))
               ) : items.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No items in review queue.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No items in review queue.</TableCell></TableRow>
               ) : (
                 items.map((item) => (
                   <TableRow key={item.id}>
@@ -255,7 +251,6 @@ function AIReviewQueueTab() {
                     <TableCell className="text-sm">{item.item_type}</TableCell>
                     <TableCell className="text-sm capitalize">{item.ai_category || "—"}</TableCell>
                     <TableCell className="text-sm">{item.ai_confidence != null ? `${Math.round(item.ai_confidence * 100)}%` : "—"}</TableCell>
-                    <TableCell className="text-sm max-w-[200px] truncate">{item.ai_reason || "—"}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={statusColor(item.status)}>{item.status}</Badge>
                     </TableCell>

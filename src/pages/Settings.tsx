@@ -1,9 +1,8 @@
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { openConsentSettings } from "@/lib/consent";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { avatarPublicUrl as avatarUrlFor } from "@/lib/avatar-url";
 import { useToast } from "@/hooks/use-toast";
 import { useLogActivity } from "@/hooks/useLogActivity";
 import { SEOHead } from "@/components/SEOHead";
@@ -13,7 +12,6 @@ import { Label } from "@/components/ui/label";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -27,7 +25,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Camera, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send, Gamepad2, Github, Key, Globe, HardDrive } from "lucide-react";
+import { Loader2, Eye, EyeOff, AlertTriangle, Trash2, User, Shield, CreditCard, Settings as SettingsIcon, Sparkles, Plug, MessageSquare, Brain, Import, Bell, Send, Gamepad2, Github, Key, Globe, HardDrive } from "lucide-react";
 import { CreditsDisplay } from "@/components/settings/CreditsDisplay";
 import { AppIntegrations } from "@/components/settings/AppIntegrations";
 import { SlackIntegration } from "@/components/settings/SlackIntegration";
@@ -48,8 +46,9 @@ import { AISuggestionPreferences } from "@/components/settings/AISuggestionPrefe
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
 import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
 import { AiVisibilitySettings } from "@/components/settings/AiVisibilitySettings";
+import { StaffAccessCard } from "@/components/settings/StaffAccessCard";
 import { BRAND } from "@/lib/brand";
-import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
+import { functionErrorMessage } from "@/lib/function-error";
 
 function PasswordStrength({ password }: { password: string }) {
   const strength = useMemo(() => {
@@ -83,7 +82,7 @@ const ROLE_LABELS: Record<string, { label: string; description: string }> = {
 };
 
 const SETTINGS_TABS = [
-  "account", "avatar", "godspeed", "import", "notifications", "ai-suggestions", "ai-visibility",
+  "account", "godspeed", "import", "notifications", "ai-suggestions", "ai-visibility",
   "connections", "mcp", "integrations", "telegram", "discord", "singlefile", "github", "gdrive",
   "apikeys", "credits", "subscription", "danger",
 ];
@@ -120,10 +119,6 @@ export default function Settings() {
     setDisplayName(profile?.display_name || "");
   }, [profile?.display_name]);
 
-  // Avatar state
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   // Password state
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -135,11 +130,6 @@ export default function Settings() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  const initials = (profile?.display_name || user?.email || "U")
-    .split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-
-  const avatarPublicUrl = avatarUrlFor(profile?.avatar_url) ?? null;
 
   // ── Profile save ──
   const handleSaveProfile = async () => {
@@ -162,64 +152,6 @@ export default function Settings() {
       toast({ title: "Profile updated", description: "Your changes have been saved." });
     }
     setProfileLoading(false);
-  };
-
-  // ── Avatar upload ──
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-
-    if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(file.type)) {
-      toast({ variant: "destructive", title: "Invalid file", description: "Please upload a JPG, PNG, GIF, or WebP image." });
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      toast({ variant: "destructive", title: "File too large", description: "Maximum file size is 2MB." });
-      return;
-    }
-
-    setAvatarUploading(true);
-
-    // Upload the new file and point the profile at it before touching the old
-    // one. Removing first meant a failed upload left the profile pointing at a
-    // file that no longer existed.
-    const ext = file.name.split(".").pop();
-    const path = `${user.id}/avatar-${Date.now()}.${ext}`;
-
-    const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, {
-      cacheControl: "3600",
-      upsert: true,
-    });
-
-    if (uploadError) {
-      toast({
-        variant: "destructive",
-        title: "Upload failed",
-        description: dbErrorMessage(uploadError, "The picture could not be uploaded. Try again."),
-      });
-      setAvatarUploading(false);
-      return;
-    }
-
-    const { error: profileError } = await supabase.from("profiles").update({ avatar_url: path }).eq("id", user.id);
-    if (profileError) {
-      await supabase.storage.from("avatars").remove([path]);
-      toast({
-        variant: "destructive",
-        title: "Upload failed",
-        description: dbErrorMessage(profileError, "The picture could not be saved to your profile. Try again."),
-      });
-      setAvatarUploading(false);
-      return;
-    }
-
-    const previous = profile?.avatar_url;
-    if (previous && previous !== path && !/^https?:\/\//.test(previous)) {
-      await supabase.storage.from("avatars").remove([previous]);
-    }
-    await refreshProfile();
-    toast({ title: "Avatar updated" });
-    setAvatarUploading(false);
   };
 
   // ── Password change ──
@@ -287,7 +219,6 @@ export default function Settings() {
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="flex flex-wrap gap-1 h-auto p-1">
           <TabsTrigger value="account" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5 hidden sm:block" /> Account</TabsTrigger>
-          <TabsTrigger value="avatar" className="gap-1.5 text-xs"><Camera className="h-3.5 w-3.5 hidden sm:block" /> Picture</TabsTrigger>
           <TabsTrigger value="godspeed" className="gap-1.5 text-xs"><Plug className="h-3.5 w-3.5 hidden sm:block" /> Integrations</TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5 text-xs"><Import className="h-3.5 w-3.5 hidden sm:block" /> Import</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-1.5 text-xs"><Bell className="h-3.5 w-3.5 hidden sm:block" /> Alerts</TabsTrigger>
@@ -308,47 +239,8 @@ export default function Settings() {
           <TabsTrigger value="danger" className="gap-1.5 text-xs text-destructive"><AlertTriangle className="h-3.5 w-3.5 hidden sm:block" /> Danger</TabsTrigger>
         </TabsList>
 
-        {/* ── Avatar Tab ── */}
-        <TabsContent value="avatar">
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile Picture</CardTitle>
-              <CardDescription>Upload a new avatar. JPG, PNG, GIF, or WebP. Max 2MB.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center gap-6">
-              <button
-                type="button"
-                aria-label="Upload a new profile picture"
-                disabled={avatarUploading}
-                className="relative group cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Avatar className="h-32 w-32">
-                  {avatarPublicUrl && <AvatarImage src={avatarPublicUrl} />}
-                  <AvatarFallback className="bg-primary text-primary-foreground text-3xl">{initials}</AvatarFallback>
-                </Avatar>
-                <div className={`absolute inset-0 flex items-center justify-center rounded-full bg-foreground/50 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity ${avatarUploading ? "opacity-100" : ""}`}>
-                  {avatarUploading ? (
-                    <Loader2 className="h-8 w-8 animate-spin text-background" />
-                  ) : (
-                    <Camera className="h-8 w-8 text-background" />
-                  )}
-                </div>
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
-                className="hidden"
-                onChange={handleAvatarUpload}
-              />
-              <p className="text-sm text-muted-foreground">Click the avatar to upload a new picture</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         {/* ── Account Tab ── */}
-        <TabsContent value="account">
+        <TabsContent value="account" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Account</CardTitle>
@@ -413,6 +305,7 @@ export default function Settings() {
               </form>
             </CardContent>
           </Card>
+          <StaffAccessCard />
         </TabsContent>
 
         {/* ── Integrations Tab ── */}
@@ -545,7 +438,7 @@ export default function Settings() {
                 <h4 className="font-medium text-destructive mb-1">Delete Account</h4>
                 <p className="text-sm text-muted-foreground mb-1">Permanently delete your account and all associated data:</p>
                 <ul className="text-sm text-muted-foreground list-disc list-inside mb-4 space-y-0.5">
-                  <li>Your profile and avatar</li>
+                  <li>Your profile</li>
                   <li>Your role and permissions</li>
                   <li>All associated data</li>
                 </ul>

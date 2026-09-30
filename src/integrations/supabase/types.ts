@@ -4895,6 +4895,18 @@ export type Database = {
       }
     }
     Functions: {
+      admin_account_counts: {
+        Args: Record<PropertyKey, never>
+        Returns: { new_users_7d: number; paid_users: number; total_users: number }[]
+      }
+      admin_user_directory: {
+        Args: { p_limit?: number; p_offset?: number; p_role?: Database["public"]["Enums"]["app_role"] | null; p_search?: string | null }
+        Returns: { created_at: string; display_name: string | null; id: string; role: Database["public"]["Enums"]["app_role"] | null; total_count: number }[]
+      }
+      admin_user_names: {
+        Args: { p_ids: string[] }
+        Returns: { display_name: string | null; id: string }[]
+      }
       ai_can_see: {
         Args: { _id: string; _kind: string; _user_id: string }
         Returns: boolean
@@ -5412,6 +5424,10 @@ export type Database = {
       move_note_folder: {
         Args: { p_source_path: string; p_target_parent_path: string }
         Returns: Json
+      }
+      my_staff_access_log: {
+        Args: Record<PropertyKey, never>
+        Returns: { action: string; actor_kind: string; created_at: string; note_id: string | null }[]
       }
       note_ai_fingerprint: { Args: { _input: Json }; Returns: string }
       note_ai_input: {

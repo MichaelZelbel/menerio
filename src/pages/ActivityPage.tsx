@@ -62,8 +62,7 @@ function formatAction(action: string, itemType: string, metadata?: any): string 
 const PAGE_SIZE = 20;
 
 export default function ActivityPage() {
-  const { user, role } = useAuth();
-  const isAdmin = role === "admin";
+  const { user } = useAuth();
 
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,11 +84,9 @@ export default function ActivityPage() {
     let query = supabase
       .from("activity_events" as any)
       .select("*")
+      .eq("actor_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (!isAdmin) {
-      query = query.eq("actor_id", user.id);
-    }
     if (actionFilter !== "all") {
       query = query.eq("action", actionFilter);
     }
@@ -127,7 +124,7 @@ export default function ActivityPage() {
     } else {
       setEvents(newData);
     }
-  }, [user, isAdmin, actionFilter, dateFrom, dateTo, events.length]);
+  }, [user, actionFilter, dateFrom, dateTo, events.length]);
 
   useEffect(() => {
     fetchEvents(false);
@@ -148,9 +145,7 @@ export default function ActivityPage() {
         <h1 className="text-2xl font-display font-bold flex items-center gap-2">
           <Activity className="h-6 w-6" /> Activity Log
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {isAdmin ? "All user activity across the platform." : "Your recent actions and events."}
-        </p>
+        <p className="text-sm text-muted-foreground mt-1">Your recent actions and events.</p>
       </div>
 
       {/* Filters */}

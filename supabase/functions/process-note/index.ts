@@ -1,6 +1,7 @@
 import { createNoteAIJobs, NoteAIJobError, classifyNoteAIError, type NoteAILease } from "../_shared/note-ai-jobs.ts";
 import { handleNoteAIRequest } from "../_shared/note-ai-processing.ts";
 import { createNoteAIExecutionDatabase } from "../_shared/note-ai-db.ts";
+import { recordStaffAccess } from "../_shared/staff-access.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
@@ -2855,6 +2856,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         if(error) throw new NoteAIJobError("transient", "Administrator lookup failed");
         return data === true;
       },
+      recordStaffAccess: (e) => recordStaffAccess(supabase, e),
       jobs: noteJobs,
       execute: (lease) => processInBackground(lease, authHeader),
     });

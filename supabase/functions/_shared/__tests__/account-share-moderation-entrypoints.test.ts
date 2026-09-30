@@ -118,6 +118,7 @@ describe("account deletion", () => {
       tables: accountTables(),
       user: { id: OTHER, email: "admin@example.test" },
       deleteUserError: { message: "Database error deleting user" },
+      rpcs: { record_staff_access: () => ({ data: "log-id", error: null }) },
     });
     const handler = await loadFunction("admin-delete-user", fake.client, ENV);
     const res = await handler(new Request("https://synthetic.invalid/admin-delete-user", {
@@ -127,6 +128,40 @@ describe("account deletion", () => {
     expect(fake.tables.user_roles.find((r) => r.user_id === OWNER)?.role).toBe("premium");
     expect(fake.tables.profiles.some((p) => p.id === OWNER)).toBe(true);
   });
+
+  it("admin-delete-user removes nothing when the staff log cannot be written", async () => {
+    const fake = fakeClient({
+      tables: accountTables(),
+      user: { id: OTHER, email: "admin@example.test" },
+      rpcs: { record_staff_access: () => ({ data: null, error: { message: "log store down" } }) },
+    });
+    const handler = await loadFunction("admin-delete-user", fake.client, ENV);
+    const res = await handler(new Request("https://synthetic.invalid/admin-delete-user", {
+      method: "POST", headers: { Authorization: "Bearer session" }, body: JSON.stringify({ target_user_id: OWNER }),
+    }));
+    expect(res.status).toBe(503);
+    expect(fake.tables.user_roles.find((r) => r.user_id === OWNER)?.role).toBe("premium");
+    expect(fake.tables.profiles.some((p) => p.id === OWNER)).toBe(true);
+    expect(fake.log).not.toContain(`auth.deleteUser ${OWNER}`);
+  });
+
+  it("admin-delete-user logs the staff access exactly once, before any delete", async () => {
+    const fake = fakeClient({
+      tables: accountTables(),
+      user: { id: OTHER, email: "admin@example.test" },
+      rpcs: { record_staff_access: () => ({ data: "log-id", error: null }) },
+    });
+    const handler = await loadFunction("admin-delete-user", fake.client, ENV);
+    const res = await handler(new Request("https://synthetic.invalid/admin-delete-user", {
+      method: "POST", headers: { Authorization: "Bearer session" }, body: JSON.stringify({ target_user_id: OWNER }),
+    }));
+    expect(res.status).toBe(200);
+    expect(fake.log.filter((l) => l === "rpc record_staff_access")).toHaveLength(1);
+    const logIndex = fake.log.indexOf("rpc record_staff_access");
+    const firstDeleteIndex = fake.log.findIndex((l) => l.startsWith("storage.list") || l.startsWith("auth.deleteUser") || l.startsWith("delete "));
+    expect(logIndex).toBeGreaterThan(-1);
+    expect(logIndex).toBeLessThan(firstDeleteIndex);
+  });
 });
 
 describe("ai-moderate-content", () => {
@@ -134,11 +169,15 @@ describe("ai-moderate-content", () => {
     const fake = fakeClient({
       tables: {
         user_roles: [],
-        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, content_snapshot: "Title\nbody", status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
         shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: true }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
         moderation_events: [],
       },
-      rpcs: { record_content_strike: () => ({ data: null, error: null }) },
+      rpcs: {
+        record_content_strike: () => ({ data: null, error: null }),
+        record_staff_access: () => ({ data: "log-id", error: null }),
+      },
     });
     // Both runs have read the queue before either decides: the classifier
     // answers only once both have asked.
@@ -168,6 +207,71 @@ describe("ai-moderate-content", () => {
     expect(fake.tables.moderation_events).toHaveLength(1);
     expect(fake.tables.moderation_review_queue[0].status).toBe("violation");
     expect(fake.tables.shared_notes[0].is_active).toBe(false);
+    expect(Object.keys(fake.tables.moderation_events[0])).not.toContain("flagged_content");
+    expect(fake.tables.moderation_review_queue[0]).not.toHaveProperty("ai_reason");
+  });
+
+  it("a queued note whose share is no longer active ends skipped, with no classifier call and no staff-log row", async () => {
+    const fake = fakeClient({
+      tables: {
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: false }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
+      },
+      rpcs: { record_staff_access: () => ({ data: "log-id", error: null }) },
+    });
+    let classifierCalled = false;
+    const run = await loadFunction("ai-moderate-content", fake.client, ENV, {
+      globals: { testRunChat: async () => { classifierCalled = true; return null; } },
+      stubs: [{ filter: /llm-router\.ts$/, contents: "export const runChat = (...a) => globalThis.testRunChat(...a)" }],
+    });
+    const res = await run(new Request("https://synthetic.invalid/ai-moderate-content", { method: "POST", headers: { Authorization: "Bearer service-key" } }));
+    expect(res.status).toBe(200);
+    expect(classifierCalled).toBe(false);
+    expect(fake.tables.moderation_review_queue[0].status).toBe("skipped");
+    expect(fake.log.filter((l) => l === "rpc record_staff_access")).toHaveLength(0);
+  });
+
+  it("when record_staff_access errs, the classifier is never called and the item stays pending with retry_count incremented", async () => {
+    const fake = fakeClient({
+      tables: {
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: true }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
+      },
+      rpcs: { record_staff_access: () => ({ data: null, error: { message: "log store down" } }) },
+    });
+    let classifierCalled = false;
+    const run = await loadFunction("ai-moderate-content", fake.client, ENV, {
+      globals: { testRunChat: async () => { classifierCalled = true; return null; } },
+      stubs: [{ filter: /llm-router\.ts$/, contents: "export const runChat = (...a) => globalThis.testRunChat(...a)" }],
+    });
+    const res = await run(new Request("https://synthetic.invalid/ai-moderate-content", { method: "POST", headers: { Authorization: "Bearer service-key" } }));
+    expect(res.status).toBe(200);
+    expect(classifierCalled).toBe(false);
+    expect(fake.tables.moderation_review_queue[0].status).toBe("pending");
+    expect(fake.tables.moderation_review_queue[0].retry_count).toBe(1);
+  });
+
+  it("when the shared-note read errors, the item stays pending with retry_count incremented, not skipped", async () => {
+    const fake = fakeClient({
+      tables: {
+        moderation_review_queue: [{ id: "q1", item_type: "note", item_id: "n1", user_id: OWNER, status: "pending", retry_count: 0, created_at: "2026-09-29" }],
+        shared_notes: [{ id: "s1", note_id: "n1", user_id: OWNER, is_active: true }],
+        notes: [{ id: "n1", user_id: OWNER, title: "Title", content: "body" }],
+      },
+      selectErrors: { shared_notes: { message: "connection reset" } },
+    });
+    let classifierCalled = false;
+    const run = await loadFunction("ai-moderate-content", fake.client, ENV, {
+      globals: { testRunChat: async () => { classifierCalled = true; return null; } },
+      stubs: [{ filter: /llm-router\.ts$/, contents: "export const runChat = (...a) => globalThis.testRunChat(...a)" }],
+    });
+    const res = await run(new Request("https://synthetic.invalid/ai-moderate-content", { method: "POST", headers: { Authorization: "Bearer service-key" } }));
+    expect(res.status).toBe(200);
+    expect(classifierCalled).toBe(false);
+    expect(fake.tables.moderation_review_queue[0].status).toBe("pending");
+    expect(fake.tables.moderation_review_queue[0].retry_count).toBe(1);
   });
 
   it("still refuses a caller that is neither the service key nor an admin", async () => {
@@ -200,6 +304,7 @@ describe("ensure-token-allowance", () => {
     const res = await call(handler, "service-key", { user_id: OTHER });
     expect(res.status).toBe(200);
     expect(fake.tables.ai_allowance_periods.map((p) => p.user_id)).toEqual([OTHER]);
+    expect(fake.log).not.toContain("rpc record_staff_access");
   });
 
   it("treats a near-miss of the service key as a session, which may not act for another account", async () => {
@@ -208,5 +313,56 @@ describe("ensure-token-allowance", () => {
     const res = await call(handler, "service-kez", { user_id: OTHER });
     expect(res.status).toBe(403);
     expect(fake.tables.ai_allowance_periods).toHaveLength(0);
+  });
+
+  it("never logs a user's own request for their own allowance", async () => {
+    const fake = allowanceClient({ id: OWNER });
+    const handler = await loadFunction("ensure-token-allowance", fake.client, ENV);
+    const res = await call(handler, "session", { user_id: OWNER });
+    expect(res.status).toBe(200);
+    expect(fake.tables.ai_allowance_periods.map((p) => p.user_id)).toEqual([OWNER]);
+    expect(fake.log).not.toContain("rpc record_staff_access");
+  });
+
+  it("logs the staff access with the right arguments when an admin acts on another account", async () => {
+    let staffAccessArgs: Row | null = null;
+    const fake = fakeClient({
+      tables: {
+        ai_allowance_periods: [],
+        ai_credit_settings: [{ key: "tokens_per_credit", value_int: 200 }, { key: "credits_free_per_month", value_int: 10 }],
+      },
+      user: { id: OTHER },
+      rpcs: {
+        get_user_role: () => ({ data: "free", error: null }),
+        is_admin: () => ({ data: true, error: null }),
+        record_staff_access: (args) => { staffAccessArgs = args; return { data: "log-id", error: null }; },
+      },
+    });
+    const handler = await loadFunction("ensure-token-allowance", fake.client, ENV);
+    const res = await call(handler, "session", { user_id: OWNER });
+    expect(res.status).toBe(200);
+    expect(fake.log.filter((l) => l === "rpc record_staff_access")).toHaveLength(1);
+    expect(staffAccessArgs).toEqual({
+      p_subject: OWNER, p_actor: OTHER, p_actor_kind: "admin", p_action: "ensure_allowance", p_note_id: null,
+    });
+  });
+
+  it("creates no allowance row for another account when the staff log cannot be written", async () => {
+    const withFailingLog = fakeClient({
+      tables: {
+        ai_allowance_periods: [],
+        ai_credit_settings: [{ key: "tokens_per_credit", value_int: 200 }, { key: "credits_free_per_month", value_int: 10 }],
+      },
+      user: { id: OWNER },
+      rpcs: {
+        get_user_role: () => ({ data: "free", error: null }),
+        is_admin: () => ({ data: true, error: null }),
+        record_staff_access: () => ({ data: null, error: { message: "log store down" } }),
+      },
+    });
+    const handler = await loadFunction("ensure-token-allowance", withFailingLog.client, ENV);
+    const res = await call(handler, "session", { user_id: OTHER });
+    expect(res.status).toBe(503);
+    expect(withFailingLog.tables.ai_allowance_periods).toHaveLength(0);
   });
 });

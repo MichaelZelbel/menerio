@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { blockedModerationEvent, reviewQueueItem } from "../_shared/moderation-source.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,20 +147,10 @@ Deno.serve(async (req) => {
 
     // --- Blocked ---
     if (matched.length > 0) {
-      const snippet = plainText.slice(0, 500);
-
       // Log event
-      await admin.from("moderation_events").insert({
-        user_id: user.id,
-        action,
-        item_type: itemType,
-        item_id: itemId,
-        flagged_content: snippet,
-        matched_words: matched,
-        category: hitCategory,
-        result: "blocked",
-        tier: "stopword",
-      });
+      await admin.from("moderation_events").insert(blockedModerationEvent({
+        userId: user.id, action, itemType, itemId, matched, category: hitCategory, tier: "stopword",
+      }));
 
       // Increment strikes. One atomic call: a read-then-write here let
       // concurrent violations share one strike and slip past the limit.
@@ -188,17 +179,14 @@ Deno.serve(async (req) => {
       tier: "stopword",
     });
 
-    // Queue for async AI review (non-blocking)
-    try {
-      await admin.from("moderation_review_queue").insert({
-        item_type: itemType,
-        item_id: itemId,
-        user_id: user.id,
-        content_snapshot: plainText.slice(0, 5000),
-        status: "pending",
-      });
-    } catch (_) {
-      // fail silently — share should still proceed
+    // Queue a reference for the async AI review. The worker reads the note
+    // live, and only while it is still shared; no copy of the text is kept.
+    if (itemId) {
+      try {
+        await admin.from("moderation_review_queue").insert(reviewQueueItem({ userId: user.id, itemType, itemId }));
+      } catch (_) {
+        // fail silently — share should still proceed
+      }
     }
 
     return ok({ approved: true });

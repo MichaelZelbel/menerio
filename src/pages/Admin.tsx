@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { avatarPublicUrl } from "@/lib/avatar-url";
+import { fetchAccountCounts, fetchUserDirectory, fetchUserNames, type DirectoryRow } from "@/lib/adminDirectory";
 import { toast } from "sonner";
 const ModerationPanel = lazy(() => import("@/components/admin/ModerationPanel"));
 const LLMConfigPanel = lazy(() => import("@/components/admin/LLMConfigPanel"));
@@ -46,7 +46,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Label } from "@/components/ui/label";
 import {
   BarChart3,
@@ -78,15 +78,7 @@ const ROLE_COLORS: Record<AppRole, string> = {
   admin: "warning",
 };
 
-interface UserRow {
-  id: string;
-  display_name: string | null;
-  avatar_url: string | null;
-  bio: string | null;
-  created_at: string;
-  email?: string;
-  role?: AppRole;
-}
+type UserRow = DirectoryRow;
 
 interface CreditSetting {
   key: string;
@@ -168,28 +160,33 @@ function OverviewTab() {
     totalTokensUsed: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [profilesRes, rolesRes, weekRes, tokensRes] = await Promise.all([
-        supabase.from("profiles").select("id", { count: "exact", head: true }),
-        supabase.from("user_roles").select("id", { count: "exact", head: true }).in("role", ["premium", "premium_gift", "admin"]),
-        supabase.from("profiles").select("id", { count: "exact", head: true }).gte("created_at", new Date(Date.now() - 7 * 86400000).toISOString()),
-        // Ask the database for the sum. Fetching every `total_tokens` row and
-        // adding it up here read low by 23x: PostgREST caps a response at
-        // max_rows (1000 on this project) and the ledger holds 20,297 rows.
-        supabase.from("llm_usage_totals" as any).select("total_tokens").maybeSingle(),
-      ]);
+      setLoadError(false);
+      try {
+        const [counts, tokensRes] = await Promise.all([
+          fetchAccountCounts(),
+          // Ask the database for the sum. Fetching every `total_tokens` row and
+          // adding it up here read low by 23x: PostgREST caps a response at
+          // max_rows (1000 on this project) and the ledger holds 20,297 rows.
+          supabase.from("llm_usage_totals" as any).select("total_tokens").maybeSingle(),
+        ]);
 
-      const totalTokens = Number((tokensRes.data as any)?.total_tokens ?? 0);
+        const totalTokens = Number((tokensRes.data as any)?.total_tokens ?? 0);
 
-      setStats({
-        totalUsers: profilesRes.count || 0,
-        premiumUsers: rolesRes.count || 0,
-        newThisWeek: weekRes.count || 0,
-        totalTokensUsed: totalTokens,
-      });
-      setLoading(false);
+        setStats({
+          totalUsers: counts.totalUsers,
+          premiumUsers: counts.paidUsers,
+          newThisWeek: counts.newUsers7d,
+          totalTokensUsed: totalTokens,
+        });
+      } catch {
+        setLoadError(true);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -201,6 +198,10 @@ function OverviewTab() {
         ))}
       </div>
     );
+  }
+
+  if (loadError || !stats) {
+    return <p className="text-sm text-muted-foreground">The account statistics could not be loaded.</p>;
   }
 
   const cards = [
@@ -249,6 +250,7 @@ function UsersTab() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<Record<string, AppRole>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
@@ -268,51 +270,26 @@ function UsersTab() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
-
-    // Role filtering happens server-side. Previously it filtered only the 10
-    // rows already fetched for the current page, so users with the selected role
-    // on other pages were invisible and the total/pagination were wrong. Instead
-    // we resolve the matching user_ids first and constrain the profiles query to
-    // them, so count + range paginate correctly. (Every user has exactly one
-    // user_roles row, seeded by handle_new_user, so this covers "free" too.)
-    let roleFilteredIds: string[] | null = null;
-    if (roleFilter !== "all") {
-      const { data: roleRows, error: roleErr } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", roleFilter as AppRole);
-      if (roleErr) { setLoading(false); return; }
-      roleFilteredIds = (roleRows || []).map((r: any) => r.user_id);
-      if (roleFilteredIds.length === 0) {
-        setRoles({});
-        setUsers([]);
-        setTotal(0);
-        setLoading(false);
-        return;
-      }
+    setLoadError(false);
+    try {
+      const { rows, total } = await fetchUserDirectory({
+        search,
+        role: roleFilter === "all" ? null : (roleFilter as AppRole),
+        page,
+        pageSize: PAGE_SIZE,
+      });
+      const roleMap: Record<string, AppRole> = {};
+      rows.forEach((r) => { if (r.role) roleMap[r.id] = r.role; });
+      setRoles(roleMap);
+      setUsers(rows);
+      setTotal(total);
+    } catch {
+      setUsers([]);
+      setTotal(0);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-
-    let query = supabase.from("profiles").select("id, display_name, avatar_url, bio, created_at", { count: "exact" });
-    if (search) {
-      query = query.ilike("display_name", `%${search}%`);
-    }
-    if (roleFilteredIds) {
-      query = query.in("id", roleFilteredIds);
-    }
-    query = query.order("created_at", { ascending: false }).range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-    const { data, count, error } = await query;
-    if (error) { setLoading(false); return; }
-
-    // Load all roles for the badge display on the visible rows.
-    const { data: roleData } = await supabase.from("user_roles").select("user_id, role");
-    const roleMap: Record<string, AppRole> = {};
-    (roleData || []).forEach((r: any) => { roleMap[r.user_id] = r.role; });
-    setRoles(roleMap);
-
-    setUsers(data || []);
-    setTotal(count || 0);
-    setLoading(false);
   }, [search, roleFilter, page]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
@@ -440,7 +417,9 @@ function UsersTab() {
                 ))
               ) : users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No users found.</TableCell>
+                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                    {loadError ? "The user list could not be loaded." : "No users found."}
+                  </TableCell>
                 </TableRow>
               ) : (
                 users.map((u) => {
@@ -450,7 +429,6 @@ function UsersTab() {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
-                            {u.avatar_url && <AvatarImage src={avatarPublicUrl(u.avatar_url)} />}
                             <AvatarFallback className="text-xs bg-muted">{getInitials(u.display_name)}</AvatarFallback>
                           </Avatar>
                           <div className="min-w-0">
@@ -768,11 +746,15 @@ function UsageLogTable() {
     // If user search, find matching profile IDs first
     let matchedUserIds: string[] | null = null;
     if (userSearch.trim()) {
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("id")
-        .ilike("display_name", `%${userSearch.trim()}%`);
-      matchedUserIds = (profileData || []).map((p: any) => p.id);
+      try {
+        const { rows } = await fetchUserDirectory({ search: userSearch, page: 0, pageSize: 100 });
+        matchedUserIds = rows.map((r) => r.id);
+      } catch {
+        setEvents([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
       if (matchedUserIds.length === 0) {
         setEvents([]);
         setTotal(0);
@@ -807,12 +789,7 @@ function UsageLogTable() {
     // Fetch display names for user IDs on this page
     const userIds = [...new Set(rows.map((r) => r.user_id))];
     if (userIds.length > 0) {
-      const { data: pData } = await supabase
-        .from("profiles")
-        .select("id, display_name")
-        .in("id", userIds);
-      const map: Record<string, string> = {};
-      (pData || []).forEach((p: any) => { map[p.id] = p.display_name || p.id.slice(0, 8); });
+      const map = await fetchUserNames(userIds).catch(() => ({} as Record<string, string>));
       setProfiles((prev) => ({ ...prev, ...map }));
     }
 

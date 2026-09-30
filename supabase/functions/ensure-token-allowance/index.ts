@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { ensureAllowanceForUser } from "../_shared/ensure-allowance.ts";
 import { secretEquals } from "../_shared/secret-equals.ts";
+import { recordStaffAccess } from "../_shared/staff-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -107,10 +108,16 @@ Deno.serve(async (req) => {
       return json({ error: "No user_id provided" }, 400);
     }
 
-    // If targeting another user, require admin
+    // If targeting another user, require admin, and record it in their log first.
     if (callerId && targetUserId !== callerId) {
       const denied = await requireAdmin();
       if (denied) return denied;
+      try {
+        await recordStaffAccess(db, { subjectUserId: targetUserId, actorUserId: callerId, actorKind: "admin", action: "ensure_allowance" });
+      } catch (e) {
+        console.error("[ensure-token-allowance] staff access not recorded:", e instanceof Error ? e.message : e);
+        return json({ error: "Staff access log unavailable" }, 503);
+      }
     }
 
     const period = await ensureForUser(targetUserId);

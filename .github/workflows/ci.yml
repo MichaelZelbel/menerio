@@ -76,6 +76,10 @@ jobs:
           node scripts/test-godspeed-connect.mjs
           createdb note_ai_normalize_test
           node scripts/test-note-ai-normalize.mjs
+          createdb staff_access_log_test
+          psql -v ON_ERROR_STOP=1 -d staff_access_log_test -f scripts/test-staff-access-log.sql
+          createdb admin_privacy_test
+          psql -v ON_ERROR_STOP=1 -d admin_privacy_test -f scripts/test-admin-privacy.sql
 
   browser-account-isolation:
     runs-on: ubuntu-latest

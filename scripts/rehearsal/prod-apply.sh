@@ -5,10 +5,17 @@
 # the plan names. Plan rule 5.1: nothing it runs may print values, only counts.
 # The SQL goes through a pipe, not an argument: the rehearsal statement is too
 # long for one command-line argument.
+# Fails on a SQL error: curl alone exits 0 on an HTTP 4xx (and the management
+# API can even answer 200 with an error body), so the response is printed and
+# then checked with check-query-response.sh, which requires a JSON array (the
+# shape of a real result set) and exits non-zero otherwise.
 # Usage: bash scripts/rehearsal/prod-apply.sh <file.sql | "SQL">
 set -euo pipefail
-if [ -f "$1" ]; then cat "$1"; else printf '%s' "$1"; fi \
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+response="$( { if [ -f "$1" ]; then cat "$1"; else printf '%s' "$1"; fi; } \
   | jq -Rs '{query: ., read_only: false}' \
   | curl -sS -X POST "https://api.supabase.com/v1/projects/tjeapelvjlmbxafsmjef/database/query" \
       -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
-      --data-binary @-
+      --data-binary @- )"
+printf '%s\n' "$response"
+printf '%s' "$response" | bash "$dir/check-query-response.sh"
