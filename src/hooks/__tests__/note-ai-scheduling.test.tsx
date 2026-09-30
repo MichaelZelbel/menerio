@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 const state = vi.hoisted(() => ({
   job: null as null | { state: string; last_error?: string },
+  credits: null as null | { creditsGranted: number; remainingCredits: number; periodEnd: string },
   local: false,
   invoke: vi.fn(),
   rpc: vi.fn(),
@@ -74,7 +75,10 @@ vi.mock("@/components/notes/VersionHistoryPanel", () => ({ VersionHistoryPanel: 
 vi.mock("@/components/common/AiVisibilityButton", () => ({ AiVisibilityButton: () => null }));
 vi.mock("@/hooks/useNoteSharing", () => ({ useSharedNote: () => ({}), useShareNote: () => ({}), useUnshareNote: () => ({}), useCopyShareLink: () => ({}) }));
 vi.mock("@/hooks/useGitHubSync", () => ({ useGitHubConnection: () => ({}), useGitHubSyncExport: () => ({}), useSyncLogForNote: () => ({}) }));
-vi.mock("@/hooks/useAICreditsGate", () => ({ useAICreditsGate: () => ({ checkCredits: () => true }) }));
+vi.mock("@/hooks/useAICreditsGate", () => ({
+  useAICreditsGate: () => ({ checkCredits: () => true, credits: state.credits }),
+  creditsBlockedMessage: () => "Your AI credits for this period are used up.",
+}));
 vi.mock("@tiptap/react", () => ({ useEditor: (options: typeof state.editorOptions) => { state.editorOptions = options; return null; }, EditorContent: () => null }));
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import type { Note } from "../useNotes";
@@ -90,6 +94,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   state.local = false;
   state.job = null;
+  state.credits = null;
   localStorage.clear();
   state.row = { id: "note-1", user_id: "user-1", title: "", content: "", tags: [], is_trashed: false };
   state.invoke.mockReset().mockResolvedValue({ data: { accepted: true, queued: true }, error: null });
@@ -210,11 +215,21 @@ describe("browser note scheduling", () => {
     expect(state.save).not.toHaveBeenCalled();
     expect(state.invoke).not.toHaveBeenCalled();
   });
-  it.each([["pending", "Queued for indexing"], ["running", "Indexing…"], ["parked", "Indexing needs attention"], ["failed", "Indexing failed"]])("shows actual durable %s state even when the note still says processed", async (status, label) => {
+  it.each([["pending", "Queued for indexing"], ["running", "Indexing…"], ["parked", "Indexing paused, resumes on its own"], ["failed", "Indexing failed"]])("shows actual durable %s state even when the note still says processed", async (status, label) => {
     state.job = { state: status };
     const view = render(<NoteEditor note={{ ...editorNote, processing_status: "processed" }} />, { wrapper });
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(view.getByText(label)).toBeInTheDocument();
+  });
+
+  it("says a job parked for credits resumes when credits are back, never that it needs attention", async () => {
+    state.job = { state: "parked", last_error: "no_credit" };
+    state.credits = { creditsGranted: 100, remainingCredits: 0, periodEnd: "2026-10-01T00:00:00Z" };
+    const view = render(<NoteEditor note={{ ...editorNote, processing_status: "processed" }} />, { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    const label = view.getByText("Indexing resumes when credits are back");
+    expect(label).toHaveAttribute("title", "Your AI credits for this period are used up. This note is indexed automatically then.");
+    expect(view.queryByText(/needs attention/)).toBeNull();
   });
 
   it("flushes the last content and title save on tab hide without requesting AI", async () => {

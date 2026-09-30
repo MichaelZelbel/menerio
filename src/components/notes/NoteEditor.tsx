@@ -49,7 +49,8 @@ import { AiVisibilityButton } from "@/components/common/AiVisibilityButton";
 import { LinkToNoteDialog } from "./LinkToNoteDialog";
 import { NoteChatPanel } from "./NoteChatPanel";
 import { supabase } from "@/integrations/supabase/client";
-import { useAICreditsGate } from "@/hooks/useAICreditsGate";
+import { useAICreditsGate, creditsBlockedMessage } from "@/hooks/useAICreditsGate";
+import type { AICredits } from "@/hooks/useAICredits";
 import { useAuth } from "@/contexts/AuthContext";
 import { EditorToolbar } from "./EditorToolbar";
 import { Button } from "@/components/ui/button";
@@ -271,26 +272,37 @@ function SaveIndicator({ status, lastSavedAt }: SaveIndicatorProps) {
 }
 
 /** Per-note AI indexing state. Silence was the actual bug: users could not tell
- *  a processed note from one that was never indexed. */
-function ProcessingIndicator({ note }: { note: Pick<Note, "id" | "processing_status" | "processing_error" | "ai_visibility"> }) {
+ *  a processed note from one that was never indexed.
+ *  A parked job waits for AI credits (or a server-side pause) and is claimed
+ *  again on its own, so its label says what will happen, not "needs attention":
+ *  there is nothing the user can do on this note, and the credits banner above
+ *  already carries "Manage credits". */
+function ProcessingIndicator({ note, credits }: {
+  note: Pick<Note, "id" | "processing_status" | "processing_error" | "ai_visibility">;
+  credits: Pick<AICredits, "creditsGranted" | "remainingCredits" | "periodEnd"> | null;
+}) {
   const { data: job } = useNoteProcessingState(note.id);
   const status = job?.state === "completed" ? "processed" : (job?.state ?? note.processing_status);
   if (!status || status === "processed") return null;
-  const map: Record<string, { label: string; className: string }> = {
+  const outOfCredits = !!credits && (credits.creditsGranted === 0 || credits.remainingCredits <= 0);
+  const waiting = outOfCredits
+    ? { label: "Indexing resumes when credits are back", className: "bg-muted text-muted-foreground", hint: `${creditsBlockedMessage(credits!)} This note is indexed automatically then.` }
+    : { label: "Indexing paused, resumes on its own", className: "bg-muted text-muted-foreground", hint: "Indexing is paused for now. This note is indexed automatically when it resumes." };
+  const map: Record<string, { label: string; className: string; hint?: string }> = {
     processing: { label: "Indexing…", className: "bg-muted text-muted-foreground" },
     running: { label: "Indexing…", className: "bg-muted text-muted-foreground" },
     pending: { label: "Queued for indexing", className: "bg-muted text-muted-foreground" },
-    parked: { label: "Indexing needs attention", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+    parked: waiting,
     skipped_short: { label: "Not indexed · too short", className: "bg-muted text-muted-foreground" },
     skipped_empty: { label: "Not indexed · empty", className: "bg-muted text-muted-foreground" },
-    skipped_no_credits: { label: "Not indexed · no AI credits", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+    skipped_no_credits: waiting,
     failed: { label: "Indexing failed", className: "bg-destructive/10 text-destructive" },
   };
   const entry = map[status];
   if (!entry) return null;
   return (
     <span
-      title={job?.last_error || note.processing_error || entry.label}
+      title={entry.hint || job?.last_error || note.processing_error || entry.label}
       className={cn("text-[10px] shrink-0 rounded px-1.5 py-0.5", entry.className)}
     >
       {entry.label}
@@ -416,7 +428,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const copyShareLink = useCopyShareLink();
   const duplicateNote = useDuplicateNote();
   const { data: sharedNote } = useSharedNote(note.id);
-  const { checkCredits } = useAICreditsGate();
+  const { checkCredits, credits } = useAICreditsGate();
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1732,30 +1744,34 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
             Uploading…
           </div>
         )}
-        <div className="flex items-center gap-2 mb-4">
+        {/* The title gets the whole row. Status lives on its own line below:
+            beside the title it took the room the title needed, so on a narrow
+            window the end of the title scrolled out of sight behind it. */}
+        <div className="mb-4">
           <input aria-label="Note title"
             ref={titleInputRef}
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
             placeholder="Untitled"
-            className="flex-1 text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40"
+            className="w-full min-w-0 text-2xl font-bold font-display bg-transparent border-none outline-none placeholder:text-muted-foreground/40"
             disabled={note.is_trashed || note.is_external}
           />
-          {!note.is_trashed && !note.is_external && (
-            <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} tick={savedTick} />
-          )}
-          {!note.is_trashed && <ProcessingIndicator note={note} />}
-
-          {note.entity_type && (
-            <Badge variant="secondary" className="text-[10px] shrink-0">
-              {note.entity_type}
-            </Badge>
-          )}
-          {note.is_external && note.source_app && (
-            <Badge variant="outline" className="text-[10px] shrink-0 bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30">
-              {note.source_app}
-            </Badge>
-          )}
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
+            {!note.is_trashed && !note.is_external && (
+              <SaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} tick={savedTick} />
+            )}
+            {!note.is_trashed && <ProcessingIndicator note={note} credits={credits} />}
+            {note.entity_type && (
+              <Badge variant="secondary" className="text-[10px] shrink-0">
+                {note.entity_type}
+              </Badge>
+            )}
+            {note.is_external && note.source_app && (
+              <Badge variant="outline" className="text-[10px] shrink-0 bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30">
+                {note.source_app}
+              </Badge>
+            )}
+          </div>
         </div>
         {/* Web clip snapshot — render at the top so it's the first thing the user sees */}
         {note.source_app === "singlefile" &&
