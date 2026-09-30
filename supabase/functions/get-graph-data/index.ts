@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildAliasMap, resolvePeopleDetailed, type Contact } from "../_shared/graph-matching.ts";
 import { selectAllRows } from "../_shared/paged-select.ts";
+import { isGodspeedMirror } from "../_shared/mc-source.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -63,6 +64,7 @@ interface NoteRow {
   tags: string[] | null;
   entity_type: string | null;
   created_at: string;
+  source_app?: string | null;
 }
 
 interface OutNode {
@@ -334,6 +336,7 @@ Deno.serve(async (req: Request) => {
       topic,
       person,
       include_hidden = false,
+      include_godspeed = false,
     } = body;
 
     const contacts = await loadContacts(user.id);
@@ -397,13 +400,19 @@ Deno.serve(async (req: Request) => {
     // Full graph mode
     let notesQuery = supabase
       .from("notes")
-      .select("id, title, metadata, tags, entity_type, created_at, ai_visibility")
+      .select("id, title, metadata, tags, entity_type, created_at, ai_visibility, source_app")
       .eq("user_id", user.id)
       .eq("is_trashed", false)
       .order("created_at", { ascending: false })
       // Bounded: the body's limit was passed through as is.
       .limit(Math.min(Math.max(Number(limit) || 200, 1), 2000));
     if (!include_hidden) notesQuery = notesQuery.eq("ai_visibility", "visible");
+    // Mirrored mission control files are left out unless asked for, and in the
+    // query, before the limit. The graph shows the newest notes, and a mission
+    // control copying hundreds of files in at once (407 skill files in the week
+    // of 2026-09-23) otherwise fills every slot: the user's own notes are still
+    // there but no longer drawn. Same filter as the GitHub export.
+    if (!include_godspeed) notesQuery = notesQuery.or("source_app.is.null,source_app.not.ilike.godspeed");
 
     if (note_type) {
       notesQuery = notesQuery.eq("entity_type", note_type);
@@ -413,6 +422,11 @@ Deno.serve(async (req: Request) => {
     if (!notes || notes.length === 0) return json({ nodes: [], edges: [] });
 
     let filteredNotes = notes as NoteRow[];
+    // The query is the cheap half; isGodspeedMirror also forgives the stray
+    // case and spaces an ILIKE would not, since another program writes source_app.
+    if (!include_godspeed) {
+      filteredNotes = filteredNotes.filter((n) => !isGodspeedMirror(n.source_app));
+    }
     if (topic) {
       filteredNotes = filteredNotes.filter((n) => {
         const t = (n.metadata as any)?.topics;

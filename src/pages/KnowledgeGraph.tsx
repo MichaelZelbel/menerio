@@ -108,6 +108,7 @@ interface Filters {
   noteTypes: Set<string>;
   showOrphans: boolean;
   showHiddenFromAi: boolean;
+  showMissionControl: boolean;
   sizeMode: "connections" | "uniform";
   labelMode: "auto" | "hover" | "always" | "never";
 }
@@ -139,6 +140,7 @@ export default function KnowledgeGraph() {
     noteTypes: new Set(ALL_NOTE_TYPES),
     showOrphans: false,
     showHiddenFromAi: false,
+    showMissionControl: false,
     sizeMode: "connections",
     labelMode: "auto",
   });
@@ -150,6 +152,7 @@ export default function KnowledgeGraph() {
   const { data: graphData, isLoading, isError, error: graphError, refetch: refetchGraph } = useGraphData({
     limit: 200,
     include_hidden: filters.showHiddenFromAi,
+    include_godspeed: filters.showMissionControl,
   });
 
   // Measure the canvas container. It is the flex-1 column between the side
@@ -726,6 +729,16 @@ export default function KnowledgeGraph() {
                       />
                       <Label className="text-[11px]" title="Include notes you've hidden from AI features">
                         Show hidden from AI
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={filters.showMissionControl}
+                        onCheckedChange={(v) => setFilters((f) => ({ ...f, showMissionControl: v }))}
+                        className="scale-75"
+                      />
+                      <Label className="text-[11px]" title="Include files copied in from a connected Mission Control">
+                        Show Mission Control files
                       </Label>
                     </div>
                     <div className="space-y-1">

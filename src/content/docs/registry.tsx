@@ -197,7 +197,8 @@ const knowledgeGraph: DocPage = {
   content: () => (
     <>
       <h2 id="overview">Overview</h2>
-      <p>The Note Graph is a visual map of every note in your vault and how they relate. Open it from the sidebar under <strong>Note Graph</strong>. Each node is a note; each edge is a connection the AI discovered or you created manually.</p>
+      <p>The Note Graph is a visual map of your notes and how they relate. Open it from the sidebar under <strong>Note Graph</strong>. Each node is a note; each edge is a connection the AI discovered or you created manually.</p>
+      <p>It draws your 200 most recent notes. Files copied in from a connected Mission Control are left out, so they never crowd out your own notes; turn on <strong>Show Mission Control files</strong> under Display to include them.</p>
       <Callout type="tip">Click any node to navigate to that note. Hover to highlight its direct connections.</Callout>
 
       <h2 id="connection-types">Connection Types</h2>

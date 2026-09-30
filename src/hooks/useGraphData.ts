@@ -44,6 +44,8 @@ export interface GraphDataOptions {
   topic?: string;
   person?: string;
   include_hidden?: boolean;
+  /** Include notes mirrored from a mission control folder; left out by default. */
+  include_godspeed?: boolean;
 }
 
 /**
