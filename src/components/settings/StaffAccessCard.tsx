@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BRAND } from "@/lib/brand";
 
 const LABELS: Record<string, string> = {
   moderation_review: "Our automatic check read a note you shared publicly",
@@ -39,14 +40,14 @@ export function StaffAccessCard() {
       <CardHeader>
         <CardTitle>Staff access</CardTitle>
         <CardDescription>
-          Every action Menerio staff take on your account, and every time our automatic check reads a note you shared publicly, is listed here.
+          Every action {BRAND.name} staff take on your account, and every time our automatic check reads a note you shared publicly, is listed here.
         </CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? null : isError ? (
           <p className="text-sm text-muted-foreground">The staff access list could not be loaded. Please try again later.</p>
         ) : !data?.length ? (
-          <p className="text-sm text-muted-foreground">Nobody at Menerio has taken any action on your account.</p>
+          <p className="text-sm text-muted-foreground">Nobody at {BRAND.name} has taken any action on your account.</p>
         ) : (
           <ul className="space-y-2">
             {data.map((e, i) => (

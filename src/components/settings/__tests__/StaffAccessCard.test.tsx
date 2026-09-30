@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BRAND } from "@/lib/brand";
 
 const rpc = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...a: unknown[]) => rpc(...a) } }));
@@ -18,7 +19,8 @@ describe("StaffAccessCard", () => {
   it("says so plainly when nobody has acted on the account", async () => {
     rpc.mockResolvedValue({ data: [], error: null });
     renderCard();
-    expect(await screen.findByText("Nobody at Menerio has taken any action on your account.")).toBeInTheDocument();
+    const expectedText = `Nobody at ${BRAND.name} has taken any action on your account.`;
+    expect(await screen.findByText(expectedText)).toBeInTheDocument();
     expect(rpc).toHaveBeenCalledWith("my_staff_access_log");
   });
 
