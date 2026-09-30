@@ -40,6 +40,12 @@ const Privacy = () => {
                 Collecting and Using Your Personal Data
               </button>
               <button
+                onClick={() => scrollToSection("who-can-see")}
+                className="block text-muted-foreground hover:text-foreground transition-colors text-left"
+              >
+                Who Can See Your Data
+              </button>
+              <button
                 onClick={() => scrollToSection("data-processors")}
                 className="block text-muted-foreground hover:text-foreground transition-colors text-left"
               >
@@ -79,7 +85,7 @@ const Privacy = () => {
             <div>
               <h1 className="text-4xl font-bold text-foreground mb-2">Privacy Policy</h1>
               <p className="text-muted-foreground">
-                <strong>Last updated:</strong> September 22, 2026
+                <strong>Last updated:</strong> September 30, 2026
               </p>
             </div>
             <Button
@@ -194,6 +200,19 @@ const Privacy = () => {
                 <li><strong className="text-foreground">With other users:</strong> when You share personal information or otherwise interact in the public areas with other users, such information may be viewed by all users and may be publicly distributed outside.</li>
                 <li><strong className="text-foreground">With Your consent:</strong> We may disclose Your personal information for any other purpose with Your consent.</li>
               </ul>
+
+              <div id="who-can-see">
+                <h3 className="text-xl font-medium text-foreground mt-6 mb-3">Who Can See Your Data</h3>
+                <p>
+                  Your notes, people, moments and everything else you keep in {BRAND.name} are visible only to you. Other users cannot see them. {BRAND.name}'s administrators have no screen and no database permission that shows them.
+                </p>
+                <p className="mt-2">There are three exceptions, and we want you to know them:</p>
+                <ul className="list-disc pl-6 space-y-2 mt-2">
+                  <li><strong className="text-foreground">Notes you share publicly.</strong> Anyone with the link can read a note you share. An automatic check reads it to keep public links free of abuse.</li>
+                  <li><strong className="text-foreground">AI features.</strong> To summarise, tag and search your notes, {BRAND.name} sends their text to the AI services that do the work: today OpenRouter, which passes it to the maker of the model (DeepSeek, Google, OpenAI or Anthropic), and Mistral. They receive it to answer that request, under their own privacy terms.</li>
+                  <li><strong className="text-foreground">The servers themselves.</strong> Like every online service that is not end-to-end encrypted, the people who run {BRAND.name}'s servers can technically reach the database. We do not look. Every action our staff take on your account, and every time our automatic check reads a note you shared, is listed in Settings, under Account, "Staff access".</li>
+                </ul>
+              </div>
 
               <h3 className="text-xl font-medium text-foreground mt-6 mb-3">Retention of Your Personal Data</h3>
               <p>
@@ -360,6 +379,20 @@ const Privacy = () => {
                     <strong className="text-foreground">DPA:</strong>{" "}
                     <a href="https://trust.openrouter.ai/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
                       OpenRouter Trust &amp; Data Protection
+                    </a>
+                  </p>
+                </div>
+
+                <div className="border border-border rounded-lg p-4">
+                  <h4 className="text-lg font-medium text-foreground mb-2">Mistral AI</h4>
+                  <p className="text-sm"><strong className="text-foreground">Role:</strong> AI inference provider (text analysis and reading text in images).</p>
+                  <p className="text-sm mt-1">
+                    Mistral AI acts as a Data Processor under GDPR Article 28 for data sent to its API for AI inference, such as note text and images submitted for text recognition.
+                  </p>
+                  <p className="text-sm mt-2">
+                    <strong className="text-foreground">DPA:</strong>{" "}
+                    <a href="https://legal.mistral.ai/terms/data-processing-addendum" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                      Mistral AI Data Processing Addendum
                     </a>
                   </p>
                 </div>
