@@ -5425,6 +5425,10 @@ export type Database = {
         Args: { p_source_path: string; p_target_parent_path: string }
         Returns: Json
       }
+      my_staff_access_log: {
+        Args: Record<PropertyKey, never>
+        Returns: { action: string; actor_kind: string; created_at: string; note_id: string | null }[]
+      }
       note_ai_fingerprint: { Args: { _input: Json }; Returns: string }
       note_ai_input: {
         Args: { _note_id: string; _pipeline: string; _user_id: string }

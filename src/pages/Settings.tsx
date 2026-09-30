@@ -48,6 +48,7 @@ import { AISuggestionPreferences } from "@/components/settings/AISuggestionPrefe
 import { SingleFileIntegration } from "@/components/settings/SingleFileIntegration";
 import { IntegrationsOverview } from "@/components/settings/IntegrationsOverview";
 import { AiVisibilitySettings } from "@/components/settings/AiVisibilitySettings";
+import { StaffAccessCard } from "@/components/settings/StaffAccessCard";
 import { BRAND } from "@/lib/brand";
 import { dbErrorMessage, functionErrorMessage } from "@/lib/function-error";
 
@@ -348,7 +349,7 @@ export default function Settings() {
         </TabsContent>
 
         {/* ── Account Tab ── */}
-        <TabsContent value="account">
+        <TabsContent value="account" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Account</CardTitle>
@@ -413,6 +414,7 @@ export default function Settings() {
               </form>
             </CardContent>
           </Card>
+          <StaffAccessCard />
         </TabsContent>
 
         {/* ── Integrations Tab ── */}
