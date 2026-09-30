@@ -17,7 +17,10 @@ const ARRAY_BODY = JSON.stringify([{ count: 3 }]);
 function withFakeCurl(body: string, run: (env: NodeJS.ProcessEnv) => void) {
   const dir = mkdtempSync(join(tmpdir(), "fake-curl-"));
   const curlPath = join(dir, "curl");
-  writeFileSync(curlPath, `#!/bin/bash\nprintf '%s' "$FAKE_CURL_BODY"\n`);
+  // Real curl reads the entire request body from stdin when --data-binary @- is used.
+  // This fake must do the same, else prod-apply.sh with set -euo pipefail causes jq to
+  // receive SIGPIPE when the pipe breaks on Linux, exiting 141 before stdout reaches the test.
+  writeFileSync(curlPath, `#!/bin/bash\ncat > /dev/null\nprintf '%s' "$FAKE_CURL_BODY"\n`);
   chmodSync(curlPath, 0o755);
   try {
     run({
