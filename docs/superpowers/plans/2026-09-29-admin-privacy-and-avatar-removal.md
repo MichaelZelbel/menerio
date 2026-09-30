@@ -1,6 +1,6 @@
 # Admin Privacy (Level 1) and Avatar Removal Implementation Plan
 
-**Status (2026-09-30): phases 1 and 2 are live; Task 8 waits for Michael's approval of the wording; Task 11 runs on or after 2026-10-07** (Godspeed obligation `menerio-privacy-phase-3`).
+**Status (2026-09-30): phases 1 and 2 are live; Task 8 is live (wording approved by Michael, PR #5); Task 11 runs on or after 2026-10-07** (Godspeed obligation `menerio-privacy-phase-3`).
 
 - Tasks 1-7 merged in PR #3 (`06525a75`). Migrations 20261001100000, 100100, 100200, 100300 and 100400 are applied and recorded in `schema_migrations`, each in one transaction with its record. Frontend published through the Lovable deploy; the six functions are deployed.
 - Verified live: as the admin session, other users' note chunks, image text, profiles, agent instructions, profile views, categories, activity and notes all read 0 rows; `profile_entries_archive` refuses; the directory returns every account; the Admin page, the Staff access card, the moderation review (live read, logged, no reason text) and a throwaway sign-up and self-deletion all work. Avatars: 0 files, bucket private, no rules, sign-up copies no photo URL.
