@@ -24,8 +24,18 @@ serve(async (req) => {
 
     // Create client with user's token to get their identity
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
+    // The hosted edge runtime sets SUPABASE_ANON_KEY (never the singular
+    // SUPABASE_PUBLISHABLE_KEY); a local .env may still only set the latter.
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    if (!supabaseAnonKey) {
+      console.error("[DELETE-ACCOUNT] no anon key in the environment");
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },

@@ -220,7 +220,15 @@ export async function loadFunction(
     name: "synthetic-platform",
     setup(b) {
       b.onResolve({ filter: /^(https:\/\/esm\.sh\/@supabase\/|npm:@supabase\/)/ }, (args) => ({ path: args.path, namespace: "fake-supabase" }));
-      b.onLoad({ filter: /.*/, namespace: "fake-supabase" }, () => ({ contents: "export const createClient = () => globalThis.testClient", loader: "js" }));
+      // Real @supabase/supabase-js throws "supabaseKey is required." when the
+      // key argument is missing; reproduce that one check so a function that
+      // reads an env var the hosted runtime never sets (and so calls
+      // createClient(url, undefined)) fails here exactly as it does in
+      // production, instead of silently getting the fake client anyway.
+      b.onLoad({ filter: /.*/, namespace: "fake-supabase" }, () => ({
+        contents: "export const createClient = (url, key) => { if (!key) throw new Error('supabaseKey is required.'); return globalThis.testClient; }",
+        loader: "js",
+      }));
       b.onResolve({ filter: /^https:\/\/deno\.land\/std@[^/]+\/http\/server\.ts$/ }, (args) => ({ path: args.path, namespace: "fake-std" }));
       b.onLoad({ filter: /.*/, namespace: "fake-std" }, () => ({ contents: "export const serve = (fn) => globalThis.Deno.serve(fn)", loader: "js" }));
       (options.stubs ?? []).forEach((stub, i) => {
