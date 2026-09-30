@@ -18,4 +18,4 @@ response="$( { if [ -f "$1" ]; then cat "$1"; else printf '%s' "$1"; fi; } \
       -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
       --data-binary @- )"
 printf '%s\n' "$response"
-printf '%s' "$response" | "$dir/check-query-response.sh"
+printf '%s' "$response" | bash "$dir/check-query-response.sh"

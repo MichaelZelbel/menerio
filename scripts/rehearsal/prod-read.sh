@@ -13,4 +13,4 @@ response="$(curl -sS -X POST "https://api.supabase.com/v1/projects/tjeapelvjlmbx
   -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
   --data "$(jq -n --arg q "$1" '{query: $q, read_only: true}')")"
 printf '%s\n' "$response"
-printf '%s' "$response" | "$dir/check-query-response.sh"
+printf '%s' "$response" | bash "$dir/check-query-response.sh"
