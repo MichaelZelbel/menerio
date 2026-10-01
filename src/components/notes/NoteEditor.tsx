@@ -506,6 +506,11 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
   const pendingSaveTitleRef = useRef<string | null>(null);
   const activeNoteIdRef = useRef(note.id);
   const flushSavesRef = useRef<() => void>(() => {});
+  // Markdown already stored for this note, as the editor serializes it, and
+  // whether the user has touched the editor since it loaded. Together they
+  // keep merely opening a note from triggering a save.
+  const storedBaselineRef = useRef<string>(normalizeSavedMarkdown(note.content));
+  const userInteractedRef = useRef(false);
 
   // A note that was just created is empty. Put the caret in its title: the
   // "New Note" menu item that created it unmounts, and focus fell back to the
@@ -705,7 +710,17 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       }),
       TaskListShortcut,
     ],
+    onCreate: ({ editor: e }) => {
+      storedBaselineRef.current = normalizeSavedMarkdown(editorToMarkdown(e));
+    },
     editorProps: {
+      handleDOMEvents: {
+        keydown: () => { userInteractedRef.current = true; return false; },
+        mousedown: () => { userInteractedRef.current = true; return false; },
+        touchstart: () => { userInteractedRef.current = true; return false; },
+        paste: () => { userInteractedRef.current = true; return false; },
+        drop: () => { userInteractedRef.current = true; return false; },
+      },
       handleClick: (_view, _pos, event) => {
         const target = event.target as HTMLElement;
         const wikilinkEl = target.closest?.(".wikilink-node") as HTMLElement | null;
@@ -746,6 +761,31 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     editable: !note.is_trashed && !note.is_external,
     onUpdate: ({ editor: e }) => {
       const md = editorToMarkdown(e);
+      // Opening a note must not save it. Updates the user did not cause (the
+      // editor normalizing freshly loaded content before any keystroke, click,
+      // paste or drop) only move the baseline. Any update whose Markdown equals
+      // what is already stored is likewise a no-op.
+      if (!userInteractedRef.current && !e.isFocused) {
+        storedBaselineRef.current = normalizeSavedMarkdown(md);
+        lastLocalContentRef.current = md;
+        return;
+      }
+      const normalizedMd = normalizeSavedMarkdown(md);
+      const stored = lastSavedContentRef.current !== null
+        ? normalizeSavedMarkdown(lastSavedContentRef.current)
+        : storedBaselineRef.current;
+      if (normalizedMd === stored || normalizedMd === storedBaselineRef.current) {
+        lastLocalContentRef.current = md;
+        if (contentSaveTimer.current) {
+          clearTimeout(contentSaveTimer.current);
+          contentSaveTimer.current = null;
+        }
+        if (pendingSaveContentRef.current !== null && !savingRef.current) {
+          pendingSaveContentRef.current = null;
+          setSaveStatus((s) => (s === "saving" ? (lastSavedAt ? "saved" : "idle") : s));
+        }
+        return;
+      }
       // Note: previously we skipped non-focused updates that appeared to remove links,
       // but that silently dropped legitimate user edits (e.g. continuation lines under
       // list items). Always persist what the editor produced.
@@ -903,6 +943,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const incomingTs = note.updated_at ? new Date(note.updated_at).getTime() : 0;
     if (noteChanged) {
       lastSavedUpdatedAtRef.current = incomingTs;
+      storedBaselineRef.current = normalizeSavedMarkdown(note.content);
+      userInteractedRef.current = false;
       lastSavedContentRef.current = null;
       queuedContentRef.current = null;
     } else if (incomingTs && incomingTs < lastSavedUpdatedAtRef.current) {
