@@ -24,8 +24,8 @@ if (typeof window !== "undefined") Object.defineProperty(window, "matchMedia", {
 if (typeof Element !== "undefined") {
   const nativeMatches = Element.prototype.matches;
   const TOP_LAYER = /^\s*:(modal|popover-open|fullscreen)\s*$/;
-  Element.prototype.matches = function matches(this: Element, selector: string) {
+  Element.prototype.matches = function matches(this: Element, selector: string): boolean {
     if (TOP_LAYER.test(selector)) return false;
     return nativeMatches.call(this, selector);
-  };
+  } as typeof Element.prototype.matches;
 }

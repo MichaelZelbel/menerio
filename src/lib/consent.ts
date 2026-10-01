@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 // Consent for the one optional thing on this site: the host's visitor statistics
 // (Lovable's analytics script, /~flock.js, which the host injects into every page).
 // We cannot remove that script, so GATE_SCRIPT runs first, inline in <head> (the

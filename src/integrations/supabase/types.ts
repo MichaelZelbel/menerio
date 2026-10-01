@@ -1707,44 +1707,6 @@ export type Database = {
           },
         ]
       }
-      group_briefings: {
-        Row: {
-          briefing_markdown: string
-          created_at: string
-          generated_at: string
-          group_id: string
-          id: string
-          period_days: number
-          user_id: string
-        }
-        Insert: {
-          briefing_markdown: string
-          created_at?: string
-          generated_at?: string
-          group_id: string
-          id?: string
-          period_days?: number
-          user_id?: string
-        }
-        Update: {
-          briefing_markdown?: string
-          created_at?: string
-          generated_at?: string
-          group_id?: string
-          id?: string
-          period_days?: number
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "group_briefings_group_id_fkey"
-            columns: ["group_id"]
-            isOneToOne: false
-            referencedRelation: "contact_groups"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       godspeed_api_keys: {
         Row: {
           created_at: string | null
@@ -1974,6 +1936,44 @@ export type Database = {
             columns: ["connection_id"]
             isOneToOne: false
             referencedRelation: "godspeed_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      group_briefings: {
+        Row: {
+          briefing_markdown: string
+          created_at: string
+          generated_at: string
+          group_id: string
+          id: string
+          period_days: number
+          user_id: string
+        }
+        Insert: {
+          briefing_markdown: string
+          created_at?: string
+          generated_at?: string
+          group_id: string
+          id?: string
+          period_days?: number
+          user_id?: string
+        }
+        Update: {
+          briefing_markdown?: string
+          created_at?: string
+          generated_at?: string
+          group_id?: string
+          id?: string
+          period_days?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_briefings_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "contact_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -2354,7 +2354,7 @@ export type Database = {
           ai_category: string | null
           ai_confidence: number | null
           ai_reason: string | null
-          content_snapshot: string
+          content_snapshot: string | null
           created_at: string
           id: string
           item_id: string
@@ -2368,7 +2368,7 @@ export type Database = {
           ai_category?: string | null
           ai_confidence?: number | null
           ai_reason?: string | null
-          content_snapshot: string
+          content_snapshot?: string | null
           created_at?: string
           id?: string
           item_id: string
@@ -2382,7 +2382,7 @@ export type Database = {
           ai_category?: string | null
           ai_confidence?: number | null
           ai_reason?: string | null
-          content_snapshot?: string
+          content_snapshot?: string | null
           created_at?: string
           id?: string
           item_id?: string
@@ -3411,7 +3411,7 @@ export type Database = {
           },
         ]
       }
-      profile_entries: {
+      profile_entries_archive: {
         Row: {
           category_id: string
           contact_id: string | null
@@ -3468,24 +3468,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "profile_entries_category_id_fkey"
-            columns: ["category_id"]
-            isOneToOne: false
-            referencedRelation: "profile_categories"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "profile_entries_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "profile_entries_derived_from_claim_id_fkey"
-            columns: ["derived_from_claim_id"]
-            isOneToOne: false
-            referencedRelation: "claims"
             referencedColumns: ["id"]
           },
           {
@@ -4723,6 +4709,32 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_world_claims: {
+        Row: {
+          attribute: string | null
+          cardinality: string | null
+          category: string | null
+          confidence: string | null
+          created_at: string | null
+          evidence_quote: string | null
+          id: string | null
+          object_id: string | null
+          origin: string | null
+          rank: string | null
+          review_by: string | null
+          source_kind: string | null
+          source_ref: string | null
+          source_table: string | null
+          subject_id: string | null
+          subject_kind: string | null
+          updated_at: string | null
+          user_id: string | null
+          valid_from: string | null
+          valid_to: string | null
+          value: string | null
+        }
+        Relationships: []
+      }
       llm_spend_daily: {
         Row: {
           calls: number | null
@@ -4896,16 +4908,34 @@ export type Database = {
     }
     Functions: {
       admin_account_counts: {
-        Args: Record<PropertyKey, never>
-        Returns: { new_users_7d: number; paid_users: number; total_users: number }[]
+        Args: never
+        Returns: {
+          new_users_7d: number
+          paid_users: number
+          total_users: number
+        }[]
       }
       admin_user_directory: {
-        Args: { p_limit?: number; p_offset?: number; p_role?: Database["public"]["Enums"]["app_role"] | null; p_search?: string | null }
-        Returns: { created_at: string; display_name: string | null; id: string; role: Database["public"]["Enums"]["app_role"] | null; total_count: number }[]
+        Args: {
+          p_limit?: number
+          p_offset?: number
+          p_role?: Database["public"]["Enums"]["app_role"]
+          p_search?: string
+        }
+        Returns: {
+          created_at: string
+          display_name: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          total_count: number
+        }[]
       }
       admin_user_names: {
         Args: { p_ids: string[] }
-        Returns: { display_name: string | null; id: string }[]
+        Returns: {
+          display_name: string
+          id: string
+        }[]
       }
       ai_can_see: {
         Args: { _id: string; _kind: string; _user_id: string }
@@ -4956,7 +4986,6 @@ export type Database = {
         }
         Returns: boolean
       }
-      backfill_accumulator_profile_entries: { Args: never; Returns: Json }
       begin_note_ai_stage: {
         Args: {
           _job_id: string
@@ -5032,11 +5061,6 @@ export type Database = {
         }
         Returns: Json
       }
-      cleanup_profile_duplicates: {
-        Args: { _contact_id: string; _user_id: string }
-        Returns: Json
-      }
-      cleanup_profile_token_duplicates: { Args: never; Returns: Json }
       create_note_folder: { Args: { p_path: string }; Returns: Json }
       deduct_ai_tokens:
         | {
@@ -5108,10 +5132,7 @@ export type Database = {
         Args: { p_contact_id: string; p_reason?: string; p_user_id: string }
         Returns: undefined
       }
-      fact_today: {
-        Args: { p_user_id: string }
-        Returns: string
-      }
+      fact_today: { Args: { p_user_id: string }; Returns: string }
       fact_writes_paused: { Args: never; Returns: boolean }
       fail_note_ai_job: {
         Args: {
@@ -5135,6 +5156,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      fold_contact_into_self: {
+        Args: { p_contact_id: string; p_user_id: string }
+        Returns: string
+      }
       get_cron_secret: { Args: never; Returns: string }
       get_note_ai_job_snapshot: {
         Args: { _job_id: string; _lease_id: string; _user_id: string }
@@ -5153,13 +5178,6 @@ export type Database = {
           p_lease: string
           p_success?: boolean
           p_user: string
-        }
-        Returns: boolean
-      }
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
         }
         Returns: boolean
       }
@@ -5257,6 +5275,13 @@ export type Database = {
       godspeed_connect_view: {
         Args: { p_request_id: string; p_user_id: string }
         Returns: Json
+      }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
       }
       increment_collection_template_usage: {
         Args: { p_slug: string }
@@ -5426,8 +5451,13 @@ export type Database = {
         Returns: Json
       }
       my_staff_access_log: {
-        Args: Record<PropertyKey, never>
-        Returns: { action: string; actor_kind: string; created_at: string; note_id: string | null }[]
+        Args: never
+        Returns: {
+          action: string
+          actor_kind: string
+          created_at: string
+          note_id: string
+        }[]
       }
       note_ai_fingerprint: { Args: { _input: Json }; Returns: string }
       note_ai_input: {
@@ -5459,34 +5489,11 @@ export type Database = {
           title: string
         }[]
       }
-      profile_audit_apply_merge: {
-        Args: {
-          _keep_id: string
-          _label: string
-          _reason: string
-          _remove_ids: string[]
-          _run_id: string
-          _value: string
-        }
-        Returns: Json
-      }
       profile_audit_mark_dirty: {
         Args: { _contact_id: string; _user_id: string }
         Returns: undefined
       }
-      profile_audit_rollback_merge: {
-        Args: { _merge_id: string }
-        Returns: Json
-      }
       profile_canonical_label: { Args: { t: string }; Returns: string }
-      profile_dedup_sweep: {
-        Args: {
-          _all_contacts?: boolean
-          _contact_id?: string
-          _user_id: string
-        }
-        Returns: Json
-      }
       profile_dedup_value_against_keys: {
         Args: { _seen_keys: string[]; _value: string }
         Returns: string
@@ -5497,15 +5504,6 @@ export type Database = {
       }
       profile_duplicate_scope_key: { Args: { _label: string }; Returns: string }
       profile_entry_norm_text: { Args: { p_value: string }; Returns: string }
-      profile_existing_token_keys: {
-        Args: {
-          _contact_id: string
-          _exclude_id?: string
-          _label: string
-          _user_id: string
-        }
-        Returns: string[]
-      }
       profile_fact_label_key: { Args: { t: string }; Returns: string }
       profile_fact_text_key: { Args: { t: string }; Returns: string }
       profile_fact_token_key: { Args: { t: string }; Returns: string }
@@ -5539,27 +5537,9 @@ export type Database = {
       }
       profile_norm_label: { Args: { t: string }; Returns: string }
       profile_norm_value: { Args: { t: string }; Returns: string }
-      profile_resolve_label: {
-        Args: {
-          _category_id: string
-          _category_slug: string
-          _contact_id: string
-          _label: string
-          _user_id: string
-        }
-        Returns: string
-      }
       profile_split_fact_value: {
         Args: { p_label: string; p_value: string }
         Returns: string[]
-      }
-      profile_subset_label_sweep: {
-        Args: {
-          _all_contacts?: boolean
-          _contact_id?: string
-          _user_id: string
-        }
-        Returns: Json
       }
       profile_token_key_contains: {
         Args: { subset_key: string; superset_key: string }
@@ -5593,6 +5573,20 @@ export type Database = {
         Returns: number
       }
       reconcile_note_folders: { Args: never; Returns: Json }
+      record_content_strike: {
+        Args: { p_limit: number; p_reason: string; p_user_id: string }
+        Returns: number
+      }
+      record_staff_access: {
+        Args: {
+          p_action: string
+          p_actor: string
+          p_actor_kind: string
+          p_note_id?: string
+          p_subject: string
+        }
+        Returns: string
+      }
       relationship_bond_group: { Args: { p: string }; Returns: string }
       relationship_canonical_label: { Args: { p: string }; Returns: string }
       relationship_inverse_label: { Args: { p: string }; Returns: string }
@@ -5679,6 +5673,10 @@ export type Database = {
       }
       wiki_resync_links: { Args: { p_page_id: string }; Returns: undefined }
       wiki_rollback_revision: { Args: { p_revision_id: string }; Returns: Json }
+      wiki_rollback_revision_for: {
+        Args: { p_revision_id: string; p_user_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "free" | "premium" | "premium_gift" | "admin"
