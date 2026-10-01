@@ -943,6 +943,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const incomingTs = note.updated_at ? new Date(note.updated_at).getTime() : 0;
     if (noteChanged) {
       lastSavedUpdatedAtRef.current = incomingTs;
+      storedBaselineRef.current = normalizeSavedMarkdown(note.content);
+      userInteractedRef.current = false;
       lastSavedContentRef.current = null;
       queuedContentRef.current = null;
     } else if (incomingTs && incomingTs < lastSavedUpdatedAtRef.current) {
