@@ -114,6 +114,9 @@ import { openExternalUrl } from "@/lib/safe-url";
 import { normalizeNoteContent, stripLeadingH1, coalesceTaskList, looksLikeHtml } from "@/lib/note-content";
 import { markdownToHtml, tiptapJsonToMarkdown } from "@/utils/markdown-converter";
 import { resolveAttachmentImagesInHtml } from "@/lib/upload-attachment";
+import { resolveEditorAttachments, openSavedNoteTab } from "@/lib/editor-async-safety";
+import { isLocalFirstActive } from "@/sync/sync-health";
+import { getDb } from "@/sync/db";
 import { buildTitleMap, resolveWikilinksInHtml } from "@/lib/wikilink-resolver";
 import { escapeLike, fetchAllPages, pgOrValue } from "@/lib/postgrest";
 import { dbErrorMessage } from "@/lib/function-error";
@@ -562,42 +565,45 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     note.updated_at ? new Date(note.updated_at).getTime() : 0,
   );
 
+  const savePromiseRef = useRef<Promise<void> | null>(null);
+  const titleSavePromiseRef = useRef<Promise<unknown> | null>(null);
   const saveContentNow = useCallback(
-    (md: string) => {
+    (md: string, sourceNoteId = note.id) => {
       if (savingRef.current) {
         queuedContentRef.current = md;
         return;
       }
       savingRef.current = true;
       setSaveStatus("saving");
-      updateNote.mutate(
-        { id: note.id, content: md },
-        {
-          onSuccess: (saved) => {
-            savingRef.current = false;
-            lastSavedContentRef.current = md;
-            const ts = saved?.updated_at ? new Date(saved.updated_at).getTime() : Date.now();
-            if (ts > lastSavedUpdatedAtRef.current) lastSavedUpdatedAtRef.current = ts;
-            if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
-            setSaveStatus("saved");
-            setLastSavedAt(Date.now());
-            const queued = queuedContentRef.current;
-            queuedContentRef.current = null;
-            if (queued !== null && queued !== md) saveContentNow(queued);
-          },
-          onError: () => {
-            savingRef.current = false;
-            // Keep the pending payload so unmount/next keystroke retries it.
-            setSaveStatus("error");
-            const queued = queuedContentRef.current;
-            queuedContentRef.current = null;
-            if (queued !== null && queued !== md) saveContentNow(queued);
-          },
-        },
-      );
+      // mutateAsync owns completion even when a title/tag mutation replaces
+      // the mutation observer or this editor unmounts during the write.
+      const task = updateNote.mutateAsync({ id: sourceNoteId, content: md })
+        .then((saved) => {
+          if (activeNoteIdRef.current !== sourceNoteId) return;
+          lastSavedContentRef.current = md;
+          const ts = saved?.updated_at ? new Date(saved.updated_at).getTime() : Date.now();
+          if (ts > lastSavedUpdatedAtRef.current) lastSavedUpdatedAtRef.current = ts;
+          if (pendingSaveContentRef.current === md) pendingSaveContentRef.current = null;
+          setSaveStatus("saved");
+          setLastSavedAt(Date.now());
+        }, (error) => {
+          // Keep the payload so the next explicit flush can retry it.
+          setSaveStatus("error");
+          throw error;
+        })
+        .finally(() => {
+          savingRef.current = false;
+          const queued = queuedContentRef.current;
+          queuedContentRef.current = null;
+          if (queued !== null && queued !== md) saveContentRef.current(queued, activeNoteIdRef.current);
+        });
+      savePromiseRef.current = task;
+      void task.catch(() => {}); // useUpdateNote reports the error.
     },
     [note.id, updateNote],
   );
+  const saveContentRef = useRef(saveContentNow);
+  saveContentRef.current = saveContentNow;
 
   const handleOpenAutocomplete = useCallback((pos: number) => {
     // Get caret position from editor view
@@ -774,7 +780,7 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       const stored = lastSavedContentRef.current !== null
         ? normalizeSavedMarkdown(lastSavedContentRef.current)
         : storedBaselineRef.current;
-      if (normalizedMd === stored || normalizedMd === storedBaselineRef.current) {
+      if (normalizedMd === stored && !savingRef.current) {
         lastLocalContentRef.current = md;
         if (contentSaveTimer.current) {
           clearTimeout(contentSaveTimer.current);
@@ -833,13 +839,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     if (!editor) return;
     editor.commands.setContent(html, { emitUpdate: false });
     if (!user?.id || !html.includes("data-attachment-name=")) return;
-    resolveAttachmentImagesInHtml(html, user.id)
-      .then((resolved) => {
-        if (!editor || editor.isDestroyed || editor.isFocused) return;
-        if (activeNoteIdRef.current !== sourceNoteId) return;
-        if (resolved === html) return;
-        editor.commands.setContent(resolved, { emitUpdate: false });
-      })
+    void resolveEditorAttachments(editor, (currentHtml) => resolveAttachmentImagesInHtml(currentHtml, user.id),
+      () => activeNoteIdRef.current === sourceNoteId)
       .catch((err) => console.warn("attachment resolver failed", err));
   }, [editor, user?.id]);
 
@@ -861,33 +862,33 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
       // they do not run; the hook's own error toast still does.)
       const settled = {
         onSuccess: () => {
+          if (pendingSaveContentRef.current !== null || savingRef.current) return;
           setSaveStatus("saved");
           setLastSavedAt(Date.now());
         },
         onError: () => setSaveStatus("error"),
       };
-      if (pendingContent !== null && pendingContent !== lastSavedContentRef.current) {
-        updateNote.mutate({ id: noteId, content: pendingContent }, {
-          ...settled,
-          onSuccess: () => {
-            if (activeNoteIdRef.current === noteId) lastSavedContentRef.current = pendingContent;
-            settled.onSuccess();
-          },
-        });
-        pendingSaveContentRef.current = null;
-      } else if (pendingContent !== null) {
-        // Already saved; only the debounce timer was left.
-        pendingSaveContentRef.current = null;
-        settled.onSuccess();
+      if (pendingContent !== null) {
+        // Visibility changes use the same queue as autosave. Do not clear the
+        // pending edit or skip its timestamp acknowledgement before it lands.
+        saveContentRef.current(pendingContent, noteId);
       }
       const pendingTitle = pendingSaveTitleRef.current;
       if (pendingTitle !== null) {
-        updateNote.mutate({ id: noteId, title: pendingTitle }, settled);
-        pendingSaveTitleRef.current = null;
+        const task = updateNote.mutateAsync({ id: noteId, title: pendingTitle }).then(() => {
+          if (pendingSaveTitleRef.current === pendingTitle) pendingSaveTitleRef.current = null;
+          settled.onSuccess();
+        }, (error) => {
+          settled.onError();
+          throw error;
+        });
+        titleSavePromiseRef.current = task;
+        void task.catch(() => {});
       }
       if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
+      contentSaveTimer.current = null;
       if (titleSaveTimer.current) clearTimeout(titleSaveTimer.current);
-
+      titleSaveTimer.current = null;
 
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
@@ -1144,13 +1145,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
     const sourceNoteId = activeNoteIdRef.current;
     const html = editor.getHTML();
     if (!html.includes("data-attachment-name=")) return;
-    resolveAttachmentImagesInHtml(html, user.id)
-      .then((resolved) => {
-        if (!editor || editor.isDestroyed || editor.isFocused) return;
-        if (activeNoteIdRef.current !== sourceNoteId) return;
-        if (resolved === html) return;
-        editor.commands.setContent(resolved, { emitUpdate: false });
-      })
+    void resolveEditorAttachments(editor, (currentHtml) => resolveAttachmentImagesInHtml(currentHtml, user.id),
+      () => activeNoteIdRef.current === sourceNoteId)
       .catch((err) => console.warn("attachment resolver failed", err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
@@ -1216,6 +1212,39 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
 
   // "Make a copy": flush any pending autosave first so the copy contains the
   // newest text, then duplicate and open the copy.
+  const openInNewTab = async () => {
+    try {
+      await openSavedNoteTab(`/dashboard/notes/${note.id}`, async () => {
+        if (isUploading) throw new Error("Wait for the attachment to finish uploading.");
+        flushSavesRef.current();
+        const deadline = Date.now() + 15000;
+        // Drains saves already in flight and edits queued while they finish.
+        while (savingRef.current || queuedContentRef.current !== null || pendingSaveContentRef.current !== null) {
+          if (Date.now() >= deadline) throw new Error("The note is still saving. Please try again.");
+          if (savingRef.current) {
+            if (savePromiseRef.current) await savePromiseRef.current;
+            else await new Promise((resolve) => setTimeout(resolve, 50));
+          } else {
+            const pending = queuedContentRef.current ?? pendingSaveContentRef.current;
+            if (pending !== null) saveContentRef.current(pending);
+          }
+        }
+        if (titleSavePromiseRef.current) await titleSavePromiseRef.current;
+        if (pendingSaveTitleRef.current !== null) throw new Error("The note title is still saving. Please try again.");
+        // The new browser tab can read the server while this window writes
+        // locally. A local acknowledgement alone does not make it current.
+        if (isLocalFirstActive()) {
+          while ((await getDb().getUploadQueueStats()).count > 0) {
+            if (Date.now() >= deadline) throw new Error("Changes are saved on this device but have not uploaded yet. Please try again when connected.");
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+      });
+    } catch (error) {
+      showToast.error(error instanceof Error ? error.message : "Could not save the note before opening it.");
+    }
+  };
+
   const makeACopy = async () => {
     if (contentSaveTimer.current) {
       clearTimeout(contentSaveTimer.current);
@@ -1610,7 +1639,8 @@ export function NoteEditor({ note, onNoteDeleted, showLocalGraph: showLocalGraph
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                onClick={() => window.open(`/dashboard/notes/${note.id}`, "_blank")}
+                onClick={() => void openInNewTab()}
+                disabled={isUploading}
                 title="Open in new tab"
               >
                 <ExternalLink className="h-3.5 w-3.5" />

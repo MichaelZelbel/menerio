@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
   batchedError: vi.fn(),
   save: vi.fn(),
   execute: vi.fn(),
-  editorOptions: null as null | { onUpdate: (event: { editor: { getJSON: () => unknown; getText: () => string } }) => void },
+  editorOptions: null as null | { onUpdate: (event: { editor: { getJSON: () => unknown; getText: () => string; isFocused?: boolean } }) => void },
   row: { id: "note-1", user_id: "user-1", title: "", content: "", tags: [], is_trashed: false },
 }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {
@@ -65,7 +65,7 @@ vi.mock("@/components/notes/NoteMetadataEditor", () => ({
 }));
 vi.mock("@/components/notes/LinkToNoteDialog", () => ({ LinkToNoteDialog: () => null }));
 vi.mock("@/components/notes/NoteChatPanel", () => ({ NoteChatPanel: () => null }));
-vi.mock("@/components/notes/EditorToolbar", () => ({ EditorToolbar: ({ noteActions }: { noteActions: ReactNode }) => <>{noteActions}</> }));
+vi.mock("@/components/notes/EditorToolbar", () => ({ EditorToolbar: ({ noteActions, quickActions }: { noteActions: ReactNode; quickActions: ReactNode }) => <>{quickActions}{noteActions}</> }));
 vi.mock("@/components/ui/dropdown-menu", () => {
   const Container = ({ children }: { children: ReactNode }) => <>{children}</>;
   return { DropdownMenu: Container, DropdownMenuTrigger: Container, DropdownMenuContent: Container, DropdownMenuSeparator: () => null,
@@ -83,8 +83,8 @@ vi.mock("@tiptap/react", () => ({ useEditor: (options: typeof state.editorOption
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import type { Note } from "../useNotes";
 const editorNote = { id: "note-1", user_id: "user-1", title: "Title", content: "initial text here", tags: [], is_trashed: false, is_external: false, created_at: "2026-09-07T00:00:00Z", updated_at: "2026-09-07T00:00:00Z" } as Note;
-function typeContent(text: string) {
-  act(() => state.editorOptions!.onUpdate({ editor: { getJSON: () => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] }), getText: () => text } }));
+function typeContent(text: string, isFocused = true) {
+  act(() => state.editorOptions!.onUpdate({ editor: { isFocused, getJSON: () => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] }), getText: () => text } }));
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -106,6 +106,66 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("browser note scheduling", () => {
+  it("does not save normalization from merely opening a note", async () => {
+    render(<NoteEditor note={editorNote} />, { wrapper });
+    typeContent("normalized initial text", false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(state.save).not.toHaveBeenCalled();
+  });
+
+  it("saves a deliberate return to the opening text after a different revision was saved", async () => {
+    render(<NoteEditor note={editorNote} />, { wrapper });
+    typeContent("changed revision");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    typeContent(editorNote.content);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(state.row.content).toBe(editorNote.content);
+    expect(state.save).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps queued content saving after a favorite mutation and a visibility flush", async () => {
+    let finishFirst!: (value: unknown) => void;
+    state.save.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }));
+    const view = render(<NoteEditor note={editorNote} />, { wrapper });
+    typeContent("first revision");
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    typeContent("final revision with new image");
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    await act(async () => { fireEvent.click(view.getByTitle("Add to favorites")); });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(state.save).toHaveBeenCalledTimes(2); // first content and favorite, no parallel content flush
+    await act(async () => {
+      finishFirst({ data: { ...state.row, content: "first revision" }, error: null });
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(state.row.content).toBe("final revision with new image");
+    expect(state.save).toHaveBeenCalledTimes(3);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  });
+
+  it("waits for the pending content and title before loading a pop-out", async () => {
+    let finishSave!: (value: unknown) => void;
+    state.save.mockImplementationOnce(() => new Promise((resolve) => { finishSave = resolve; }));
+    const tab = { closed: false, opener: {}, close: vi.fn(), location: { replace: vi.fn() } };
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    try {
+      const view = render(<NoteEditor note={editorNote} />, { wrapper });
+      typeContent("new text and image");
+      fireEvent.change(view.getByPlaceholderText("Untitled"), { target: { value: "Edited title" } });
+      await act(async () => { fireEvent.click(view.getByTitle("Open in new tab")); });
+      expect(open).toHaveBeenCalledOnce();
+      expect(tab.location.replace).not.toHaveBeenCalled();
+      await act(async () => {
+        finishSave({ data: { ...state.row, content: "new text and image" }, error: null });
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(tab.location.replace).toHaveBeenCalledWith("/dashboard/notes/note-1");
+      expect(state.row.content).toBe("new text and image");
+      expect(state.row.title).toBe("Edited title");
+    } finally { open.mockRestore(); }
+  });
+
   it("saves a deliberate duplicate through atomic enrollment, not a follow-up request", async () => {
     const { result } = renderHook(() => useDuplicateNote(), { wrapper });
     await act(async () => { await result.current.mutateAsync("note-1"); });
