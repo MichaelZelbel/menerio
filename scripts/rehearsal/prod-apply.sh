@@ -12,6 +12,9 @@
 # Usage: bash scripts/rehearsal/prod-apply.sh <file.sql | "SQL">
 set -euo pipefail
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# A table created in public after 2026-10-30 gets no grants unless the SQL
+# grants them (scripts/check-table-grants.mjs), so refuse a file that forgets.
+if [ -f "$1" ]; then node "$dir/../check-table-grants.mjs" "$1"; fi
 response="$( { if [ -f "$1" ]; then cat "$1"; else printf '%s' "$1"; fi; } \
   | jq -Rs '{query: ., read_only: false}' \
   | curl -sS -X POST "https://api.supabase.com/v1/projects/tjeapelvjlmbxafsmjef/database/query" \

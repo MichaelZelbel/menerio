@@ -9,9 +9,10 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node scripts/check-edge-functions.mjs && node scripts/check-no-profile-entry-writes.mjs && node scripts/check-no-prod-data.mjs && node scripts/check-admin-read-policies.mjs && vitest run",
+    "test": "node scripts/check-edge-functions.mjs && node scripts/check-no-profile-entry-writes.mjs && node scripts/check-no-prod-data.mjs && node scripts/check-admin-read-policies.mjs && node scripts/check-table-grants.mjs && vitest run",
     "check:functions": "node scripts/check-edge-functions.mjs",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:grants": "node scripts/check-table-grants.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

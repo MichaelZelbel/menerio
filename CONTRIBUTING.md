@@ -30,6 +30,18 @@ If your change touches the database schema or overall architecture:
 - Update `docs/ARCHITECTURE.md` or `docs/PROJECT_STRUCTURE.md` if the structure changes
 - Document any new Edge Functions in the architecture docs
 
+### Every new table needs explicit grants
+
+Since 2026-10-30 Supabase no longer grants new tables in `public` to `anon`, `authenticated` or `service_role` automatically ([changelog](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically)). A table, view or materialized view created without grants answers "permission denied" to the app, to PostgREST and to every edge function, and so does every table after a rebuild from migrations. So a migration that creates one grants it in the same file, keeping only the lines that apply:
+
+```sql
+grant select on public.x to anon;  -- only if anon should read it
+grant select, insert, update, delete on public.x to authenticated;
+grant select, insert, update, delete on public.x to service_role;
+```
+
+A table with a `serial`/`bigserial` column that `authenticated` may insert into also needs `grant usage, select on sequence public.x_id_seq to authenticated;` (identity columns need nothing). A table that is private on purpose says so with an explicit `revoke all on public.x from anon, authenticated;`. `npm run check:grants` (also part of `npm test`, CI, the `.githooks/pre-push` hook and `scripts/rehearsal/prod-apply.sh`) fails on any migration from `20261020000000` on that forgets. Turn the hook on once per clone with `git config core.hooksPath .githooks`.
+
 ## Running Checks
 
 ```bash

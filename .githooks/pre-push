@@ -1,0 +1,7 @@
+#!/bin/sh
+# Turn on once per clone: git config core.hooksPath .githooks
+# GitHub Actions cannot be relied on to run, so the grant check runs here too:
+# every new table in public needs explicit grants in its migration, because
+# Supabase stopped auto-granting them on 2026-10-30.
+root="$(git rev-parse --show-toplevel)" || exit 1
+exec node "$root/scripts/check-table-grants.mjs"
