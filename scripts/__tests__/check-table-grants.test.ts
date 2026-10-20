@@ -35,6 +35,21 @@ describe("check-table-grants", () => {
     expect(fresh.failures).toEqual(["20261020000000_new.sql: table public.legacy has no GRANT (or deliberate REVOKE) in this migration"]);
   });
 
+  it("follows drops, re-creates and renames in order when reporting older objects", () => {
+    const report = checkMigrations([
+      { name: "20260101000000_a.sql", sql: "create view public.v as select 1; create table public.old_name (id int); create table public.gone (id int);" },
+      { name: "20260102000000_b.sql", sql: "drop view if exists public.v; create view public.v as select 2; drop table public.gone;" },
+      { name: "20260103000000_c.sql", sql: "alter table public.old_name rename to new_name;" },
+    ]);
+    expect(report.neverGranted).toEqual(["new_name", "v"]);
+
+    const granted = checkMigrations([
+      { name: "20260101000000_a.sql", sql: "create table public.old_name (id int); grant select on public.old_name to authenticated;" },
+      { name: "20260103000000_c.sql", sql: "alter table public.old_name rename to new_name;" },
+    ]);
+    expect(granted.neverGranted).toEqual([]);
+  });
+
   it("accepts the marker comment for grants written with dynamic SQL", () => {
     expect(checkSql("-- table-grants: public.dyn\ncreate table public.dyn (x int);\ndo $$ begin execute format('grant select on %I to authenticated', 'dyn'); end $$;")).toEqual([]);
   });

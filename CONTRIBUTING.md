@@ -42,6 +42,8 @@ grant select, insert, update, delete on public.x to service_role;
 
 A table with a `serial`/`bigserial` column that `authenticated` may insert into also needs `grant usage, select on sequence public.x_id_seq to authenticated;` (identity columns need nothing). A table that is private on purpose says so with an explicit `revoke all on public.x from anon, authenticated;`. `npm run check:grants` (also part of `npm test`, CI, the `.githooks/pre-push` hook and `scripts/rehearsal/prod-apply.sh`) fails on any migration from `20261020000000` on that forgets. Turn the hook on once per clone with `git config core.hooksPath .githooks`.
 
+Tables created before this rule got their grants from the old defaults. `supabase/migrations/20261020120000_restate_live_table_grants.sql` restates the live privileges of all of them (generated from the live database by `scripts/oneoff/generate-grant-catch-up.mjs`), so a rebuild from migrations ends with the same access as production.
+
 ## Running Checks
 
 ```bash

@@ -98,7 +98,7 @@ export function createdObjects(code) {
         for (const s of parenBody(rest, open).matchAll(SERIAL_RE)) serials.push(splitName(s[1]).name);
       }
     }
-    out.push({ kind: kind.toLowerCase(), name, serials });
+    out.push({ kind: kind.toLowerCase(), name, serials, index: m.index });
   }
   return out;
 }
@@ -184,14 +184,28 @@ export function checkMigrations(files, enforceFrom = ENFORCE_FROM) {
   let everythingGranted = false;
   for (const f of files) {
     const { code, markers } = stripSql(f.sql);
-    for (const o of createdObjects(code)) if (!created.has(o.name)) created.set(o.name, f.name);
+    // Creates and drops in the order they appear, so DROP VIEW ... ; CREATE
+    // VIEW ... in one file leaves the view standing.
+    const events = createdObjects(code).map((o) => ({ index: o.index, create: o.name }));
+    for (const d of code.matchAll(new RegExp(String.raw`\bDROP\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?(${QNAME}(?:\s*,\s*${QNAME})*)`, "gi"))) {
+      events.push({ index: d.index, drop: d[1].split(/\s*,\s*/).map((n) => splitName(n).name) });
+    }
+    for (const r of code.matchAll(new RegExp(String.raw`\bALTER\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(${QNAME})\s+RENAME\s+TO\s+(${IDENT})`, "gi"))) {
+      events.push({ index: r.index, from: splitName(r[1]).name, to: splitName(r[2]).name });
+    }
+    for (const e of events.sort((a, b) => a.index - b.index)) {
+      if (e.create) created.set(e.create, f.name);
+      else if (e.drop) e.drop.forEach((n) => created.delete(n));
+      else if (created.has(e.from)) {
+        created.set(e.to, created.get(e.from));
+        created.delete(e.from);
+        if (handled.has(e.from)) handled.add(e.to);
+      }
+    }
     const p = privileges(code);
     if (p.allTables) everythingGranted = true;
     for (const [n, t] of p.tables) if (t.grants.length || t.revoked) handled.add(n);
     markers.forEach((n) => handled.add(n));
-    for (const d of code.matchAll(new RegExp(String.raw`\bDROP\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?(${QNAME}(?:\s*,\s*${QNAME})*)`, "gi"))) {
-      d[1].split(/\s*,\s*/).forEach((n) => created.delete(splitName(n).name));
-    }
   }
   const neverGranted = everythingGranted
     ? []
@@ -224,7 +238,7 @@ function main() {
   }
   console.log(
     `table grants: ok (${files.length} migrations, enforced from ${ENFORCE_FROM}). ` +
-      `Report only: ${olderFiles.length} older migrations create a public table/view without a grant in the same file; ` +
+      `Report only: ${olderFiles.length} older migrations create a public table/view without a grant in the same file (fine when a later migration grants it); ` +
       `${neverGranted.length} public tables/views from older migrations are granted by no migration at all, so a rebuild from migrations would leave them without access` +
       (neverGranted.length ? `: ${neverGranted.join(", ")}` : "."),
   );

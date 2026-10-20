@@ -1,0 +1,813 @@
+{
+ "snapshot": {
+  "rels": [
+   {
+    "name": "action_items",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "activity_events",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "agent_facts",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "agent_instructions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "agent_world_claims",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "ai_allowance_periods",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "ai_credit_settings",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "ai_suggestion_preferences",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "ai_suggestion_suppressions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "attribute_rules",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "claims",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "collection_item_folders",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "collection_items",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "collection_templates",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "collections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "connected_apps",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "contact_group_memberships",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "contact_groups",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "contact_interactions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "contact_merge_receipts",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "contact_merge_vault_jobs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "contact_relationships",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "contact_topic_events",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres,authenticated=r/postgres}"
+   },
+   {
+    "name": "contact_topics",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres,authenticated=r/postgres}"
+   },
+   {
+    "name": "contacts",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "conversation_messages",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "discord_connections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=awdDxtm/postgres,authenticated=awdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "dismissed_suggestions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "entities",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "fact_slots",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "gdrive_connections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=awdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "gdrive_imports",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "generation_logs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "github_connections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=awdDxtm/postgres,authenticated=awdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "github_sync_log",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "godspeed_api_keys",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "godspeed_api_usage",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "godspeed_connect_requests",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "godspeed_connections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres,authenticated=r/postgres}"
+   },
+   {
+    "name": "godspeed_devices",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres,authenticated=r/postgres}"
+   },
+   {
+    "name": "group_briefings",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "llm_call_configs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "llm_call_fingerprints",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "llm_call_fingerprints_id_seq",
+    "kind": "S",
+    "acl": "{postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres}"
+   },
+   {
+    "name": "llm_spend_daily",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "llm_usage_events",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "llm_usage_models",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "llm_usage_totals",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "maintenance_flags",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "mcp_api_tokens",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "mcp_call_logs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "mcp_preferences",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "mcp_tool_usage",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "media_analysis",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "moderation_events",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "moderation_review_queue",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "moderation_stopwords",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "moment_entities",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "moment_participants",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "moment_provenance",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "moments",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "name_disambiguation_decisions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_ai_completions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_ai_jobs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_ai_stage_results",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_ai_worker_settings",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_attachments",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_capture_receipts",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres,authenticated=ar/postgres}"
+   },
+   {
+    "name": "note_chunks",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_connections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "note_folders",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "notes",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres,powersync_role=r/postgres}"
+   },
+   {
+    "name": "notification_preferences",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "notifications",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "person_documents",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_audit_merges",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_audit_runs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_categories",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_entries_archive",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_facts",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_fields",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_normalization_inputs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_normalization_jobs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_normalization_leases",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_normalization_runs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_reconcile_runs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profile_views",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "profiles",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "relationship_evidence",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "relationship_rejections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "relationship_repair_items",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "relationship_repair_runs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "review_queue",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "review_queue_bulk_jobs",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "shared_notes",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "sync_log",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "telegram_connections",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=awdDxtm/postgres,authenticated=awdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "user_mcp_servers",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "user_roles",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "user_self_aliases",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "user_suspensions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "v_ai_allowance_current",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "weekly_reviews",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "wiki_links",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "wiki_log",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "wiki_page_sources",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "wiki_pages",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "wiki_revisions",
+    "kind": "r",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "world_claims",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "world_entities",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   },
+   {
+    "name": "world_events",
+    "kind": "v",
+    "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+   }
+  ],
+  "cols": [
+   {
+    "rel": "discord_connections",
+    "col": "application_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "bot_token",
+    "acl": "{authenticated=aw/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "created_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "discord_channel_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "discord_guild_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "is_active",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "public_key",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "updated_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "discord_connections",
+    "col": "user_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "channel_expires_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "channel_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "created_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "google_email",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "last_error",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "last_sync_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "last_webhook_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "start_page_token",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "sync_enabled",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "target_note_folder",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "updated_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "user_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "watch_folder_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "gdrive_connections",
+    "col": "watch_folder_name",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "attachment_folder",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "branch",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "created_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "github_token",
+    "acl": "{authenticated=aw/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "github_username",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "last_sync_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "repo_name",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "repo_owner",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "sync_direction",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "sync_enabled",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "sync_people",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "updated_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "user_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "github_connections",
+    "col": "vault_path",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "bot_token",
+    "acl": "{authenticated=aw/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "created_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "is_active",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "is_paired",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "pairing_code",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "telegram_chat_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "updated_at",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "user_id",
+    "acl": "{authenticated=r/postgres}"
+   },
+   {
+    "rel": "telegram_connections",
+    "col": "webhook_secret",
+    "acl": "{authenticated=aw/postgres}"
+   }
+  ]
+ }
+}
